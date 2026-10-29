@@ -1,0 +1,20 @@
+[package]
+name = "stormix-flow"
+description = "The Stormix flow model and test file format"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[features]
+# Derives `specta::Type` so the desktop app can export the model to TypeScript.
+specta = ["dep:specta", "dep:specta-typescript"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+serde_path_to_error.workspace = true
+serde_yaml_ng.workspace = true
+specta = { workspace = true, optional = true }
+specta-typescript = { workspace = true, optional = true }
+thiserror.workspace = true

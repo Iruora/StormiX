@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. Surfaces are a neutral slate; the accent is the storm
+ * indigo of the app icon, with the bolt's yellow kept for highlights.
+ */
+:root {
+  --bg: #f4f5f9;
+  --surface: #ffffff;
+  --surface-2: #f7f8fb;
+  --line: #e2e5ee;
+  --ink: #161a2b;
+  --muted: #5f667d;
+  --subtle: #979db0;
+
+  --accent: #4f46e5;
+  --accent-soft: #eceafd;
+  --bolt: #eab308;
+
+  --ok: #15803d;
+  --ok-soft: #e7f6ec;
+  --warn: #b45309;
+  --warn-soft: #fdf3e2;
+  --bad: #b91c1c;
+  --bad-soft: #fdeaea;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1120;
+    --surface: #161a2c;
+    --surface-2: #1c2136;
+    --line: #2a3048;
+    --ink: #e8eaf3;
+    --muted: #a0a6bd;
+    --subtle: #6d7390;
+
+    --accent: #8b85ff;
+    --accent-soft: #252456;
+    --bolt: #facc15;
+
+    --ok: #4ade80;
+    --ok-soft: #12301f;
+    --warn: #fbbf24;
+    --warn-soft: #33270e;
+    --bad: #f87171;
+    --bad-soft: #3a1717;
+
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-bolt: var(--bolt);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono {
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+}

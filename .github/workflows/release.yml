@@ -1,0 +1,233 @@
+name: Release
+
+# Pushing a tag like v1.0.0 builds the installers for every platform and
+# attaches them to a draft GitHub release. Review the draft, then publish it,
+# or run it by hand with "publish" ticked to publish once every download is in.
+# Running it by hand from the Actions tab with a tag that does not exist yet
+# creates that tag on the commit it runs from (usually main) first.
+#
+# Builds are unsigned. To sign later, add the secrets Tauri reads (APPLE_*
+# for macOS, a Windows certificate or signCommand) and pass them in `env`
+# below; nothing else changes.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to build, e.g. v1.0.0 (created on the selected branch if missing)
+        required: true
+      publish:
+        description: Publish the release once every installer and zip is attached
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  create-release:
+    name: Create the draft release
+    runs-on: ubuntu-22.04
+    outputs:
+      release-id: ${{ steps.release.outputs.id }}
+    steps:
+      - name: Create the tag if it does not exist yet
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --silent 2>/dev/null; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA"
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Check the tag matches the app version
+        run: |
+          version=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::Tag $TAG does not match the app version $version in tauri.conf.json"
+            exit 1
+          fi
+      - name: Create or reuse the draft
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # GitHub can drop a draft's tag and show it as untagged-..., so match the title too.
+          find_id() {
+            gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+              --jq ".[] | select(.tag_name == \"$TAG\" or .name == \"Stormix $TAG\") | .id" | sort -n | tail -n 1
+          }
+          id=$(find_id)
+          if [ -z "$id" ]; then
+            # Take the id from the response: a fresh draft can take a moment to show up in the list.
+            id=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$TAG" \
+              -f name="Stormix $TAG" -F draft=true -F body=@.github/release-notes.md --jq .id)
+          else
+            # A rerun refreshes the notes of the existing release and pins it to the tag again.
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$id" -f tag_name="$TAG" \
+              -F body=@.github/release-notes.md --silent
+          fi
+          if [ -z "$id" ]; then
+            echo "::error::Could not find or create the draft release for $TAG"
+            exit 1
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple silicon
+            os: macos-latest
+            target: aarch64-apple-darwin
+            arch: aarch64
+          - name: macOS Intel
+            os: macos-latest
+            target: x86_64-apple-darwin
+            arch: x64
+          - name: Linux
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            arch: amd64
+          - name: Windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: apps/desktop/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: apps/desktop
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          args: --target ${{ matrix.target }}
+          releaseId: ${{ needs.create-release.outputs.release-id }}
+      - name: Build and attach the CLI
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release-id }}
+        run: |
+          cargo build --release -p stormix-cli --target ${{ matrix.target }}
+          version=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
+          out="target/${{ matrix.target }}/release"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            archive="stormix-cli_${version}_${{ matrix.target }}.zip"
+            7z a "$archive" "./$out/stormix.exe" LICENSE-MIT LICENSE-APACHE > /dev/null
+            type=application/zip
+          else
+            archive="stormix-cli_${version}_${{ matrix.target }}.tar.gz"
+            tar -czf "$archive" -C "$out" stormix -C "$GITHUB_WORKSPACE" LICENSE-MIT LICENSE-APACHE
+            type=application/gzip
+          fi
+          # A rerun replaces the archive from the previous attempt.
+          old=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --jq ".[] | select(.name == \"$archive\") | .id")
+          if [ -n "$old" ]; then gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$old"; fi
+          gh api --method POST -H "Content-Type: $type" \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$archive" \
+            --input "$archive" --silent
+      - name: Zip the macOS app
+        if: runner.os == 'macOS'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release-id }}
+        run: |
+          version=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
+          zip="Stormix_${version}_${{ matrix.arch }}.app.zip"
+          # ditto keeps the bundle's signature and symlinks intact.
+          ditto -c -k --keepParent "target/${{ matrix.target }}/release/bundle/macos/Stormix.app" "$zip"
+          # A rerun replaces the zip from the previous attempt.
+          old=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --jq ".[] | select(.name == \"$zip\") | .id")
+          if [ -n "$old" ]; then gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$old"; fi
+          gh api --method POST -H "Content-Type: application/zip" \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$zip" \
+            --input "$zip" --silent
+      - name: Zip the portable Windows app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release-id }}
+        run: |
+          $version = (Get-Content apps/desktop/src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          $out = "target/${{ matrix.target }}/release"
+          $dir = New-Item -ItemType Directory -Force -Path "portable/Stormix"
+          Copy-Item "$out/stormix-desktop.exe" "$dir/Stormix.exe"
+          $zip = "Stormix_${version}_${{ matrix.arch }}_portable.zip"
+          Compress-Archive -Path $dir -DestinationPath $zip -Force
+          # A rerun replaces the zip from the previous attempt.
+          $jq = '.[] | select(.name == "' + $zip + '") | .id'
+          $old = gh api "repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets" --jq $jq
+          if ($old) { gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$old" }
+          gh api --method POST -H "Content-Type: application/zip" `
+            "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets?name=$zip" `
+            --input $zip --silent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  publish:
+    name: Publish the release
+    needs: [create-release, build]
+    if: inputs.publish
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check every download is attached, then publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release-id }}
+        run: |
+          names=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate --jq '.[].name')
+          echo "$names"
+          missing=0
+          for suffix in _aarch64.dmg _x64.dmg _aarch64.app.zip _x64.app.zip -setup.exe .msi _portable.zip .AppImage .deb .rpm \
+            _aarch64-apple-darwin.tar.gz _x86_64-apple-darwin.tar.gz _x86_64-unknown-linux-gnu.tar.gz _x86_64-pc-windows-msvc.zip; do
+            if ! grep -q -- "$suffix\$" <<< "$names"; then
+              echo "::error::No asset ending in $suffix"
+              missing=1
+            fi
+          done
+          [ "$missing" = 0 ] || exit 1
+          # Naming the tag here keeps the release on it rather than an untagged-... one.
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -f tag_name="$TAG" \
+            -F draft=false -f make_latest=true --silent
+          echo "Published $TAG"
+          # Clean up leftovers of earlier attempts: other drafts of this release and stray untagged-... tags.
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.draft and .name == \"Stormix $TAG\" and .id != $RELEASE_ID) | .id" |
+            while read -r old; do gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$old"; done
+          gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/untagged-" --jq '.[].ref' |
+            while read -r ref; do gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/$ref"; done
