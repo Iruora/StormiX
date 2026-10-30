@@ -1,0 +1,16 @@
+[package]
+name = "stormix-metrics"
+description = "Latency histograms, load test summaries and threshold checks for Stormix"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[features]
+specta = ["dep:specta"]
+
+[dependencies]
+hdrhistogram.workspace = true
+serde.workspace = true
+specta = { workspace = true, optional = true }
+stormix-flow.workspace = true

@@ -104,17 +104,19 @@ impl Runner {
         if let Some(source) = &step.scripts.pre_request {
             let before = outgoing.script_view();
             let snapshot = vars.to_map();
-            let out = script::run(
-                source,
-                &ScriptInput {
-                    phase: Phase::PreRequest,
-                    step_name: &step.name,
-                    variables: &snapshot,
-                    request: &before,
-                    response: None,
-                },
-                self.options.script_timeout,
-            );
+            let out = blocking(|| {
+                script::run(
+                    source,
+                    &ScriptInput {
+                        phase: Phase::PreRequest,
+                        step_name: &step.name,
+                        variables: &snapshot,
+                        request: &before,
+                        response: None,
+                    },
+                    self.options.script_timeout,
+                )
+            });
             apply_variables(vars, &out.variables);
             outgoing.apply_script(before, out.request);
             checks.extend(script_checks("pre-request script", out.tests, out.error));
@@ -241,17 +243,19 @@ impl Runner {
             let mut request = outgoing.script_view();
             request.url = result.url.clone();
             let snapshot = vars.to_map();
-            let out = script::run(
-                source,
-                &ScriptInput {
-                    phase: Phase::Test,
-                    step_name: &step.name,
-                    variables: &snapshot,
-                    request: &request,
-                    response: Some(&response),
-                },
-                self.options.script_timeout,
-            );
+            let out = blocking(|| {
+                script::run(
+                    source,
+                    &ScriptInput {
+                        phase: Phase::Test,
+                        step_name: &step.name,
+                        variables: &snapshot,
+                        request: &request,
+                        response: Some(&response),
+                    },
+                    self.options.script_timeout,
+                )
+            });
             for (name, value) in &out.variables {
                 if let Some(value) = value {
                     result.extracted.insert(name.clone(), value.clone());
@@ -344,6 +348,18 @@ impl Outgoing {
         if after.body != before.body {
             self.body = after.body.map_or(OutBody::None, OutBody::Raw);
         }
+    }
+}
+
+/// Scripts are CPU work that holds the thread until done. Under load, on
+/// the multi-threaded runtime, the scheduler moves other tasks off this
+/// thread meanwhile; a current-thread runtime only runs one flow anyway.
+fn blocking<T>(f: impl FnOnce() -> T) -> T {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(f)
+        }
+        _ => f(),
     }
 }
 
