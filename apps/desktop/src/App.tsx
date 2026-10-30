@@ -95,13 +95,22 @@ function TestFileView() {
     enabled: debounced.length > 0,
     placeholderData: (previous) => previous,
   });
-  const result = validation.data;
+  const environments = imported?.environments ?? {};
+  const envVars = environments[envName] ?? {};
+  // The validator does not know the chosen environment; drop its warnings
+  // about variables that environment provides.
+  const result = validation.data && {
+    ...validation.data,
+    issues: validation.data.issues.filter((i) => {
+      const name = /^`\{\{([^}]+)\}\}` is not defined/.exec(i.message)?.[1];
+      return !(name && name in envVars);
+    }),
+  };
   const canRun = !!result?.test && !result.issues.some((i) => i.severity === "error");
 
-  const environments = imported?.environments ?? {};
   const run = useMutation({
     mutationFn: async (yaml: string) => {
-      const res = await commands.runTestFile(yaml, environments[envName] ?? {});
+      const res = await commands.runTestFile(yaml, envVars);
       if (res.status === "error") throw new Error(res.error);
       return res.data;
     },
@@ -112,7 +121,7 @@ function TestFileView() {
       setPoints([]);
       const unlisten = await events.loadProgress.listen((e) => setPoints((p) => [...p, e.payload]));
       try {
-        const res = await commands.runLoadTest(yaml, environments[envName] ?? {});
+        const res = await commands.runLoadTest(yaml, envVars);
         if (res.status === "error") throw new Error(res.error);
         return res.data;
       } finally {

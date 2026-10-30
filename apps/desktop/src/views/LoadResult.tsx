@@ -77,14 +77,14 @@ export function LoadResult({ report }: { report: LoadReport }) {
         <table className="w-full border-t border-line text-[13px]">
           <thead className="text-xs text-subtle">
             <tr>
-              <th className="px-4 py-1.5 text-left font-medium">Step</th>
+              <th className="w-1/2 px-4 py-1.5 text-left font-medium">Step</th>
               <th className="px-2 py-1.5 text-right font-medium">Requests</th>
               <th className="px-2 py-1.5 text-right font-medium">Failed</th>
               <th className="px-2 py-1.5 text-right font-medium">p50</th>
               <th className="px-4 py-1.5 text-right font-medium">p95</th>
             </tr>
           </thead>
-          <tbody className="mono text-xs">
+          <tbody className="mono whitespace-nowrap text-xs">
             {s.steps.map((step) => (
               <tr key={step.name} className="border-t border-line">
                 <td className="max-w-0 truncate px-4 py-1.5 font-sans text-[13px]" title={step.name}>

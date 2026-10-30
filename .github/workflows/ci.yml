@@ -69,13 +69,42 @@ jobs:
       - name: Run the Bruno collection unchanged
         if: always()
         run: ./target/debug/stormix run examples/collections/bruno --env local --verbose --junit junit/bruno.xml
+      - name: Load test the demo flow and check its thresholds
+        if: always()
+        run: ./target/debug/stormix load examples/demo-api.stormix.yaml --junit junit/load.xml --out load-report.json
+      - name: Load test the Bruno collection with virtual users
+        if: always()
+        run: ./target/debug/stormix load examples/collections/bruno --env local --vus 5 --duration 5s --threshold "errors < 1%" --threshold "checks > 99%" --junit junit/bruno-load.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: stormix-junit
-          path: junit/
+          path: |
+            junit/
+            load-report.json
           if-no-files-found: ignore
           retention-days: 14
+
+  benchmark:
+    name: Benchmark against k6
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: grafana/setup-k6-action@v1
+      - run: cargo build --release -p stormix-cli
+      - run: cargo build --release -p stormix-engine --example demo_api
+      - name: Compare Stormix and k6 on the demo flow
+        run: |
+          ./target/release/examples/demo_api &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:3999/health > /dev/null && break; sleep 1; done
+          {
+            echo "## Stormix and k6 on the same machine"
+            echo
+            bench/compare.sh rate 500 20s
+            bench/compare.sh vus 50 20s
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
   build:
     name: Test and build (${{ matrix.name }})
