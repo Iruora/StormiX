@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "apps/desktop/src-tauri",
     "crates/cli",
+    "crates/collections",
     "crates/engine",
     "crates/flow",
     "crates/script",
@@ -15,15 +16,17 @@ repository = "https://github.com/Iruora/StormiX"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+stormix-collections = { path = "crates/collections" }
 stormix-engine = { path = "crates/engine" }
 stormix-flow = { path = "crates/flow" }
 stormix-script = { path = "crates/script" }
 
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 fastrand = "2"
 regex = "1"
-reqwest = { version = "0.13", default-features = false, features = ["charset", "form", "http2", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["charset", "form", "http2", "multipart", "rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 serde_json_path = "0.7"

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use reqwest::header::CONTENT_TYPE;
 use reqwest::redirect::Policy;
-use stormix_flow::{Body, Flow, Request, Step};
+use stormix_flow::{Body, Flow, KeyValue, Request, Step};
 use stormix_script::{self as script, Phase, ScriptInput, ScriptRequest, ScriptResponse, TestOutcome};
 
 use crate::checks::{self, Response};
@@ -168,6 +168,13 @@ impl Runner {
                     .collect();
                 builder.form(&pairs)
             }
+            OutBody::Multipart(fields) => {
+                let mut form = reqwest::multipart::Form::new();
+                for (k, v) in fields {
+                    form = form.text(render(k, &mut missing), render(v, &mut missing));
+                }
+                builder.multipart(form)
+            }
         };
         for name in &missing {
             result.warnings.push(format!(
@@ -264,6 +271,7 @@ enum OutBody {
     Json(serde_json::Value),
     Raw(String),
     Form(Vec<(String, String)>),
+    Multipart(Vec<(String, String)>),
 }
 
 impl From<&Request> for Outgoing {
@@ -280,12 +288,18 @@ impl From<&Request> for Outgoing {
                 None => OutBody::None,
                 Some(Body::Json(v)) => OutBody::Json(v.clone()),
                 Some(Body::Raw(t)) => OutBody::Raw(t.clone()),
-                Some(Body::Form(f)) => {
-                    OutBody::Form(f.iter().map(|kv| (kv.key.clone(), kv.value.clone())).collect())
-                }
+                Some(Body::Form(f)) => OutBody::Form(pairs(f)),
+                Some(Body::Multipart(f)) => OutBody::Multipart(pairs(f)),
             },
         }
     }
+}
+
+fn pairs(fields: &[KeyValue]) -> Vec<(String, String)> {
+    fields
+        .iter()
+        .map(|kv| (kv.key.clone(), kv.value.clone()))
+        .collect()
 }
 
 impl Outgoing {
@@ -294,7 +308,7 @@ impl Outgoing {
             OutBody::None => None,
             OutBody::Json(v) => Some(v.to_string()),
             OutBody::Raw(t) => Some(t.clone()),
-            OutBody::Form(f) => Some(
+            OutBody::Form(f) | OutBody::Multipart(f) => Some(
                 f.iter()
                     .map(|(k, v)| format!("{k}={v}"))
                     .collect::<Vec<_>>()

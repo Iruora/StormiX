@@ -287,3 +287,14 @@ fn no_io_is_reachable() {
         Some("undefined,undefined,undefined,undefined".into())
     );
 }
+
+#[test]
+fn base64_helpers() {
+    let out = pre(r#"
+        pm.variables.set("a", btoa("demo:secret"));
+        pm.variables.set("b", atob(btoa("ab")) + atob(btoa("abcd")));
+    "#);
+    assert_eq!(out.error, None);
+    assert_eq!(out.variables["a"], Some("ZGVtbzpzZWNyZXQ=".into()));
+    assert_eq!(out.variables["b"], Some("ababcd".into()));
+}

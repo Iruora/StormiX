@@ -30,6 +30,35 @@ function __text(v) {
   return String(v);
 }
 
+// ---------------------------------------------------------------- base64
+
+// Both sandboxes offer these; collections use them for Basic auth headers.
+const __B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+globalThis.btoa = (input) => {
+  const s = String(input);
+  let out = "";
+  for (let i = 0; i < s.length; i += 3) {
+    const [a, b, c] = [s.charCodeAt(i), s.charCodeAt(i + 1), s.charCodeAt(i + 2)];
+    if (a > 255 || b > 255 || c > 255) throw new Error("btoa: the string has characters outside Latin-1");
+    const n = (a << 16) | ((b || 0) << 8) | (c || 0);
+    out += __B64[n >> 18] + __B64[(n >> 12) & 63];
+    out += i + 1 < s.length ? __B64[(n >> 6) & 63] : "=";
+    out += i + 2 < s.length ? __B64[n & 63] : "=";
+  }
+  return out;
+};
+globalThis.atob = (input) => {
+  const s = String(input).replace(/[\s=]+/g, "");
+  let out = "";
+  for (let i = 0; i < s.length; i += 4) {
+    const n = [0, 1, 2, 3].reduce((acc, j) => (acc << 6) | Math.max(__B64.indexOf(s[i + j] || "A"), 0), 0);
+    out += String.fromCharCode(n >> 16);
+    if (i + 2 < s.length) out += String.fromCharCode((n >> 8) & 255);
+    if (i + 3 < s.length) out += String.fromCharCode(n & 255);
+  }
+  return out;
+};
+
 // ---------------------------------------------------------------- console
 
 globalThis.console = {};

@@ -1,0 +1,195 @@
+{
+  "info": {
+    "name": "Demo API (Postman)",
+    "description": "Runs against crates/engine/examples/demo_api.rs. CI runs it with `stormix run` to check Postman collections run unchanged.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test(\"responds within 2 s\", function () {",
+          "    pm.expect(pm.response.responseTime).to.be.below(2000);",
+          "});"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://127.0.0.1:3999" },
+    { "key": "user", "value": "demo" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "tests[\"Status code is 200\"] = responseCode.code === 200;",
+              "pm.test(\"says ok\", () => pm.expect(pm.response.text()).to.eql(\"ok\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Log in",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": { "exec": ["pm.environment.set(\"password\", \"secret\");"] }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test(\"returns a token\", function () {",
+                  "    pm.expect(body).to.have.property(\"token\").that.is.a(\"string\");",
+                  "});",
+                  "pm.environment.set(\"token\", body.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user\": \"{{user}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/login", "host": ["{{base_url}}"], "path": ["login"] }
+          }
+        },
+        {
+          "name": "Read the profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"is the logged in user\", function () {",
+                  "    const me = pm.response.json();",
+                  "    pm.expect(me.user).to.eql(pm.variables.get(\"user\"));",
+                  "    pm.expect(me.roles).to.include(\"tester\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/me", "host": ["{{base_url}}"], "path": ["me"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "auth": { "type": "noauth" },
+      "item": [
+        {
+          "name": "Get a user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"is Ada\", () => {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.response.to.have.jsonBody(\"name\", \"Ada\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/users/:id",
+              "host": ["{{base_url}}"],
+              "path": ["users", ":id"],
+              "variable": [{ "key": "id", "value": "7" }]
+            }
+          }
+        },
+        {
+          "name": "Admin with Basic auth",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.test(\"is allowed\", () => pm.response.to.have.status(204));"] }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "basic",
+              "basic": [
+                { "key": "username", "value": "{{user}}" },
+                { "key": "password", "value": "secret" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/admin"
+          }
+        },
+        {
+          "name": "Echo a form",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"sent the form\", () => {",
+                  "    const echo = pm.response.json();",
+                  "    pm.expect(echo.contentType).to.include(\"x-www-form-urlencoded\");",
+                  "    pm.expect(echo.body).to.eql(\"q=a+b&user=demo\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "q", "value": "a b" },
+                { "key": "user", "value": "{{user}}" },
+                { "key": "off", "value": "1", "disabled": true }
+              ]
+            },
+            "url": "{{base_url}}/echo"
+          }
+        }
+      ]
+    }
+  ]
+}
