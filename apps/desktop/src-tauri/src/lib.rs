@@ -2,16 +2,19 @@ mod commands;
 
 use stormix_engine::{RunOptions, Runner};
 use tauri::Manager;
-use tauri_specta::collect_commands;
+use tauri_specta::{collect_commands, collect_events};
 
 fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
-    tauri_specta::Builder::<tauri::Wry>::new().commands(collect_commands![
-        commands::get_app_info,
-        commands::example_test_file,
-        commands::validate_test_file,
-        commands::run_test_file,
-        commands::import_collection,
-    ])
+    tauri_specta::Builder::<tauri::Wry>::new()
+        .commands(collect_commands![
+            commands::get_app_info,
+            commands::example_test_file,
+            commands::validate_test_file,
+            commands::run_test_file,
+            commands::import_collection,
+            commands::run_load_test,
+        ])
+        .events(collect_events![commands::LoadProgress])
 }
 
 #[cfg(any(debug_assertions, test))]

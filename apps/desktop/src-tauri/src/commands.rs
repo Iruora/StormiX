@@ -3,11 +3,12 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use specta::Type;
-use stormix_engine::{FlowResult, Runner, Variables};
+use stormix_engine::{run_load, FlowResult, LoadOptions, LoadReport, Runner, Variables};
 use stormix_flow::{Issue, Severity, TestFile};
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_specta::Event;
 
 const EXAMPLE: &str = include_str!("../../../../examples/login.stormix.yaml");
 
@@ -83,6 +84,70 @@ pub fn import_collection(path: String) -> Result<ImportedCollection, String> {
     })
 }
 
+/// Sent once a second while a load test runs.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadProgress {
+    pub elapsed_s: u32,
+    pub total_s: u32,
+    pub requests: u32,
+    pub failed: u32,
+    pub p95_ms: f64,
+    pub active: u32,
+}
+
+/// Runs the file's flow under its load profile and checks its thresholds,
+/// sending [`LoadProgress`] events as it goes.
+#[tauri::command]
+#[specta::specta]
+pub async fn run_load_test(
+    text: String,
+    variables: BTreeMap<String, String>,
+    app: AppHandle,
+    runner: State<'_, Runner>,
+) -> Result<LoadReport, String> {
+    let test = checked(&text)?;
+    let Some(profile) = &test.load else {
+        return Err("the file has no `load` section".into());
+    };
+    let mut vars = Variables::new();
+    vars.extend(variables);
+    Ok(run_load(
+        &runner,
+        &test.flow,
+        &vars,
+        profile,
+        &test.thresholds,
+        &LoadOptions::default(),
+        |p| {
+            let _ = LoadProgress {
+                elapsed_s: p.elapsed.as_secs() as u32,
+                total_s: p.total.as_secs() as u32,
+                requests: p.second.requests,
+                failed: p.second.failed,
+                p95_ms: p.second.p95_ms,
+                active: p.second.active,
+            }
+            .emit(&app);
+        },
+    )
+    .await)
+}
+
+/// Parses the file and refuses it if it has errors; the editor already
+/// shows why.
+fn checked(text: &str) -> Result<TestFile, String> {
+    let test = TestFile::from_yaml(text).map_err(|e| e.to_string())?;
+    if let Some(issue) = test
+        .validate()
+        .into_iter()
+        .find(|i| i.severity == Severity::Error)
+    {
+        return Err(format!("{}: {}", issue.path, issue.message));
+    }
+    Ok(test)
+}
+
 /// Runs the file's flow once, as a functional test, with `variables` (an
 /// environment) over the flow's own. Refuses a file that does not parse or
 /// has errors; the editor already shows why.
@@ -93,14 +158,7 @@ pub async fn run_test_file(
     variables: BTreeMap<String, String>,
     runner: State<'_, Runner>,
 ) -> Result<FlowResult, String> {
-    let test = TestFile::from_yaml(&text).map_err(|e| e.to_string())?;
-    if let Some(issue) = test
-        .validate()
-        .into_iter()
-        .find(|i| i.severity == Severity::Error)
-    {
-        return Err(format!("{}: {}", issue.path, issue.message));
-    }
+    let test = checked(&text)?;
     let mut vars = Variables::new();
     vars.extend(variables);
     Ok(runner.run(&test.flow, &vars).await)

@@ -3804,6 +3804,7 @@ dependencies = [
  "stormix-collections",
  "stormix-engine",
  "stormix-flow",
+ "stormix-metrics",
  "tempfile",
  "tokio",
 ]
@@ -3829,6 +3830,7 @@ dependencies = [
  "stormix-collections",
  "stormix-engine",
  "stormix-flow",
+ "stormix-metrics",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

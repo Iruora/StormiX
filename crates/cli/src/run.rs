@@ -1,20 +1,21 @@
 //! `stormix run`: one functional pass over a flow.
 
 use std::fmt::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Args;
 use stormix_engine::{junit_report, FlowResult, RunOptions, Runner, Variables};
-use stormix_flow::{Duration, Severity};
+use stormix_flow::{Duration, Severity, TestFile};
 
 use crate::vars::{parse_var, read_env};
 use crate::{print_warnings, source, Format};
 
+/// What `run` and `load` both take: the flow and how to send its requests.
 #[derive(Args)]
-pub struct RunArgs {
+pub struct Target {
     /// A test file, a Postman collection (.json) or a Bruno collection folder.
-    file: PathBuf,
+    pub file: PathBuf,
     /// Set a variable, overriding the file and the environment. Repeatable.
     #[arg(long = "var", value_name = "NAME=VALUE", value_parser = parse_var)]
     vars: Vec<(String, String)>,
@@ -23,17 +24,6 @@ pub struct RunArgs {
     /// of its environments works too.
     #[arg(long, value_name = "FILE|NAME")]
     env: Option<PathBuf>,
-    /// Also write a JUnit XML report here, for CI test tabs.
-    #[arg(long, value_name = "FILE")]
-    junit: Option<PathBuf>,
-    #[arg(long, value_enum, default_value_t = Format::Text)]
-    format: Format,
-    /// Show passed checks and extracted values, not only failures.
-    #[arg(long, short)]
-    verbose: bool,
-    /// Stop at the first failed step.
-    #[arg(long)]
-    bail: bool,
     /// Time allowed for each request.
     #[arg(long, default_value = "30s")]
     timeout: Duration,
@@ -48,62 +38,119 @@ pub struct RunArgs {
     script_timeout: Duration,
 }
 
-/// Exit codes: 0 every check passed, 1 something failed, 2 the run could not start.
-pub fn run(args: RunArgs) -> Result<ExitCode, String> {
-    let source = source::load(&args.file)?;
-    print_warnings(&source.warnings);
-    let test = &source.test;
-    let errors: Vec<_> = test
-        .validate()
-        .into_iter()
-        .filter(|i| i.severity == Severity::Error)
-        .collect();
-    if !errors.is_empty() {
-        let lines: Vec<_> = errors
-            .iter()
-            .map(|i| format!("  {}: {}", i.path, i.message))
-            .collect();
-        return Err(format!(
-            "{} is not valid:\n{}",
-            args.file.display(),
-            lines.join("\n")
-        ));
-    }
+#[derive(Args)]
+pub struct RunArgs {
+    #[command(flatten)]
+    target: Target,
+    /// Also write a JUnit XML report here, for CI test tabs.
+    #[arg(long, value_name = "FILE")]
+    junit: Option<PathBuf>,
+    #[arg(long, value_enum, default_value_t = Format::Text)]
+    format: Format,
+    /// Show passed checks and extracted values, not only failures.
+    #[arg(long, short)]
+    verbose: bool,
+    /// Stop at the first failed step.
+    #[arg(long)]
+    bail: bool,
+}
 
-    let mut vars = match &args.env {
-        Some(path) if path.exists() => read_env(path)?,
-        Some(name) => {
-            let name = name.to_string_lossy();
-            match source.environments.get(name.as_ref()) {
-                Some(env) => {
-                    let mut vars = Variables::new();
-                    vars.extend(env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
-                    vars
-                }
-                None if source.environments.is_empty() => {
-                    return Err(format!("cannot read {name}: no such file"));
-                }
-                None => {
-                    let names: Vec<_> = source.environments.keys().map(String::as_str).collect();
-                    return Err(format!(
-                        "{name} is neither a file nor one of the collection's environments ({})",
-                        names.join(", ")
-                    ));
+/// A loaded, valid test with its variables and a runner set up.
+pub struct Prepared {
+    pub source: source::Source,
+    pub vars: Variables,
+    pub runner: Runner,
+}
+
+impl Target {
+    /// Loads the file, refuses it if it has errors, and reads the environment.
+    /// `adjust` may change the test (a load override) before it is checked.
+    pub fn prepare(
+        self,
+        bail: bool,
+        adjust: impl FnOnce(&mut TestFile) -> Result<(), String>,
+    ) -> Result<Prepared, String> {
+        let mut source = source::load(&self.file)?;
+        print_warnings(&source.warnings);
+        adjust(&mut source.test)?;
+        let errors: Vec<_> = source
+            .test
+            .validate()
+            .into_iter()
+            .filter(|i| i.severity == Severity::Error)
+            .collect();
+        if !errors.is_empty() {
+            let lines: Vec<_> = errors
+                .iter()
+                .map(|i| format!("  {}: {}", i.path, i.message))
+                .collect();
+            return Err(format!(
+                "{} is not valid:\n{}",
+                self.file.display(),
+                lines.join("\n")
+            ));
+        }
+
+        let mut vars = match &self.env {
+            Some(path) if path.exists() => read_env(path)?,
+            Some(name) => {
+                let name = name.to_string_lossy();
+                match source.environments.get(name.as_ref()) {
+                    Some(env) => {
+                        let mut vars = Variables::new();
+                        vars.extend(env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+                        vars
+                    }
+                    None if source.environments.is_empty() => {
+                        return Err(format!("cannot read {name}: no such file"));
+                    }
+                    None => {
+                        let names: Vec<_> =
+                            source.environments.keys().map(String::as_str).collect();
+                        return Err(format!(
+                            "{name} is neither a file nor one of the collection's environments ({})",
+                            names.join(", ")
+                        ));
+                    }
                 }
             }
-        }
-        None => Variables::new(),
-    };
-    vars.extend(args.vars);
+            None => Variables::new(),
+        };
+        vars.extend(self.vars);
 
-    let runner = Runner::new(RunOptions {
-        timeout: args.timeout.into(),
-        insecure: args.insecure,
-        follow_redirects: !args.no_follow_redirects,
-        bail: args.bail,
-        script_timeout: args.script_timeout.into(),
-    })
-    .map_err(|e| e.to_string())?;
+        let runner = Runner::new(RunOptions {
+            timeout: self.timeout.into(),
+            insecure: self.insecure,
+            follow_redirects: !self.no_follow_redirects,
+            bail,
+            script_timeout: self.script_timeout.into(),
+        })
+        .map_err(|e| e.to_string())?;
+        Ok(Prepared {
+            source,
+            vars,
+            runner,
+        })
+    }
+}
+
+/// Creates the parent folder of a report file if needed, then writes it.
+pub fn write_report(path: &Path, contents: &str) -> Result<(), String> {
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    }
+    std::fs::write(path, contents).map_err(|e| format!("cannot write {}: {e}", path.display()))
+}
+
+/// Exit codes: 0 every check passed, 1 something failed, 2 the run could not start.
+pub fn run(args: RunArgs) -> Result<ExitCode, String> {
+    let Prepared {
+        source,
+        vars,
+        runner,
+    } = args.target.prepare(args.bail, |_| Ok(()))?;
+    let test = &source.test;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -111,12 +158,7 @@ pub fn run(args: RunArgs) -> Result<ExitCode, String> {
     let result = runtime.block_on(runner.run(&test.flow, &vars));
 
     if let Some(path) = &args.junit {
-        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-            std::fs::create_dir_all(dir)
-                .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-        }
-        std::fs::write(path, junit_report(&result))
-            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        write_report(path, &junit_report(&result))?;
     }
     match args.format {
         Format::Json => println!(
@@ -125,7 +167,7 @@ pub fn run(args: RunArgs) -> Result<ExitCode, String> {
         ),
         Format::Text => {
             if test.load.is_some() {
-                eprintln!("note: running the flow once; the load profile is for `stormix load`, coming in M3.");
+                eprintln!("note: running the flow once; `stormix load` applies the load profile.");
             }
             print!("{}", render_text(&result, args.verbose));
         }

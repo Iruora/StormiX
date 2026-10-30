@@ -12,7 +12,7 @@ mod result;
 mod runner;
 mod variables;
 
-pub use junit::junit_report;
+pub use junit::{junit_load_report, junit_report};
 pub use load::{run_load, LoadOptions, LoadReport, Progress};
 pub use result::{Check, FlowResult, StepResult};
 pub use runner::{RunOptions, Runner, RunnerError};
