@@ -21,7 +21,7 @@ pub use model::{
     Assertion, Body, ExtractSource, Flow, Header, HeaderAssertion, JsonAssertion, KeyValue, Method,
     Request, Scripts, Step,
 };
-pub use template::variable_refs;
+pub use template::{render, variable_refs, Rendered};
 pub use test_file::{ParseError, TestFile, CURRENT_VERSION};
 pub use threshold::{Comparison, Metric, Threshold, ThresholdError};
 pub use validate::{Issue, Severity};

@@ -48,6 +48,28 @@ jobs:
       - name: Check the example test file
         run: cargo run -q -p stormix-cli -- validate --strict examples/login.stormix.yaml
 
+  demo:
+    name: Run the demo flow
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p stormix-cli
+      - run: cargo build -p stormix-engine --example demo_api
+      - name: Run examples/demo-api.stormix.yaml against the demo API
+        run: |
+          ./target/debug/examples/demo_api &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:3999/health > /dev/null && break; sleep 1; done
+          ./target/debug/stormix run examples/demo-api.stormix.yaml --verbose --junit stormix-junit.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stormix-junit
+          path: stormix-junit.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
   build:
     name: Test and build (${{ matrix.name }})
     strategy:

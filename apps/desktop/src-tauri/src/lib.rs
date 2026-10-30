@@ -1,5 +1,7 @@
 mod commands;
 
+use stormix_engine::{RunOptions, Runner};
+use tauri::Manager;
 use tauri_specta::collect_commands;
 
 fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
@@ -7,6 +9,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         commands::get_app_info,
         commands::example_test_file,
         commands::validate_test_file,
+        commands::run_test_file,
     ])
 }
 
@@ -37,6 +40,7 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
+            app.manage(Runner::new(RunOptions::default())?);
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -2,7 +2,9 @@
 
 use serde::Serialize;
 use specta::Type;
-use stormix_flow::{Issue, TestFile};
+use stormix_engine::{FlowResult, Runner, Variables};
+use stormix_flow::{Issue, Severity, TestFile};
+use tauri::State;
 
 const EXAMPLE: &str = include_str!("../../../../examples/login.stormix.yaml");
 
@@ -51,6 +53,22 @@ pub fn validate_test_file(text: String) -> Validation {
             issues: Vec::new(),
         },
     }
+}
+
+/// Runs the file's flow once, as a functional test. Refuses a file that
+/// does not parse or has errors; the editor already shows why.
+#[tauri::command]
+#[specta::specta]
+pub async fn run_test_file(text: String, runner: State<'_, Runner>) -> Result<FlowResult, String> {
+    let test = TestFile::from_yaml(&text).map_err(|e| e.to_string())?;
+    if let Some(issue) = test
+        .validate()
+        .into_iter()
+        .find(|i| i.severity == Severity::Error)
+    {
+        return Err(format!("{}: {}", issue.path, issue.message));
+    }
+    Ok(runner.run(&test.flow, &Variables::new()).await)
 }
 
 #[cfg(test)]
