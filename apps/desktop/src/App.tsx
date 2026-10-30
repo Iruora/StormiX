@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   CircleAlert,
   CircleCheck,
@@ -6,6 +6,8 @@ import {
   Folders,
   Gauge,
   History,
+  LoaderCircle,
+  Play,
   RotateCcw,
   TriangleAlert,
   Zap,
@@ -14,6 +16,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { commands, type Issue, type TestFile } from "./bindings";
 import { describeLoad } from "./lib/describe";
+import { RunResult } from "./views/RunResult";
 
 export function App() {
   const info = useQuery({ queryKey: ["app-info"], queryFn: commands.getAppInfo });
@@ -83,21 +86,43 @@ function TestFileView() {
     placeholderData: (previous) => previous,
   });
   const result = validation.data;
+  const canRun = !!result?.test && !result.issues.some((i) => i.severity === "error");
+
+  const run = useMutation({
+    mutationFn: async (yaml: string) => {
+      const res = await commands.runTestFile(yaml);
+      if (res.status === "error") throw new Error(res.error);
+      return res.data;
+    },
+  });
+  const edit = (next: string | null) => {
+    setText(next);
+    run.reset();
+  };
 
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-3 border-b border-line bg-surface px-5 py-3">
         <h1 className="text-[15px] font-semibold">Test file</h1>
         <span className="text-xs text-muted">
-          A flow, an optional load profile and thresholds. Run and load arrive in M1 and M3.
+          A flow, an optional load profile and thresholds. Load tests arrive in M3.
         </span>
         <button
           type="button"
-          onClick={() => setText(null)}
+          onClick={() => edit(null)}
           className="ml-auto flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
         >
           <RotateCcw size={13} />
           Reset to example
+        </button>
+        <button
+          type="button"
+          disabled={!canRun || run.isPending}
+          onClick={() => run.mutate(source)}
+          className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+        >
+          {run.isPending ? <LoaderCircle size={13} className="animate-spin" /> : <Play size={13} />}
+          Run once
         </button>
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
@@ -106,7 +131,7 @@ function TestFileView() {
           spellCheck={false}
           wrap="off"
           value={source}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => edit(e.target.value)}
           className="mono resize-none border-r border-line bg-surface p-4 text-[13px] leading-5 outline-none"
         />
         <aside className="min-h-0 overflow-y-auto p-4">
@@ -117,6 +142,14 @@ function TestFileView() {
           ) : result?.test ? (
             <>
               <Issues issues={result.issues} />
+              {run.error && (
+                <div className="mt-4">
+                  <Banner tone="bad" icon={<CircleAlert size={16} />} title="The run could not start">
+                    {run.error.message}
+                  </Banner>
+                </div>
+              )}
+              {run.data && <RunResult result={run.data} />}
               <Summary test={result.test} />
             </>
           ) : null}

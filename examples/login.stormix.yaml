@@ -1,5 +1,5 @@
-# A Stormix test file. `stormix validate` checks it; `stormix run` (M1) runs
-# the flow once and `stormix load` (M3) replays it under the load profile.
+# A Stormix test file. `stormix validate` checks it, `stormix run` runs the
+# flow once, and `stormix load` (M3) will replay it under the load profile.
 version: 1
 flow:
   name: Log in, then read the profile

@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "apps/desktop/src-tauri",
     "crates/cli",
+    "crates/engine",
     "crates/flow",
 ]
 
@@ -13,18 +14,27 @@ repository = "https://github.com/Iruora/StormiX"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+stormix-engine = { path = "crates/engine" }
 stormix-flow = { path = "crates/flow" }
 
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 clap = { version = "4", features = ["derive"] }
+fastrand = "2"
+regex = "1"
+reqwest = { version = "0.13", default-features = false, features = ["charset", "form", "http2", "rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+serde_json_path = "0.7"
 serde_path_to_error = "0.1"
 serde_yaml_ng = "0.10"
 specta = { version = "=2.0.0-rc.26", features = ["derive", "serde_json"] }
 specta-typescript = "0.0.13"
+tempfile = "3"
 thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
 
 [profile.release]
 codegen-units = 1

@@ -6,6 +6,9 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand, ValueEnum};
 use stormix_flow::{Severity, TestFile};
 
+mod run;
+mod vars;
+
 const EXAMPLE: &str = include_str!("../../../examples/login.stormix.yaml");
 
 #[derive(Parser)]
@@ -30,6 +33,8 @@ enum Command {
         #[arg(long)]
         strict: bool,
     },
+    /// Run the flow once and check every assertion, as a functional test.
+    Run(run::RunArgs),
     /// Write an example test file to start from.
     Init {
         #[arg(default_value = "stormix.yaml")]
@@ -54,6 +59,7 @@ fn main() -> ExitCode {
             format,
             strict,
         } => validate(&file, format, strict),
+        Command::Run(args) => run::run(args),
         Command::Init { file, force } => init(&file, force),
     };
     match result {
@@ -65,11 +71,15 @@ fn main() -> ExitCode {
     }
 }
 
-/// Exit codes: 0 clean, 1 issues that fail the check, 2 the file could not be read.
-fn validate(file: &Path, format: Format, strict: bool) -> Result<ExitCode, String> {
+fn read_test_file(file: &Path) -> Result<TestFile, String> {
     let text = std::fs::read_to_string(file)
         .map_err(|e| format!("cannot read {}: {e}", file.display()))?;
-    let test = TestFile::from_yaml(&text).map_err(|e| format!("{}: {e}", file.display()))?;
+    TestFile::from_yaml(&text).map_err(|e| format!("{}: {e}", file.display()))
+}
+
+/// Exit codes: 0 clean, 1 issues that fail the check, 2 the file could not be read.
+fn validate(file: &Path, format: Format, strict: bool) -> Result<ExitCode, String> {
+    let test = read_test_file(file)?;
     let issues = test.validate();
 
     match format {

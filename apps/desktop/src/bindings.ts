@@ -9,6 +9,11 @@ export const commands = {
 	getAppInfo: () => __TAURI_INVOKE<AppInfo>("get_app_info"),
 	exampleTestFile: () => __TAURI_INVOKE<string>("example_test_file"),
 	validateTestFile: (text: string) => __TAURI_INVOKE<Validation_Serialize>("validate_test_file", { text }),
+	/**
+	 *  Runs the file's flow once, as a functional test. Refuses a file that
+	 *  does not parse or has errors; the editor already shows why.
+	 */
+	runTestFile: (text: string) => typedError<FlowResult_Serialize, string>(__TAURI_INVOKE("run_test_file", { text })),
 };
 
 /* Types */
@@ -42,6 +47,25 @@ export type Body =
 /**  Sent as `application/x-www-form-urlencoded`. */
 ({ form: KeyValue[] }) & { json?: never; raw?: never };
 
+/**  One assertion or extraction and how it went. */
+export type Check = Check_Serialize | Check_Deserialize;
+
+/**  One assertion or extraction and how it went. */
+export type Check_Deserialize = {
+	name: string,
+	passed: boolean,
+	/**  Why it failed, like `got 404`. */
+	message?: string | null,
+};
+
+/**  One assertion or extraction and how it went. */
+export type Check_Serialize = {
+	name: string,
+	passed: boolean,
+	/**  Why it failed, like `got 404`. */
+	message: string | null,
+};
+
 export type ExtractSource = 
 /**  A JSONPath into the response body, like `$.data.token`. */
 ({ json: string }) & { header?: never; regex?: never } | 
@@ -57,6 +81,20 @@ export type ExtractSource =
  *  after it.
  */
 export type Flow = Flow_Serialize | Flow_Deserialize;
+
+export type FlowResult = FlowResult_Serialize | FlowResult_Deserialize;
+
+export type FlowResult_Deserialize = {
+	name: string,
+	steps: StepResult_Deserialize[],
+	durationMs: number | null,
+};
+
+export type FlowResult_Serialize = {
+	name: string,
+	steps: StepResult_Serialize[],
+	durationMs: number | null,
+};
 
 /**
  *  An ordered list of requests run one after the other by one virtual user.
@@ -232,6 +270,52 @@ export type Stage = {
 
 export type Step = Step_Serialize | Step_Deserialize;
 
+export type StepResult = StepResult_Serialize | StepResult_Deserialize;
+
+export type StepResult_Deserialize = {
+	name: string,
+	method: string,
+	/**  The URL as sent, after variables were filled in. */
+	url: string,
+	status?: number | null,
+	/**  From sending the request to the last byte of the body. */
+	durationMs: number | null,
+	/**  From sending the request to the response headers. */
+	timeToHeadersMs?: number | null,
+	responseBytes: number,
+	checks: Check_Deserialize[],
+	/**  Variables this step set, with their values. */
+	extracted: { [key in string]: string },
+	/**  Things that did not fail the step but may explain a surprise. */
+	warnings: string[],
+	/**  Set when no response came back: bad URL, connection refused, timeout. */
+	error?: string | null,
+	/**  Not run because an earlier step failed and the run stops at the first failure. */
+	skipped: boolean,
+};
+
+export type StepResult_Serialize = {
+	name: string,
+	method: string,
+	/**  The URL as sent, after variables were filled in. */
+	url: string,
+	status: number | null,
+	/**  From sending the request to the last byte of the body. */
+	durationMs: number | null,
+	/**  From sending the request to the response headers. */
+	timeToHeadersMs: number | null,
+	responseBytes: number,
+	checks: Check_Serialize[],
+	/**  Variables this step set, with their values. */
+	extracted: { [key in string]: string },
+	/**  Things that did not fail the step but may explain a surprise. */
+	warnings: string[],
+	/**  Set when no response came back: bad URL, connection refused, timeout. */
+	error: string | null,
+	/**  Not run because an earlier step failed and the run stops at the first failure. */
+	skipped: boolean,
+};
+
 export type Step_Deserialize = {
 	name: string,
 	request: Request_Deserialize,
@@ -288,4 +372,14 @@ export type Validation_Serialize = {
 	parseError: string | null,
 	issues: Issue[],
 };
+
+/* Tauri Specta runtime */
+async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
+    try {
+        return { status: "ok", data: await result };
+    } catch (e) {
+        if (e instanceof Error) throw e;
+        return { status: "error", error: e as any };
+    }
+}
 

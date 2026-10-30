@@ -1,0 +1,27 @@
+[package]
+name = "stormix-engine"
+description = "Runs Stormix flows: sends the requests, extracts variables, checks assertions"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[features]
+# Derives `specta::Type` on results so the desktop app can export them to TypeScript.
+specta = ["dep:specta", "stormix-flow/specta"]
+
+[dependencies]
+fastrand.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_json_path.workspace = true
+specta = { workspace = true, optional = true }
+stormix-flow.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+axum.workspace = true

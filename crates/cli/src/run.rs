@@ -1,0 +1,274 @@
+//! `stormix run`: one functional pass over a flow.
+
+use std::fmt::Write;
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+use clap::Args;
+use stormix_engine::{junit_report, FlowResult, RunOptions, Runner, Variables};
+use stormix_flow::{Duration, Severity};
+
+use crate::vars::{parse_var, read_env};
+use crate::{read_test_file, Format};
+
+#[derive(Args)]
+pub struct RunArgs {
+    file: PathBuf,
+    /// Set a variable, overriding the file and the environment. Repeatable.
+    #[arg(long = "var", value_name = "NAME=VALUE", value_parser = parse_var)]
+    vars: Vec<(String, String)>,
+    /// Variables from a YAML or JSON file, or a Postman environment export.
+    #[arg(long, value_name = "FILE")]
+    env: Option<PathBuf>,
+    /// Also write a JUnit XML report here, for CI test tabs.
+    #[arg(long, value_name = "FILE")]
+    junit: Option<PathBuf>,
+    #[arg(long, value_enum, default_value_t = Format::Text)]
+    format: Format,
+    /// Show passed checks and extracted values, not only failures.
+    #[arg(long, short)]
+    verbose: bool,
+    /// Stop at the first failed step.
+    #[arg(long)]
+    bail: bool,
+    /// Time allowed for each request.
+    #[arg(long, default_value = "30s")]
+    timeout: Duration,
+    /// Accept invalid or self-signed TLS certificates.
+    #[arg(long)]
+    insecure: bool,
+    /// Report redirects instead of following them.
+    #[arg(long)]
+    no_follow_redirects: bool,
+}
+
+/// Exit codes: 0 every check passed, 1 something failed, 2 the run could not start.
+pub fn run(args: RunArgs) -> Result<ExitCode, String> {
+    let test = read_test_file(&args.file)?;
+    let errors: Vec<_> = test
+        .validate()
+        .into_iter()
+        .filter(|i| i.severity == Severity::Error)
+        .collect();
+    if !errors.is_empty() {
+        let lines: Vec<_> = errors
+            .iter()
+            .map(|i| format!("  {}: {}", i.path, i.message))
+            .collect();
+        return Err(format!(
+            "{} is not valid:\n{}",
+            args.file.display(),
+            lines.join("\n")
+        ));
+    }
+
+    let mut vars = match &args.env {
+        Some(path) => read_env(path)?,
+        None => Variables::new(),
+    };
+    vars.extend(args.vars);
+
+    let runner = Runner::new(RunOptions {
+        timeout: args.timeout.into(),
+        insecure: args.insecure,
+        follow_redirects: !args.no_follow_redirects,
+        bail: args.bail,
+    })
+    .map_err(|e| e.to_string())?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("cannot start the runtime: {e}"))?;
+    let result = runtime.block_on(runner.run(&test.flow, &vars));
+
+    if let Some(path) = &args.junit {
+        std::fs::write(path, junit_report(&result))
+            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    }
+    match args.format {
+        Format::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&result).expect("a result always serializes")
+        ),
+        Format::Text => {
+            if test.load.is_some() {
+                eprintln!("note: running the flow once; the load profile is for `stormix load`, coming in M3.");
+            }
+            print!("{}", render_text(&result, args.verbose));
+        }
+    }
+    Ok(if result.passed() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
+}
+
+fn render_text(result: &FlowResult, verbose: bool) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{}\n", result.name);
+    let width = result
+        .steps
+        .iter()
+        .map(|s| s.name.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(40);
+
+    for step in &result.steps {
+        let mark = if step.skipped {
+            "-"
+        } else if step.passed() {
+            "✓"
+        } else {
+            "✗"
+        };
+        let outcome = if step.skipped {
+            "skipped".to_owned()
+        } else {
+            let status = step.status.map_or("---".to_owned(), |s| s.to_string());
+            format!("{:<7} {status} {:>6.0} ms", step.method, step.duration_ms)
+        };
+        let _ = writeln!(out, "  {mark} {:<width$}  {outcome}", step.name);
+
+        if let Some(error) = &step.error {
+            let _ = writeln!(out, "      ✗ {} {}: {error}", step.method, step.url);
+        }
+        for check in &step.checks {
+            match (&check.message, check.passed) {
+                (Some(why), false) => {
+                    let _ = writeln!(out, "      ✗ {}: {why}", check.name);
+                }
+                (None, false) => {
+                    let _ = writeln!(out, "      ✗ {}", check.name);
+                }
+                (_, true) if verbose => {
+                    let _ = writeln!(out, "      ✓ {}", check.name);
+                }
+                _ => {}
+            }
+        }
+        if verbose {
+            for (name, value) in &step.extracted {
+                let _ = writeln!(out, "      = {name} = {}", truncate(value, 60));
+            }
+        }
+        for warning in &step.warnings {
+            let _ = writeln!(out, "      ! {warning}");
+        }
+    }
+
+    let ran = result.steps.iter().filter(|s| !s.skipped).count();
+    let failed = result.failed_steps();
+    let skipped = result.steps.len() - ran;
+    let (checks_passed, checks) = result.check_counts();
+    let mut summary = format!(
+        "{} steps: {} passed, {failed} failed",
+        result.steps.len(),
+        ran - failed
+    );
+    if skipped > 0 {
+        let _ = write!(summary, ", {skipped} skipped");
+    }
+    let _ = writeln!(
+        out,
+        "\n{summary} · {checks_passed}/{checks} checks passed · {:.2} s",
+        result.duration_ms / 1000.0
+    );
+    out
+}
+
+fn truncate(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let cut: String = text.chars().take(max - 1).collect();
+    format!("{cut}…")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    use stormix_engine::{Check, StepResult};
+
+    fn check(name: &str, message: Option<&str>) -> Check {
+        Check {
+            name: name.into(),
+            passed: message.is_none(),
+            message: message.map(Into::into),
+        }
+    }
+
+    fn step(name: &str) -> StepResult {
+        StepResult {
+            name: name.into(),
+            method: "GET".into(),
+            url: "https://x.test/me".into(),
+            status: Some(200),
+            duration_ms: 42.4,
+            time_to_headers_ms: Some(40.0),
+            response_bytes: 10,
+            checks: vec![check("status is 200", None)],
+            extracted: BTreeMap::new(),
+            warnings: Vec::new(),
+            error: None,
+            skipped: false,
+        }
+    }
+
+    fn sample() -> FlowResult {
+        let mut login = step("Log in");
+        login.extracted.insert("token".into(), "abc".into());
+        let mut profile = step("Profile");
+        profile.status = Some(401);
+        profile.checks = vec![check("status is 200", Some("got 401"))];
+        profile.warnings = vec!["`{{x}}` has no value".into()];
+        let mut down = step("Down");
+        down.status = None;
+        down.checks.clear();
+        down.error = Some("connection refused".into());
+        let mut later = step("Later");
+        later.skipped = true;
+        later.checks.clear();
+        FlowResult {
+            name: "Login flow".into(),
+            steps: vec![login, profile, down, later],
+            duration_ms: 1234.0,
+        }
+    }
+
+    #[test]
+    fn text_shows_failures_and_a_summary() {
+        let text = render_text(&sample(), false);
+        let expected = "\
+Login flow
+
+  ✓ Log in   GET     200     42 ms
+  ✗ Profile  GET     401     42 ms
+      ✗ status is 200: got 401
+      ! `{{x}}` has no value
+  ✗ Down     GET     ---     42 ms
+      ✗ GET https://x.test/me: connection refused
+  - Later    skipped
+
+4 steps: 1 passed, 2 failed, 1 skipped · 1/2 checks passed · 1.23 s
+";
+        assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn verbose_adds_passed_checks_and_values() {
+        let text = render_text(&sample(), true);
+        assert!(
+            text.contains("      ✓ status is 200\n      = token = abc\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn truncates_long_values() {
+        assert_eq!(truncate("abcdef", 4), "abc…");
+        assert_eq!(truncate("abc", 4), "abc");
+    }
+}
