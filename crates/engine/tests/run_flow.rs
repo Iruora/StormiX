@@ -191,3 +191,60 @@ async fn reports_timeouts_and_refused_connections() {
     assert!(result.steps[1].error.is_some());
     assert_eq!(result.failed_steps(), 2);
 }
+
+#[tokio::test]
+async fn scripts_set_variables_change_requests_and_add_checks() {
+    let url = serve().await;
+    let f = flow(
+        r#"
+  name: scripts
+  steps:
+    - name: Log in
+      request:
+        method: POST
+        url: "{{base}}/login"
+        body: { json: { user: demo, password: "{{password}}" } }
+      scripts:
+        pre_request: |
+          pm.environment.set("password", "secret");
+          console.log("logging in as", "demo");
+        test: |
+          pm.test("status is 200", () => pm.response.to.have.status(200));
+          pm.environment.set("token", pm.response.json().token);
+    - name: Profile
+      request: { method: GET, url: "{{base}}/me" }
+      scripts:
+        pre_request: |
+          req.setHeader("Authorization", "Bearer " + bru.getVar("token"));
+        test: |
+          test("user", () => expect(res.body.user).to.equal("demo"));
+          test("wrong id", () => expect(res.body.id).to.equal(8));
+          oops();
+"#,
+    );
+    let result = Runner::new(RunOptions::default())
+        .unwrap()
+        .run(&f, &base(&url))
+        .await;
+
+    let login = &result.steps[0];
+    assert!(login.passed(), "{login:#?}");
+    assert_eq!(login.extracted["token"], "tok-demo");
+    assert_eq!(login.logs, ["logging in as demo"]);
+
+    let profile = &result.steps[1];
+    assert_eq!(profile.status, Some(200));
+    let checks: Vec<_> = profile
+        .checks
+        .iter()
+        .map(|c| (c.name.as_str(), c.passed))
+        .collect();
+    assert_eq!(
+        checks,
+        [("user", true), ("wrong id", false), ("test script ran", false)]
+    );
+    assert_eq!(
+        profile.checks[2].message.as_deref(),
+        Some("ReferenceError: oops is not defined")
+    );
+}

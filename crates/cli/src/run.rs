@@ -212,6 +212,7 @@ mod tests {
             checks: vec![check("status is 200", None)],
             extracted: BTreeMap::new(),
             warnings: Vec::new(),
+            logs: Vec::new(),
             error: None,
             skipped: false,
         }

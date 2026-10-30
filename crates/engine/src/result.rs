@@ -32,6 +32,8 @@ pub struct StepResult {
     pub extracted: BTreeMap<String, String>,
     /// Things that did not fail the step but may explain a surprise.
     pub warnings: Vec<String>,
+    /// What scripts printed with `console.log`.
+    pub logs: Vec<String>,
     /// Set when no response came back: bad URL, connection refused, timeout.
     pub error: Option<String>,
     /// Not run because an earlier step failed and the run stops at the first failure.

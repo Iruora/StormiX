@@ -31,6 +31,14 @@ impl Variables {
         self.values.insert(name.into(), value.into());
     }
 
+    pub fn remove(&mut self, name: &str) {
+        self.values.remove(name);
+    }
+
+    pub fn to_map(&self) -> BTreeMap<String, String> {
+        self.values.clone()
+    }
+
     pub fn entries(&self) -> impl Iterator<Item = (&str, &str)> {
         self.values.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }

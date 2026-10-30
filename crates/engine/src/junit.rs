@@ -106,6 +106,7 @@ mod tests {
             checks,
             extracted: BTreeMap::new(),
             warnings: Vec::new(),
+            logs: Vec::new(),
             error: error.map(Into::into),
             skipped,
         }

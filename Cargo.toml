@@ -5,6 +5,7 @@ members = [
     "crates/cli",
     "crates/engine",
     "crates/flow",
+    "crates/script",
 ]
 
 [workspace.package]
@@ -16,6 +17,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 stormix-engine = { path = "crates/engine" }
 stormix-flow = { path = "crates/flow" }
+stormix-script = { path = "crates/script" }
 
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 clap = { version = "4", features = ["derive"] }
