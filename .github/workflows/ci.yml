@@ -49,7 +49,7 @@ jobs:
         run: cargo run -q -p stormix-cli -- validate --strict examples/login.stormix.yaml
 
   demo:
-    name: Run the demo flow
+    name: Run the demo flow and fixture collections
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -57,16 +57,23 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build -p stormix-cli
       - run: cargo build -p stormix-engine --example demo_api
-      - name: Run examples/demo-api.stormix.yaml against the demo API
+      - name: Start the demo API
         run: |
           ./target/debug/examples/demo_api &
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:3999/health > /dev/null && break; sleep 1; done
-          ./target/debug/stormix run examples/demo-api.stormix.yaml --verbose --junit stormix-junit.xml
+      - name: Run examples/demo-api.stormix.yaml
+        run: ./target/debug/stormix run examples/demo-api.stormix.yaml --verbose --junit junit/test-file.xml
+      - name: Run the Postman collection unchanged
+        if: always()
+        run: ./target/debug/stormix run examples/collections/demo-api.postman_collection.json --verbose --junit junit/postman.xml
+      - name: Run the Bruno collection unchanged
+        if: always()
+        run: ./target/debug/stormix run examples/collections/bruno --env local --verbose --junit junit/bruno.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: stormix-junit
-          path: stormix-junit.xml
+          path: junit/
           if-no-files-found: ignore
           retention-days: 14
 

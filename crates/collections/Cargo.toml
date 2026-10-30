@@ -1,0 +1,16 @@
+[package]
+name = "stormix-collections"
+description = "Imports Postman and Bruno collections as Stormix flows"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+base64.workspace = true
+serde_json.workspace = true
+stormix-flow.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,9 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   CircleAlert,
   CircleCheck,
   FileCode,
-  Folders,
+  FileJson,
+  FolderOpen,
   Gauge,
   History,
   LoaderCircle,
@@ -14,7 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { commands, type Issue, type TestFile } from "./bindings";
+import { commands, type ImportedCollection, type Issue, type TestFile } from "./bindings";
 import { describeLoad } from "./lib/describe";
 import { RunResult } from "./views/RunResult";
 
@@ -31,7 +33,6 @@ export function App() {
           <span className="text-base font-extrabold tracking-tight">Stormix</span>
         </div>
         <NavItem icon={<FileCode size={16} />} label="Test file" active />
-        <NavItem icon={<Folders size={16} />} label="Collections" soon="M2" />
         <NavItem icon={<Gauge size={16} />} label="Load tests" soon="M3" />
         <NavItem icon={<History size={16} />} label="Runs" soon="M4" />
         <div className="mt-auto px-4 py-3 text-xs text-subtle">
@@ -76,6 +77,8 @@ function NavItem({
 function TestFileView() {
   const example = useQuery({ queryKey: ["example"], queryFn: commands.exampleTestFile });
   const [text, setText] = useState<string | null>(null);
+  const [imported, setImported] = useState<ImportedCollection | null>(null);
+  const [envName, setEnvName] = useState("");
   const source = text ?? example.data ?? "";
   const debounced = useDebounced(source, 250);
 
@@ -88,9 +91,10 @@ function TestFileView() {
   const result = validation.data;
   const canRun = !!result?.test && !result.issues.some((i) => i.severity === "error");
 
+  const environments = imported?.environments ?? {};
   const run = useMutation({
     mutationFn: async (yaml: string) => {
-      const res = await commands.runTestFile(yaml);
+      const res = await commands.runTestFile(yaml, environments[envName] ?? {});
       if (res.status === "error") throw new Error(res.error);
       return res.data;
     },
@@ -100,6 +104,26 @@ function TestFileView() {
     run.reset();
   };
 
+  const importFrom = useMutation({
+    mutationFn: async (kind: "postman" | "bruno") => {
+      const path = await open(
+        kind === "postman"
+          ? { title: "Import a Postman collection", filters: [{ name: "Postman collection", extensions: ["json"] }] }
+          : { title: "Import a Bruno collection folder", directory: true },
+      );
+      if (typeof path !== "string") return null;
+      const res = await commands.importCollection(path);
+      if (res.status === "error") throw new Error(res.error);
+      return res.data;
+    },
+    onSuccess: (collection) => {
+      if (!collection) return;
+      setImported(collection);
+      setEnvName(Object.keys(collection.environments)[0] ?? "");
+      edit(collection.yaml);
+    },
+  });
+
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-3 border-b border-line bg-surface px-5 py-3">
@@ -107,10 +131,51 @@ function TestFileView() {
         <span className="text-xs text-muted">
           A flow, an optional load profile and thresholds. Load tests arrive in M3.
         </span>
+        <span className="ml-auto text-xs text-muted">Import</span>
         <button
           type="button"
-          onClick={() => edit(null)}
-          className="ml-auto flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
+          disabled={importFrom.isPending}
+          onClick={() => importFrom.mutate("postman")}
+          className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
+        >
+          <FileJson size={13} />
+          Postman
+        </button>
+        <button
+          type="button"
+          disabled={importFrom.isPending}
+          onClick={() => importFrom.mutate("bruno")}
+          className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
+        >
+          <FolderOpen size={13} />
+          Bruno
+        </button>
+        {Object.keys(environments).length > 0 && (
+          <select
+            aria-label="Environment"
+            value={envName}
+            onChange={(e) => {
+              setEnvName(e.target.value);
+              run.reset();
+            }}
+            className="rounded-md border border-line bg-surface px-2 py-1 text-xs"
+          >
+            <option value="">No environment</option>
+            {Object.keys(environments).map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            setImported(null);
+            setEnvName("");
+            edit(null);
+          }}
+          className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
         >
           <RotateCcw size={13} />
           Reset to example
@@ -141,6 +206,28 @@ function TestFileView() {
             </Banner>
           ) : result?.test ? (
             <>
+              {importFrom.error && (
+                <div className="mb-4">
+                  <Banner tone="bad" icon={<CircleAlert size={16} />} title="The collection could not be imported">
+                    {importFrom.error.message}
+                  </Banner>
+                </div>
+              )}
+              {imported && imported.warnings.length > 0 && (
+                <div className="mb-4">
+                  <Banner
+                    tone="warn"
+                    icon={<TriangleAlert size={16} />}
+                    title={`${count(imported.warnings.length, "thing")} did not carry over`}
+                  >
+                    <ul className="space-y-1">
+                      {imported.warnings.map((w, i) => (
+                        <li key={i}>{w}</li>
+                      ))}
+                    </ul>
+                  </Banner>
+                </div>
+              )}
               <Issues issues={result.issues} />
               {run.error && (
                 <div className="mt-4">

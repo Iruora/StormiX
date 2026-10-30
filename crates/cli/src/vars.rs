@@ -16,8 +16,15 @@ pub fn parse_var(arg: &str) -> Result<(String, String), String> {
 }
 
 /// Reads an environment file: a flat YAML or JSON map of names to values,
-/// or a Postman environment export (`{"values": [{"key", "value", "enabled"}]}`).
+/// a Postman environment export (`{"values": [{"key", "value", "enabled"}]}`)
+/// or a Bruno environment (`.bru`).
 pub fn read_env(path: &Path) -> Result<Variables, String> {
+    if path.extension().is_some_and(|e| e == "bru") {
+        let env = stormix_collections::bruno::environment(path).map_err(|e| e.to_string())?;
+        let mut vars = Variables::new();
+        vars.extend(env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        return Ok(vars);
+    }
     let text = std::fs::read_to_string(path)
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     parse_env(&text).map_err(|e| format!("{}: {e}", path.display()))
@@ -71,6 +78,20 @@ mod tests {
         assert_eq!(parse_var("empty="), Ok(("empty".into(), String::new())));
         assert!(parse_var("novalue").is_err());
         assert!(parse_var("=x").is_err());
+    }
+
+    #[test]
+    fn reads_bruno_environments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("local.bru");
+        std::fs::write(
+            &path,
+            "vars {\n  base_url: http://x.test\n  ~off: 1\n}\nvars:secret [\n  token\n]\n",
+        )
+        .unwrap();
+        let vars = read_env(&path).unwrap();
+        assert_eq!(vars.get("base_url"), Some("http://x.test"));
+        assert_eq!(vars.get("off"), None);
     }
 
     #[test]

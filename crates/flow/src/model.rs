@@ -106,6 +106,8 @@ pub enum Body {
     Raw(String),
     /// Sent as `application/x-www-form-urlencoded`.
     Form(Vec<KeyValue>),
+    /// Sent as `multipart/form-data`, text fields only.
+    Multipart(Vec<KeyValue>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

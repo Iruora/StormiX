@@ -1,0 +1,9 @@
+headers {
+  X-Client: stormix-fixture
+}
+
+tests {
+  test("responds within 2 s", function () {
+    expect(res.getResponseTime()).to.be.below(2000);
+  });
+}

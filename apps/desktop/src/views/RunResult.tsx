@@ -83,6 +83,16 @@ function Step({ step }: { step: StepResult }) {
           </li>
         ))}
       </ul>
+      {step.logs.length > 0 && (
+        <details className="mt-1 pl-[22px]" open={!passed}>
+          <summary className="cursor-pointer text-xs text-subtle">
+            Console ({step.logs.length})
+          </summary>
+          <pre className="mono mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-surface-2 px-2 py-1 text-xs">
+            {step.logs.join("\n")}
+          </pre>
+        </details>
+      )}
     </li>
   );
 }

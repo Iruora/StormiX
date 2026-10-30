@@ -1,0 +1,12 @@
+[package]
+name = "stormix-script"
+description = "Runs Postman and Bruno scripts in an embedded JavaScript engine"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+rquickjs = { version = "0.14" }
+serde.workspace = true
+serde_json.workspace = true

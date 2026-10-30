@@ -42,6 +42,9 @@ impl TestFile {
         // extract. Anything else must come from an environment, so it warns.
         let mut known: BTreeSet<&str> = flow.variables.keys().map(String::as_str).collect();
         let mut names = BTreeSet::new();
+        // Scripts that have run by the time a step is sent; a variable they
+        // name may well be one they set.
+        let mut scripts: Vec<&str> = Vec::new();
         for (i, step) in flow.steps.iter().enumerate() {
             let at = format!("flow.steps[{i}]");
             if step.name.trim().is_empty() {
@@ -77,16 +80,19 @@ impl TestFile {
                     body_text = value.to_string();
                     templated.push((format!("{at}.request.body"), &body_text));
                 }
-                Some(Body::Form(fields)) => {
+                Some(Body::Form(fields) | Body::Multipart(fields)) => {
                     for field in fields {
                         templated.push((format!("{at}.request.body"), field.value.as_str()));
                     }
                 }
                 None => {}
             }
+            if let Some(source) = &step.scripts.pre_request {
+                scripts.push(source);
+            }
             for (path, text) in templated {
                 for name in variable_refs(text) {
-                    if !known.contains(name) {
+                    if !known.contains(name) && !mentioned(&scripts, name) {
                         issues.warning(
                             &path,
                             &format!("`{{{{{name}}}}}` is not defined in the flow or extracted by an earlier step; it must come from an environment"),
@@ -119,6 +125,9 @@ impl TestFile {
             }
             // Extracted values only exist for the steps after this one.
             known.extend(step.extract.keys().map(String::as_str));
+            if let Some(source) = &step.scripts.test {
+                scripts.push(source);
+            }
         }
 
         match &self.load {
@@ -204,6 +213,16 @@ impl Issues {
     }
 }
 
+/// Whether any script names `name` as a string literal, as in
+/// `pm.environment.set("token", ...)`.
+fn mentioned(scripts: &[&str], name: &str) -> bool {
+    scripts.iter().any(|source| {
+        ['"', '\'', '`']
+            .iter()
+            .any(|q| source.contains(&format!("{q}{name}{q}")))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,6 +272,31 @@ flow:
         assert_eq!(
             issues(yaml),
             [(Severity::Warning, "flow.steps[0].request.url".into())]
+        );
+    }
+
+    #[test]
+    fn variables_a_script_names_count_as_set() {
+        let yaml = r#"
+version: 1
+flow:
+  name: scripts
+  steps:
+    - name: log in
+      request: { method: POST, url: "https://example.com/login" }
+      scripts: { test: 'pm.environment.set("token", pm.response.json().token)' }
+    - name: me
+      request:
+        method: GET
+        url: "https://example.com/me/{{id}}"
+        headers: [{ name: Authorization, value: "Bearer {{token}}" }]
+      scripts: { pre_request: "bru.setVar('id', 7)" }
+    - name: other
+      request: { method: GET, url: "https://example.com/{{other}}" }
+"#;
+        assert_eq!(
+            issues(yaml),
+            [(Severity::Warning, "flow.steps[2].request.url".into())]
         );
     }
 

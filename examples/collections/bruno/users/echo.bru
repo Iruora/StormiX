@@ -1,0 +1,30 @@
+meta {
+  name: Echo a form
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/echo
+  body: multipartForm
+  auth: none
+}
+
+body:multipart-form {
+  q: a b
+  user: {{user}}
+  ~off: 1
+}
+
+script:pre-request {
+  req.setHeader("X-Request", "echo");
+}
+
+tests {
+  test("sent the form as multipart", function () {
+    expect(res.body.contentType).to.include("multipart/form-data");
+    expect(res.body.body).to.include('name="user"');
+    expect(res.body.body).to.include("demo");
+    expect(res.body.body).to.not.include('name="off"');
+  });
+}

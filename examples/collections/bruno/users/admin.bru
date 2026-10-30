@@ -1,0 +1,20 @@
+meta {
+  name: Admin with Basic auth
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/admin
+  body: none
+  auth: basic
+}
+
+auth:basic {
+  username: {{user}}
+  password: secret
+}
+
+assert {
+  res.status: eq 204
+}

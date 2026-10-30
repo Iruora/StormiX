@@ -1,0 +1,21 @@
+meta {
+  name: Read the profile
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/me
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.body.user: eq {{user}}
+  res.body.roles: contains tester
+  ~res.body.never: isDefined
+}

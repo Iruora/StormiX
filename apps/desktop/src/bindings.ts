@@ -10,10 +10,13 @@ export const commands = {
 	exampleTestFile: () => __TAURI_INVOKE<string>("example_test_file"),
 	validateTestFile: (text: string) => __TAURI_INVOKE<Validation_Serialize>("validate_test_file", { text }),
 	/**
-	 *  Runs the file's flow once, as a functional test. Refuses a file that
-	 *  does not parse or has errors; the editor already shows why.
+	 *  Runs the file's flow once, as a functional test, with `variables` (an
+	 *  environment) over the flow's own. Refuses a file that does not parse or
+	 *  has errors; the editor already shows why.
 	 */
-	runTestFile: (text: string) => typedError<FlowResult_Serialize, string>(__TAURI_INVOKE("run_test_file", { text })),
+	runTestFile: (text: string, variables: { [key in string]: string }) => typedError<FlowResult_Serialize, string>(__TAURI_INVOKE("run_test_file", { text, variables })),
+	/**  Imports a Postman `.json` export or a Bruno collection folder. */
+	importCollection: (path: string) => typedError<ImportedCollection, string>(__TAURI_INVOKE("import_collection", { path })),
 };
 
 /* Types */
@@ -41,11 +44,13 @@ export type Assertion_Serialize =
 
 export type Body = 
 /**  Sent as `application/json` unless a `Content-Type` header says otherwise. */
-({ json: unknown }) & { form?: never; raw?: never } | 
+({ json: unknown }) & { form?: never; multipart?: never; raw?: never } | 
 /**  Sent as-is, with the step's own `Content-Type` header. */
-({ raw: string }) & { form?: never; json?: never } | 
+({ raw: string }) & { form?: never; json?: never; multipart?: never } | 
 /**  Sent as `application/x-www-form-urlencoded`. */
-({ form: KeyValue[] }) & { json?: never; raw?: never };
+({ form: KeyValue[] }) & { json?: never; multipart?: never; raw?: never } | 
+/**  Sent as `multipart/form-data`, text fields only. */
+({ multipart: KeyValue[] }) & { form?: never; json?: never; raw?: never };
 
 /**  One assertion or extraction and how it went. */
 export type Check = Check_Serialize | Check_Deserialize;
@@ -145,6 +150,15 @@ export type HeaderAssertion_Serialize = {
 	name: string,
 	equals?: string,
 	contains?: string,
+};
+
+/**  A collection converted to a test file, ready for the editor. */
+export type ImportedCollection = {
+	yaml: string,
+	/**  Environments that came with it (Bruno), by name. */
+	environments: { [key in string]: { [key in string]: string } },
+	/**  What did not carry over. */
+	warnings: string[],
 };
 
 export type Issue = {
@@ -288,6 +302,8 @@ export type StepResult_Deserialize = {
 	extracted: { [key in string]: string },
 	/**  Things that did not fail the step but may explain a surprise. */
 	warnings: string[],
+	/**  What scripts printed with `console.log`. */
+	logs: string[],
 	/**  Set when no response came back: bad URL, connection refused, timeout. */
 	error?: string | null,
 	/**  Not run because an earlier step failed and the run stops at the first failure. */
@@ -310,6 +326,8 @@ export type StepResult_Serialize = {
 	extracted: { [key in string]: string },
 	/**  Things that did not fail the step but may explain a surprise. */
 	warnings: string[],
+	/**  What scripts printed with `console.log`. */
+	logs: string[],
 	/**  Set when no response came back: bad URL, connection refused, timeout. */
 	error: string | null,
 	/**  Not run because an earlier step failed and the run stops at the first failure. */
