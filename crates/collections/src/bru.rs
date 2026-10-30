@@ -41,7 +41,10 @@ pub fn parse(text: &str) -> Result<Vec<Block>, (usize, String)> {
         } else if let Some(name) = line.strip_suffix('[') {
             (name.trim(), "]")
         } else {
-            return Err((i + 1, format!("expected a block like `name {{`, found `{}`", line.trim())));
+            return Err((
+                i + 1,
+                format!("expected a block like `name {{`, found `{}`", line.trim()),
+            ));
         };
         if name.is_empty() || name.contains(char::is_whitespace) {
             return Err((i + 1, format!("`{}` is not a block name", line.trim())));
@@ -83,7 +86,12 @@ pub fn parse(text: &str) -> Result<Vec<Block>, (usize, String)> {
                     .find(": ")
                     .or_else(|| line.strip_suffix(':').map(str::len))
                     .or_else(|| line.find(':'))
-                    .ok_or_else(|| (start + n + 2, format!("expected `key: value`, found `{line}`")))?;
+                    .ok_or_else(|| {
+                        (
+                            start + n + 2,
+                            format!("expected `key: value`, found `{line}`"),
+                        )
+                    })?;
                 let key = unquote(line[..split].trim());
                 let value = line[split + 1..].trim().to_owned();
                 pairs.push((key, value, enabled));
@@ -100,7 +108,8 @@ pub fn parse(text: &str) -> Result<Vec<Block>, (usize, String)> {
 }
 
 fn dedent(line: &str) -> &str {
-    line.strip_prefix("  ").unwrap_or_else(|| line.strip_prefix(' ').unwrap_or(line))
+    line.strip_prefix("  ")
+        .unwrap_or_else(|| line.strip_prefix(' ').unwrap_or(line))
 }
 
 fn unquote(key: &str) -> String {
@@ -156,7 +165,10 @@ mod tests {
             [("Content-Type", "application/json"), ("a b", "c")]
         );
         assert_eq!(blocks[2].text(), "{\n  \"user\": \"{{user}}\"\n}");
-        assert_eq!(blocks[3].content, Content::List(vec!["password".into(), "token".into()]));
+        assert_eq!(
+            blocks[3].content,
+            Content::List(vec!["password".into(), "token".into()])
+        );
     }
 
     #[test]

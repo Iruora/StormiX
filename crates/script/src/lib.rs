@@ -93,12 +93,17 @@ pub fn run(source: &str, input: &ScriptInput<'_>, timeout: Duration) -> ScriptOu
     }
 }
 
-fn run_inner(source: &str, input: &ScriptInput<'_>, timeout: Duration) -> Result<ScriptOutput, String> {
+fn run_inner(
+    source: &str,
+    input: &ScriptInput<'_>,
+    timeout: Duration,
+) -> Result<ScriptOutput, String> {
     let runtime = Runtime::new().map_err(|e| format!("cannot start the script engine: {e}"))?;
     runtime.set_memory_limit(MEMORY_LIMIT);
     let deadline = Instant::now() + timeout;
     runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() > deadline)));
-    let context = Context::full(&runtime).map_err(|e| format!("cannot start the script engine: {e}"))?;
+    let context =
+        Context::full(&runtime).map_err(|e| format!("cannot start the script engine: {e}"))?;
 
     let input_json = serde_json::to_string(input).expect("script input always serializes");
     let result = context.with(|ctx| -> rquickjs::Result<String> {
@@ -108,7 +113,9 @@ fn run_inner(source: &str, input: &ScriptInput<'_>, timeout: Duration) -> Result
         run.call((source,))
     });
     match result {
-        Ok(json) => serde_json::from_str(&json).map_err(|e| format!("unexpected script result: {e}")),
+        Ok(json) => {
+            serde_json::from_str(&json).map_err(|e| format!("unexpected script result: {e}"))
+        }
         Err(_) if Instant::now() > deadline => Err(format!(
             "the script did not finish within {} ms",
             timeout.as_millis()

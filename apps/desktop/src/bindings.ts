@@ -41,11 +41,13 @@ export type Assertion_Serialize =
 
 export type Body = 
 /**  Sent as `application/json` unless a `Content-Type` header says otherwise. */
-({ json: unknown }) & { form?: never; raw?: never } | 
+({ json: unknown }) & { form?: never; multipart?: never; raw?: never } | 
 /**  Sent as-is, with the step's own `Content-Type` header. */
-({ raw: string }) & { form?: never; json?: never } | 
+({ raw: string }) & { form?: never; json?: never; multipart?: never } | 
 /**  Sent as `application/x-www-form-urlencoded`. */
-({ form: KeyValue[] }) & { json?: never; raw?: never };
+({ form: KeyValue[] }) & { json?: never; multipart?: never; raw?: never } | 
+/**  Sent as `multipart/form-data`, text fields only. */
+({ multipart: KeyValue[] }) & { form?: never; json?: never; raw?: never };
 
 /**  One assertion or extraction and how it went. */
 export type Check = Check_Serialize | Check_Deserialize;
@@ -288,6 +290,8 @@ export type StepResult_Deserialize = {
 	extracted: { [key in string]: string },
 	/**  Things that did not fail the step but may explain a surprise. */
 	warnings: string[],
+	/**  What scripts printed with `console.log`. */
+	logs: string[],
 	/**  Set when no response came back: bad URL, connection refused, timeout. */
 	error?: string | null,
 	/**  Not run because an earlier step failed and the run stops at the first failure. */
@@ -310,6 +314,8 @@ export type StepResult_Serialize = {
 	extracted: { [key in string]: string },
 	/**  Things that did not fail the step but may explain a surprise. */
 	warnings: string[],
+	/**  What scripts printed with `console.log`. */
+	logs: string[],
 	/**  Set when no response came back: bad URL, connection refused, timeout. */
 	error: string | null,
 	/**  Not run because an earlier step failed and the run stops at the first failure. */

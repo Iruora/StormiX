@@ -241,7 +241,11 @@ async fn scripts_set_variables_change_requests_and_add_checks() {
         .collect();
     assert_eq!(
         checks,
-        [("user", true), ("wrong id", false), ("test script ran", false)]
+        [
+            ("user", true),
+            ("wrong id", false),
+            ("test script ran", false)
+        ]
     );
     assert_eq!(
         profile.checks[2].message.as_deref(),

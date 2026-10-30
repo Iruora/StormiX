@@ -14,6 +14,7 @@ path = "src/main.rs"
 clap.workspace = true
 serde_json.workspace = true
 serde_yaml_ng.workspace = true
+stormix-collections.workspace = true
 stormix-engine.workspace = true
 stormix-flow.workspace = true
 tokio.workspace = true

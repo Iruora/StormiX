@@ -9,16 +9,19 @@ use stormix_engine::{junit_report, FlowResult, RunOptions, Runner, Variables};
 use stormix_flow::{Duration, Severity};
 
 use crate::vars::{parse_var, read_env};
-use crate::{read_test_file, Format};
+use crate::{print_warnings, source, Format};
 
 #[derive(Args)]
 pub struct RunArgs {
+    /// A test file, a Postman collection (.json) or a Bruno collection folder.
     file: PathBuf,
     /// Set a variable, overriding the file and the environment. Repeatable.
     #[arg(long = "var", value_name = "NAME=VALUE", value_parser = parse_var)]
     vars: Vec<(String, String)>,
-    /// Variables from a YAML or JSON file, or a Postman environment export.
-    #[arg(long, value_name = "FILE")]
+    /// Variables from a YAML or JSON file, a Postman environment export or
+    /// a Bruno environment (.bru). For a Bruno collection, the name of one
+    /// of its environments works too.
+    #[arg(long, value_name = "FILE|NAME")]
     env: Option<PathBuf>,
     /// Also write a JUnit XML report here, for CI test tabs.
     #[arg(long, value_name = "FILE")]
@@ -40,11 +43,16 @@ pub struct RunArgs {
     /// Report redirects instead of following them.
     #[arg(long)]
     no_follow_redirects: bool,
+    /// Time allowed for each pre-request or test script.
+    #[arg(long, default_value = "5s")]
+    script_timeout: Duration,
 }
 
 /// Exit codes: 0 every check passed, 1 something failed, 2 the run could not start.
 pub fn run(args: RunArgs) -> Result<ExitCode, String> {
-    let test = read_test_file(&args.file)?;
+    let source = source::load(&args.file)?;
+    print_warnings(&source.warnings);
+    let test = &source.test;
     let errors: Vec<_> = test
         .validate()
         .into_iter()
@@ -63,7 +71,27 @@ pub fn run(args: RunArgs) -> Result<ExitCode, String> {
     }
 
     let mut vars = match &args.env {
-        Some(path) => read_env(path)?,
+        Some(path) if path.exists() => read_env(path)?,
+        Some(name) => {
+            let name = name.to_string_lossy();
+            match source.environments.get(name.as_ref()) {
+                Some(env) => {
+                    let mut vars = Variables::new();
+                    vars.extend(env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+                    vars
+                }
+                None if source.environments.is_empty() => {
+                    return Err(format!("cannot read {name}: no such file"));
+                }
+                None => {
+                    let names: Vec<_> = source.environments.keys().map(String::as_str).collect();
+                    return Err(format!(
+                        "{name} is neither a file nor one of the collection's environments ({})",
+                        names.join(", ")
+                    ));
+                }
+            }
+        }
         None => Variables::new(),
     };
     vars.extend(args.vars);
@@ -73,6 +101,7 @@ pub fn run(args: RunArgs) -> Result<ExitCode, String> {
         insecure: args.insecure,
         follow_redirects: !args.no_follow_redirects,
         bail: args.bail,
+        script_timeout: args.script_timeout.into(),
     })
     .map_err(|e| e.to_string())?;
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -155,6 +184,12 @@ fn render_text(result: &FlowResult, verbose: bool) -> String {
         }
         for warning in &step.warnings {
             let _ = writeln!(out, "      ! {warning}");
+        }
+        // Script output helps most when something failed.
+        if verbose || !step.passed() {
+            for line in &step.logs {
+                let _ = writeln!(out, "      > {}", truncate(line, 200));
+            }
         }
     }
 

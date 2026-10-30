@@ -4,9 +4,12 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use stormix_flow::{Severity, TestFile};
+use stormix_flow::Severity;
+#[cfg(test)]
+use stormix_flow::TestFile;
 
 mod run;
+mod source;
 mod vars;
 
 const EXAMPLE: &str = include_str!("../../../examples/login.stormix.yaml");
@@ -24,7 +27,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Check a test file without sending any request.
+    /// Check a test file or collection without sending any request.
     Validate {
         file: PathBuf,
         #[arg(long, value_enum, default_value_t = Format::Text)]
@@ -33,8 +36,20 @@ enum Command {
         #[arg(long)]
         strict: bool,
     },
-    /// Run the flow once and check every assertion, as a functional test.
+    /// Run a test file or collection once and check every assertion and
+    /// script test, as a functional test.
     Run(run::RunArgs),
+    /// Convert a Postman collection (.json) or Bruno collection (folder)
+    /// into a Stormix test file.
+    Import {
+        collection: PathBuf,
+        /// Write the test file here instead of printing it.
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+        /// Replace the output file if it exists.
+        #[arg(long)]
+        force: bool,
+    },
     /// Write an example test file to start from.
     Init {
         #[arg(default_value = "stormix.yaml")]
@@ -60,6 +75,11 @@ fn main() -> ExitCode {
             strict,
         } => validate(&file, format, strict),
         Command::Run(args) => run::run(args),
+        Command::Import {
+            collection,
+            output,
+            force,
+        } => import(&collection, output.as_deref(), force),
         Command::Init { file, force } => init(&file, force),
     };
     match result {
@@ -71,15 +91,17 @@ fn main() -> ExitCode {
     }
 }
 
-fn read_test_file(file: &Path) -> Result<TestFile, String> {
-    let text = std::fs::read_to_string(file)
-        .map_err(|e| format!("cannot read {}: {e}", file.display()))?;
-    TestFile::from_yaml(&text).map_err(|e| format!("{}: {e}", file.display()))
+fn print_warnings(warnings: &[String]) {
+    for warning in warnings {
+        eprintln!("warning: {warning}");
+    }
 }
 
 /// Exit codes: 0 clean, 1 issues that fail the check, 2 the file could not be read.
 fn validate(file: &Path, format: Format, strict: bool) -> Result<ExitCode, String> {
-    let test = read_test_file(file)?;
+    let source = source::load(file)?;
+    print_warnings(&source.warnings);
+    let test = source.test;
     let issues = test.validate();
 
     match format {
@@ -116,6 +138,47 @@ fn validate(file: &Path, format: Format, strict: bool) -> Result<ExitCode, Strin
     })
 }
 
+fn import(collection: &Path, output: Option<&Path>, force: bool) -> Result<ExitCode, String> {
+    if !source::is_collection(collection) {
+        return Err(format!(
+            "{} is not a collection: expected a Postman .json export or a Bruno folder",
+            collection.display()
+        ));
+    }
+    let source = source::load(collection)?;
+    print_warnings(&source.warnings);
+    let header = format!(
+        "# Imported from {} by `stormix import`.\n",
+        collection.display()
+    );
+    let yaml = format!("{header}{}", source.test.to_yaml());
+    let Some(output) = output else {
+        print!("{yaml}");
+        return Ok(ExitCode::SUCCESS);
+    };
+    if output.exists() && !force {
+        return Err(format!(
+            "{} already exists; pass --force to replace it",
+            output.display()
+        ));
+    }
+    std::fs::write(output, yaml).map_err(|e| format!("cannot write {}: {e}", output.display()))?;
+    eprintln!(
+        "Wrote {} ({} steps).",
+        output.display(),
+        source.test.flow.steps.len()
+    );
+    if !source.environments.is_empty() {
+        let names: Vec<_> = source.environments.keys().map(String::as_str).collect();
+        eprintln!(
+            "The collection has environments ({}); pass one with --env {}/environments/<name>.bru.",
+            names.join(", "),
+            collection.display()
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 fn init(file: &Path, force: bool) -> Result<ExitCode, String> {
     if file.exists() && !force {
         return Err(format!(
@@ -149,6 +212,21 @@ mod tests {
         assert!(init(&path, false).is_err());
         assert!(init(&path, true).is_ok());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), EXAMPLE);
+    }
+
+    #[test]
+    fn imports_collections_to_test_files_that_load_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("bruno.yaml");
+        let bruno = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/collections/bruno");
+        assert!(import(&bruno, Some(&out), false).is_ok());
+        assert!(import(&bruno, Some(&out), false).is_err());
+
+        let back = source::load(&out).unwrap();
+        assert_eq!(back.test, source::load(&bruno).unwrap().test);
+        assert!(import(&out, None, false)
+            .unwrap_err()
+            .contains("is not a collection"));
     }
 
     #[test]

@@ -43,7 +43,10 @@ async fn me(headers: HeaderMap) -> (StatusCode, Json<Value>) {
 async fn user(Path(id): Path<u32>) -> (StatusCode, Json<Value>) {
     match id {
         7 => (StatusCode::OK, Json(json!({ "id": 7, "name": "Ada" }))),
-        _ => (StatusCode::NOT_FOUND, Json(json!({ "error": "no such user" }))),
+        _ => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "no such user" })),
+        ),
     }
 }
 

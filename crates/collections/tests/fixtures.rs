@@ -148,7 +148,10 @@ fn bad_input_is_reported_with_its_location() {
 
     std::fs::write(dir.path().join("broken.bru"), "meta {\n  name: x\n").unwrap();
     let err = import(dir.path()).unwrap_err().to_string();
-    assert!(err.ends_with("broken.bru:1: the `meta` block is never closed"), "{err}");
+    assert!(
+        err.ends_with("broken.bru:1: the `meta` block is never closed"),
+        "{err}"
+    );
 
     let json = dir.path().join("old.json");
     std::fs::write(
@@ -156,5 +159,8 @@ fn bad_input_is_reported_with_its_location() {
         r#"{"info":{"name":"x","schema":"https://schema.getpostman.com/json/collection/v1.0.0/collection.json"}}"#,
     )
     .unwrap();
-    assert!(import(&json).unwrap_err().to_string().contains("Collection v2.1"));
+    assert!(import(&json)
+        .unwrap_err()
+        .to_string()
+        .contains("Collection v2.1"));
 }

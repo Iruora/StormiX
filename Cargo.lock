@@ -3764,6 +3764,7 @@ dependencies = [
  "clap",
  "serde_json",
  "serde_yaml_ng",
+ "stormix-collections",
  "stormix-engine",
  "stormix-flow",
  "tempfile",

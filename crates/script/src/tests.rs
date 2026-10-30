@@ -12,7 +12,11 @@ fn request() -> ScriptRequest {
 fn response(status: u16, body: &str) -> ScriptResponse {
     ScriptResponse {
         status,
-        status_text: if status == 200 { "OK".into() } else { "Not Found".into() },
+        status_text: if status == 200 {
+            "OK".into()
+        } else {
+            "Not Found".into()
+        },
         headers: vec![
             ("Content-Type".into(), "application/json".into()),
             ("Set-Cookie".into(), "a=1".into()),
@@ -22,10 +26,14 @@ fn response(status: u16, body: &str) -> ScriptResponse {
     }
 }
 
-const USER: &str = r#"{"id":7,"name":"Ada","tags":["admin","qa"],"profile":{"active":true},"empty":[]}"#;
+const USER: &str =
+    r#"{"id":7,"name":"Ada","tags":["admin","qa"],"profile":{"active":true},"empty":[]}"#;
 
 fn vars() -> BTreeMap<String, String> {
-    BTreeMap::from([("base".into(), "https://api.test".into()), ("n".into(), "1".into())])
+    BTreeMap::from([
+        ("base".into(), "https://api.test".into()),
+        ("n".into(), "1".into()),
+    ])
 }
 
 fn pre(source: &str) -> ScriptOutput {
@@ -115,12 +123,16 @@ fn bruno_request_helpers() {
     assert_eq!(out.request.url, "https://api.test/users/7?v=2");
     assert_eq!(out.request.method, "POST");
     assert_eq!(out.request.body.as_deref(), Some(r#"{"a":1}"#));
-    assert!(out.request.headers.contains(&("Authorization".into(), "Bearer 42".into())));
+    assert!(out
+        .request
+        .headers
+        .contains(&("Authorization".into(), "Bearer 42".into())));
 }
 
 #[test]
 fn postman_tests_and_chai_expect() {
-    let out = test(r#"
+    let out = test(
+        r#"
         pm.test("status", () => pm.response.to.have.status(200));
         pm.test("ok", () => { pm.response.to.be.ok; pm.response.to.be.json; });
         pm.test("header", () => pm.response.to.have.header("content-type"));
@@ -142,7 +154,8 @@ fn postman_tests_and_chai_expect() {
         pm.test("fails", () => pm.expect(pm.response.json().name).to.eql("Bob"));
         pm.test("wrong status", () => pm.response.to.have.status(201));
         pm.environment.set("userId", pm.response.json().id);
-    "#);
+    "#,
+    );
     assert_eq!(out.error, None);
     assert_eq!(
         outcomes(&out),
@@ -168,13 +181,15 @@ fn postman_tests_and_chai_expect() {
 
 #[test]
 fn legacy_postman_globals() {
-    let out = test(r#"
+    let out = test(
+        r#"
         tests["Status code is 200"] = responseCode.code === 200;
         tests["Has Ada"] = responseBody.has ? false : responseBody.indexOf("Ada") >= 0;
         tests["Is slow"] = responseTime > 1000;
         var data = JSON.parse(responseBody);
         postman.setEnvironmentVariable("name", data.name);
-    "#);
+    "#,
+    );
     assert_eq!(out.error, None);
     assert_eq!(
         outcomes(&out),
@@ -189,14 +204,16 @@ fn legacy_postman_globals() {
 
 #[test]
 fn bruno_tests_and_res() {
-    let out = test(r#"
+    let out = test(
+        r#"
         test("status", () => expect(res.getStatus()).to.equal(200));
         test("body", () => {
             expect(res.body.name).to.equal("Ada");
             expect(res.getHeader("content-type")).to.contain("json");
         });
         bru.setVar("first_tag", res.body.tags[0]);
-    "#);
+    "#,
+    );
     assert_eq!(out.error, None);
     assert!(out.tests.iter().all(|t| t.passed), "{:?}", out.tests);
     assert_eq!(out.variables["first_tag"], Some("admin".into()));
@@ -204,7 +221,8 @@ fn bruno_tests_and_res() {
 
 #[test]
 fn bruno_assert_operators() {
-    let out = test(r#"
+    let out = test(
+        r#"
         test("1", () => __bruAssert(res.status, "eq", "200"));
         test("2", () => __bruAssert(res.body.name, "eq", "Ada"));
         test("3", () => __bruAssert(res.body.name, "eq", "'Ada'"));
@@ -217,17 +235,25 @@ fn bruno_assert_operators() {
         test("10", () => __bruAssert(res.body.id, "in", "6, 7"));
         test("11", () => __bruAssert(res.body.id, "between", "1, 10"));
         test("12", () => __bruAssert(res.body.name, "neq", "Ada"));
-    "#);
-    let failed: Vec<_> = out.tests.iter().filter(|t| !t.passed).map(|t| t.name.as_str()).collect();
+    "#,
+    );
+    let failed: Vec<_> = out
+        .tests
+        .iter()
+        .filter(|t| !t.passed)
+        .map(|t| t.name.as_str())
+        .collect();
     assert_eq!(failed, ["12"], "{:?}", out.tests);
 }
 
 #[test]
 fn errors_are_reported_and_earlier_tests_kept() {
-    let out = test(r#"
+    let out = test(
+        r#"
         pm.test("before", () => {});
         undefinedFunction();
-    "#);
+    "#,
+    );
     assert_eq!(outcomes(&out), [("before".into(), true, None)]);
     assert_eq!(
         out.error.as_deref(),

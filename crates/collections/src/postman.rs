@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 
 use serde_json::Value;
-use stormix_flow::{Body, Flow, Header, KeyValue, Request, Scripts, Step, TestFile, CURRENT_VERSION};
+use stormix_flow::{
+    Body, Flow, Header, KeyValue, Request, Scripts, Step, TestFile, CURRENT_VERSION,
+};
 
 use crate::common::{self, Auth};
 use crate::{ImportError, Imported};
@@ -39,7 +41,9 @@ pub fn from_json(text: &str) -> Result<Imported, ImportError> {
         importer.item(item, &scope);
     }
     if importer.steps.is_empty() {
-        importer.warnings.push("the collection has no requests".into());
+        importer
+            .warnings
+            .push("the collection has no requests".into());
     }
 
     let variables = array(root.get("variable"))
@@ -100,7 +104,8 @@ impl Importer {
             return;
         }
         let Some(request) = item.get("request") else {
-            self.warnings.push(format!("`{name}` has no request; skipped"));
+            self.warnings
+                .push(format!("`{name}` has no request; skipped"));
             return;
         };
 
@@ -112,22 +117,28 @@ impl Importer {
             .collect::<Vec<_>>()
             .join(" / ");
         if let Some(mut built) = self.request(request, &step_name) {
-                let mut pre_request = scope.pre_request.clone();
-                pre_request.extend(events(item, "prerequest"));
-                let mut test = scope.test.clone();
-                test.extend(events(item, "test"));
-                let auth = auth(request.get("auth")).unwrap_or_else(|| scope.auth.clone());
-                common::apply_auth(&auth, &mut built, &mut pre_request, &step_name, &mut self.warnings);
-                self.steps.push(Step {
-                    name: step_name,
-                    request: built,
-                    extract: BTreeMap::new(),
-                    assertions: Vec::new(),
-                    scripts: Scripts {
-                        pre_request: common::join_scripts(pre_request),
-                        test: common::join_scripts(test),
-                    },
-                });
+            let mut pre_request = scope.pre_request.clone();
+            pre_request.extend(events(item, "prerequest"));
+            let mut test = scope.test.clone();
+            test.extend(events(item, "test"));
+            let auth = auth(request.get("auth")).unwrap_or_else(|| scope.auth.clone());
+            common::apply_auth(
+                &auth,
+                &mut built,
+                &mut pre_request,
+                &step_name,
+                &mut self.warnings,
+            );
+            self.steps.push(Step {
+                name: step_name,
+                request: built,
+                extract: BTreeMap::new(),
+                assertions: Vec::new(),
+                scripts: Scripts {
+                    pre_request: common::join_scripts(pre_request),
+                    test: common::join_scripts(test),
+                },
+            });
         }
     }
 
@@ -141,10 +152,14 @@ impl Importer {
                 body: None,
             });
         }
-        let method_name = request.get("method").and_then(Value::as_str).unwrap_or("GET");
+        let method_name = request
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or("GET");
         let Some(method) = common::method(method_name) else {
-            self.warnings
-                .push(format!("`{step}`: the {method_name} method is not supported; skipped"));
+            self.warnings.push(format!(
+                "`{step}`: the {method_name} method is not supported; skipped"
+            ));
             return None;
         };
         let mut built = Request {
@@ -190,7 +205,10 @@ impl Importer {
             "urlencoded" => request.body = Some(Body::Form(fields(body.get("urlencoded")))),
             "formdata" => {
                 let all = array(body.get("formdata"));
-                if all.iter().any(|f| !disabled(f) && f.get("type").and_then(Value::as_str) == Some("file")) {
+                if all
+                    .iter()
+                    .any(|f| !disabled(f) && f.get("type").and_then(Value::as_str) == Some("file"))
+                {
                     self.warnings.push(format!(
                         "`{step}`: file fields in form-data are not supported yet; they are left out"
                     ));
@@ -251,7 +269,11 @@ fn url(url: Option<&Value>) -> String {
 /// For exports that only have the parts of the URL, not `raw`.
 fn built_url(url: &Value) -> String {
     let join = |v: Option<&Value>, sep: &str| match v {
-        Some(Value::Array(parts)) => parts.iter().map(|p| text_of(Some(p))).collect::<Vec<_>>().join(sep),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .map(|p| text_of(Some(p)))
+            .collect::<Vec<_>>()
+            .join(sep),
         other => text_of(other),
     };
     let mut out = String::new();
@@ -272,7 +294,13 @@ fn built_url(url: &Value) -> String {
     let query: Vec<String> = array(url.get("query"))
         .iter()
         .filter(|q| !disabled(q))
-        .filter_map(|q| Some(format!("{}={}", q.get("key")?.as_str()?, text_of(q.get("value")))))
+        .filter_map(|q| {
+            Some(format!(
+                "{}={}",
+                q.get("key")?.as_str()?,
+                text_of(q.get("value"))
+            ))
+        })
         .collect();
     if !query.is_empty() {
         out.push('?');
@@ -323,7 +351,11 @@ fn events(item: &Value, listen: &str) -> Option<String> {
         .iter()
         .filter(|e| !disabled(e) && e.get("listen").and_then(Value::as_str) == Some(listen))
         .map(|e| match e.pointer("/script/exec") {
-            Some(Value::Array(lines)) => lines.iter().map(|l| text_of(Some(l))).collect::<Vec<_>>().join("\n"),
+            Some(Value::Array(lines)) => lines
+                .iter()
+                .map(|l| text_of(Some(l)))
+                .collect::<Vec<_>>()
+                .join("\n"),
             other => text_of(other),
         })
         .filter(|s| !s.trim().is_empty())

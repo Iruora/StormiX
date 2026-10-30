@@ -9,8 +9,15 @@ pub enum Auth {
     #[default]
     None,
     Bearer(String),
-    Basic { username: String, password: String },
-    ApiKey { key: String, value: String, in_query: bool },
+    Basic {
+        username: String,
+        password: String,
+    },
+    ApiKey {
+        key: String,
+        value: String,
+        in_query: bool,
+    },
     /// OAuth 2, digest, AWS and the rest: named so the warning can say which.
     Unsupported(String),
 }
@@ -49,7 +56,10 @@ pub fn default_header(request: &mut Request, name: &str, value: &str) {
 pub fn inherit_headers(request: &mut Request, inherited: &[Header]) {
     let own = std::mem::take(&mut request.headers);
     for header in inherited {
-        if !own.iter().any(|h| h.name.eq_ignore_ascii_case(&header.name)) {
+        if !own
+            .iter()
+            .any(|h| h.name.eq_ignore_ascii_case(&header.name))
+        {
             request.headers.push(header.clone());
         }
     }
@@ -107,10 +117,7 @@ pub fn apply_auth(
 /// request). Each keeps its own scope, so two that declare the same
 /// `const` do not clash.
 pub fn join_scripts(parts: Vec<String>) -> Option<String> {
-    let parts: Vec<String> = parts
-        .into_iter()
-        .filter(|p| !p.trim().is_empty())
-        .collect();
+    let parts: Vec<String> = parts.into_iter().filter(|p| !p.trim().is_empty()).collect();
     match parts.len() {
         0 => None,
         1 => parts.into_iter().next(),
@@ -173,12 +180,18 @@ mod tests {
             path_variables("{{base}}/users/:id/posts?x=:id", &vars),
             "{{base}}/users/7/posts?x=:id"
         );
-        assert_eq!(path_variables("http://h:80/a/:idx", &vars), "http://h:80/a/:idx");
+        assert_eq!(
+            path_variables("http://h:80/a/:idx", &vars),
+            "http://h:80/a/:idx"
+        );
     }
 
     #[test]
     fn scripts_keep_their_own_scope() {
-        assert_eq!(join_scripts(vec![" ".into(), "a()".into()]).as_deref(), Some("a()"));
+        assert_eq!(
+            join_scripts(vec![" ".into(), "a()".into()]).as_deref(),
+            Some("a()")
+        );
         assert_eq!(
             join_scripts(vec!["const x = 1;".into(), "const x = 2;".into()]).as_deref(),
             Some("(function () {\nconst x = 1;\n})();\n(function () {\nconst x = 2;\n})();")

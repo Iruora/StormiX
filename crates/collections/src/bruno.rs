@@ -5,7 +5,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use stormix_flow::{Body, Flow, Header, KeyValue, Request, Scripts, Step, TestFile, CURRENT_VERSION};
+use stormix_flow::{
+    Body, Flow, Header, KeyValue, Request, Scripts, Step, TestFile, CURRENT_VERSION,
+};
 
 use crate::bru::{self, Block, Content};
 use crate::common::{self, js_string, Auth};
@@ -15,12 +17,35 @@ const METHODS: [&str; 7] = ["get", "post", "put", "patch", "delete", "head", "op
 
 /// Operators that take no argument, like `res.body.id: isNumber`.
 const UNARY: [&str; 12] = [
-    "isEmpty", "isNotEmpty", "isNull", "isUndefined", "isDefined", "isTruthy", "isFalsy",
-    "isJson", "isNumber", "isString", "isBoolean", "isArray",
+    "isEmpty",
+    "isNotEmpty",
+    "isNull",
+    "isUndefined",
+    "isDefined",
+    "isTruthy",
+    "isFalsy",
+    "isJson",
+    "isNumber",
+    "isString",
+    "isBoolean",
+    "isArray",
 ];
 const BINARY: [&str; 15] = [
-    "eq", "neq", "gt", "gte", "lt", "lte", "in", "notIn", "contains", "notContains", "length",
-    "matches", "notMatches", "startsWith", "endsWith",
+    "eq",
+    "neq",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "in",
+    "notIn",
+    "contains",
+    "notContains",
+    "length",
+    "matches",
+    "notMatches",
+    "startsWith",
+    "endsWith",
 ];
 
 /// Imports the collection in `dir`.
@@ -28,11 +53,12 @@ pub fn from_dir(dir: &Path) -> Result<Imported, ImportError> {
     let config = dir.join("bruno.json");
     let name = if config.is_file() {
         let text = read(&config)?;
-        let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| ImportError::Bru {
-            file: config.clone(),
-            line: e.line(),
-            message: e.to_string(),
-        })?;
+        let json: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| ImportError::Bru {
+                file: config.clone(),
+                line: e.line(),
+                message: e.to_string(),
+            })?;
         json.get("name").and_then(|n| n.as_str()).map(str::to_owned)
     } else if bru_files(dir)?.is_empty() {
         return Err(ImportError::NotBruno(dir.to_owned()));
@@ -62,7 +88,9 @@ pub fn from_dir(dir: &Path) -> Result<Imported, ImportError> {
     }
     importer.walk(dir, &scope)?;
     if importer.steps.is_empty() {
-        importer.warnings.push("the collection has no requests".into());
+        importer
+            .warnings
+            .push("the collection has no requests".into());
     }
 
     let mut environments = BTreeMap::new();
@@ -109,7 +137,11 @@ fn parse_environment(
 ) -> Result<(BTreeMap<String, String>, Vec<String>), ImportError> {
     let blocks = parse(text, file)?;
     let vars = bru::find(&blocks, "vars")
-        .map(|b| b.pairs().map(|(k, v)| (k.to_owned(), v.to_owned())).collect())
+        .map(|b| {
+            b.pairs()
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect()
+        })
         .unwrap_or_default();
     let secrets = match bru::find(&blocks, "vars:secret").map(|b| &b.content) {
         Some(Content::List(names)) => names
@@ -180,12 +212,24 @@ impl Importer {
 
         let mut folders = Vec::new();
         for entry in entries(dir)? {
-            let name = entry.file_name().unwrap_or_default().to_string_lossy().into_owned();
-            if !entry.is_dir() || name.starts_with('.') || name == "node_modules" || (name == "environments" && scope.path.is_empty()) {
+            let name = entry
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            if !entry.is_dir()
+                || name.starts_with('.')
+                || name == "node_modules"
+                || (name == "environments" && scope.path.is_empty())
+            {
                 continue;
             }
             let folder_file = entry.join("folder.bru");
-            let blocks = if folder_file.is_file() { parse_file(&folder_file)? } else { Vec::new() };
+            let blocks = if folder_file.is_file() {
+                parse_file(&folder_file)?
+            } else {
+                Vec::new()
+            };
             folders.push((seq(&blocks), name, entry, blocks));
         }
         folders.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
@@ -215,20 +259,25 @@ impl Importer {
             .join(" / ");
         let kind = meta.and_then(|m| m.get("type")).unwrap_or("http");
         if !matches!(kind, "http" | "graphql") {
-            self.warnings
-                .push(format!("`{step}`: {kind} requests are not supported; skipped"));
+            self.warnings.push(format!(
+                "`{step}`: {kind} requests are not supported; skipped"
+            ));
             return;
         }
         let Some(http) = blocks.iter().find(|b| METHODS.contains(&b.name.as_str())) else {
-            self.warnings.push(format!("`{step}` has no method block, like `get {{ ... }}`; skipped"));
+            self.warnings.push(format!(
+                "`{step}` has no method block, like `get {{ ... }}`; skipped"
+            ));
             return;
         };
         let method = common::method(&http.name).expect("METHODS are all supported");
 
         let mut url = http.get("url").unwrap_or_default().to_owned();
         if let Some(params) = bru::find(blocks, "params:path") {
-            let vars: Vec<(String, String)> =
-                params.pairs().map(|(k, v)| (k.to_owned(), v.to_owned())).collect();
+            let vars: Vec<(String, String)> = params
+                .pairs()
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect();
             url = common::path_variables(&url, &vars);
         }
         let mut request = Request {
@@ -241,7 +290,12 @@ impl Importer {
             common_headers(&mut request.headers, headers);
         }
         common::inherit_headers(&mut request, &scope.headers);
-        self.body(http.get("body").unwrap_or("none"), blocks, &mut request, &step);
+        self.body(
+            http.get("body").unwrap_or("none"),
+            blocks,
+            &mut request,
+            &step,
+        );
 
         let mut pre_request = scope.vars.clone();
         pre_request.extend(var_lines(blocks));
@@ -252,7 +306,13 @@ impl Importer {
             mode => auth(mode, blocks),
         };
         if let Some(auth) = auth {
-            common::apply_auth(&auth, &mut request, &mut pre_request, &step, &mut self.warnings);
+            common::apply_auth(
+                &auth,
+                &mut request,
+                &mut pre_request,
+                &step,
+                &mut self.warnings,
+            );
         }
 
         // Bruno's order after the response: variables, scripts, assertions, tests.
@@ -267,7 +327,13 @@ impl Importer {
         test.extend(scope.post_response.iter().cloned());
         push_text(&mut test, blocks, "script:post-response");
         if let Some(asserts) = bru::find(blocks, "assert") {
-            test.push(asserts.pairs().map(|(k, v)| assertion(k, v)).collect::<Vec<_>>().join("\n"));
+            test.push(
+                asserts
+                    .pairs()
+                    .map(|(k, v)| assertion(k, v))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
         }
         test.extend(scope.tests.iter().cloned());
         push_text(&mut test, blocks, "tests");
@@ -303,8 +369,9 @@ impl Importer {
             }
             "multipartForm" => {
                 if let Some(form) = bru::find(blocks, "body:multipart-form") {
-                    let (files, fields): (Vec<_>, Vec<_>) =
-                        key_values(form).into_iter().partition(|kv| kv.value.starts_with("@file("));
+                    let (files, fields): (Vec<_>, Vec<_>) = key_values(form)
+                        .into_iter()
+                        .partition(|kv| kv.value.starts_with("@file("));
                     if !files.is_empty() {
                         self.warnings.push(format!(
                             "`{step}`: file fields in multipart forms are not supported yet; they are left out"
@@ -352,7 +419,12 @@ fn assertion(expr: &str, rule: &str) -> String {
 
 fn auth(mode: &str, blocks: &[Block]) -> Option<Auth> {
     let block = bru::find(blocks, &format!("auth:{mode}"));
-    let get = |key: &str| block.and_then(|b| b.get(key)).unwrap_or_default().to_owned();
+    let get = |key: &str| {
+        block
+            .and_then(|b| b.get(key))
+            .unwrap_or_default()
+            .to_owned()
+    };
     Some(match mode {
         "inherit" => return None,
         "none" => Auth::None,
@@ -375,7 +447,13 @@ fn var_lines(blocks: &[Block]) -> Option<String> {
     let vars = bru::find(blocks, "vars:pre-request")?;
     let lines: Vec<String> = vars
         .pairs()
-        .map(|(k, v)| format!("bru.setVar({}, bru.interpolate({}));", js_string(k), js_string(v)))
+        .map(|(k, v)| {
+            format!(
+                "bru.setVar({}, bru.interpolate({}));",
+                js_string(k),
+                js_string(v)
+            )
+        })
         .collect();
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
@@ -446,5 +524,8 @@ fn bru_files(dir: &Path) -> Result<Vec<PathBuf>, ImportError> {
 }
 
 fn stem(path: &Path) -> String {
-    path.file_stem().unwrap_or_default().to_string_lossy().into_owned()
+    path.file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
 }

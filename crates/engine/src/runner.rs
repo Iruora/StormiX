@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 use reqwest::header::CONTENT_TYPE;
 use reqwest::redirect::Policy;
 use stormix_flow::{Body, Flow, KeyValue, Request, Step};
-use stormix_script::{self as script, Phase, ScriptInput, ScriptRequest, ScriptResponse, TestOutcome};
+use stormix_script::{
+    self as script, Phase, ScriptInput, ScriptRequest, ScriptResponse, TestOutcome,
+};
 
 use crate::checks::{self, Response};
 use crate::{Check, FlowResult, StepResult, Variables};
@@ -226,7 +228,12 @@ impl Runner {
                 status_text: status.canonical_reason().unwrap_or_default().to_owned(),
                 headers: headers
                     .iter()
-                    .map(|(k, v)| (k.as_str().to_owned(), String::from_utf8_lossy(v.as_bytes()).into_owned()))
+                    .map(|(k, v)| {
+                        (
+                            k.as_str().to_owned(),
+                            String::from_utf8_lossy(v.as_bytes()).into_owned(),
+                        )
+                    })
                     .collect(),
                 body: String::from_utf8_lossy(&body).into_owned(),
                 time_ms: result.duration_ms,
@@ -251,7 +258,9 @@ impl Runner {
                 }
             }
             apply_variables(vars, &out.variables);
-            result.checks.extend(script_checks("test script", out.tests, out.error));
+            result
+                .checks
+                .extend(script_checks("test script", out.tests, out.error));
             result.logs.extend(out.logs);
         }
         result
