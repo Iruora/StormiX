@@ -111,6 +111,10 @@ pub fn run(args: RunArgs) -> Result<ExitCode, String> {
     let result = runtime.block_on(runner.run(&test.flow, &vars));
 
     if let Some(path) = &args.junit {
+        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        }
         std::fs::write(path, junit_report(&result))
             .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     }

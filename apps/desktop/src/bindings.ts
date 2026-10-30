@@ -10,10 +10,13 @@ export const commands = {
 	exampleTestFile: () => __TAURI_INVOKE<string>("example_test_file"),
 	validateTestFile: (text: string) => __TAURI_INVOKE<Validation_Serialize>("validate_test_file", { text }),
 	/**
-	 *  Runs the file's flow once, as a functional test. Refuses a file that
-	 *  does not parse or has errors; the editor already shows why.
+	 *  Runs the file's flow once, as a functional test, with `variables` (an
+	 *  environment) over the flow's own. Refuses a file that does not parse or
+	 *  has errors; the editor already shows why.
 	 */
-	runTestFile: (text: string) => typedError<FlowResult_Serialize, string>(__TAURI_INVOKE("run_test_file", { text })),
+	runTestFile: (text: string, variables: { [key in string]: string }) => typedError<FlowResult_Serialize, string>(__TAURI_INVOKE("run_test_file", { text, variables })),
+	/**  Imports a Postman `.json` export or a Bruno collection folder. */
+	importCollection: (path: string) => typedError<ImportedCollection, string>(__TAURI_INVOKE("import_collection", { path })),
 };
 
 /* Types */
@@ -147,6 +150,15 @@ export type HeaderAssertion_Serialize = {
 	name: string,
 	equals?: string,
 	contains?: string,
+};
+
+/**  A collection converted to a test file, ready for the editor. */
+export type ImportedCollection = {
+	yaml: string,
+	/**  Environments that came with it (Bruno), by name. */
+	environments: { [key in string]: { [key in string]: string } },
+	/**  What did not carry over. */
+	warnings: string[],
 };
 
 export type Issue = {

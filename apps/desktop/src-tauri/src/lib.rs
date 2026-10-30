@@ -10,6 +10,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         commands::example_test_file,
         commands::validate_test_file,
         commands::run_test_file,
+        commands::import_collection,
     ])
 }
 
@@ -37,6 +38,7 @@ pub fn run() {
     export_bindings(&builder);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
