@@ -1,0 +1,39 @@
+# A Stormix test file. `stormix validate` checks it; `stormix run` (M1) runs
+# the flow once and `stormix load` (M3) replays it under the load profile.
+version: 1
+flow:
+  name: Log in, then read the profile
+  variables:
+    base_url: https://httpbin.org
+  steps:
+    - name: Log in
+      request:
+        method: POST
+        url: "{{base_url}}/anything/login"
+        headers:
+          - { name: Accept, value: application/json }
+        body:
+          json: { user: demo, password: secret }
+      extract:
+        token: { json: $.json.user }
+      assert:
+        - status: 200
+        - max_duration_ms: 2000
+    - name: Read the profile
+      request:
+        method: GET
+        url: "{{base_url}}/anything/me"
+        headers:
+          - { name: Authorization, value: "Bearer {{token}}" }
+      assert:
+        - status: 200
+        - json: { path: $.headers.Authorization, equals: Bearer demo }
+load:
+  ramping:
+    stages:
+      - { duration: 30s, target: 20 }
+      - { duration: 1m, target: 20 }
+      - { duration: 15s, target: 0 }
+thresholds:
+  - p95 < 500ms
+  - errors < 1%

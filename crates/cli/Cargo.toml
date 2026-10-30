@@ -1,0 +1,19 @@
+[package]
+name = "stormix-cli"
+description = "The Stormix command line, for CI and quick runs"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "stormix"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+serde_json.workspace = true
+stormix-flow.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
