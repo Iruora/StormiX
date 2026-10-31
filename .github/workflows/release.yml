@@ -6,6 +6,9 @@ name: Release
 # Running it by hand from the Actions tab with a tag that does not exist yet
 # creates that tag on the commit it runs from (usually main) first.
 #
+# Update bundles are signed with TAURI_SIGNING_PRIVATE_KEY (a repo secret) so
+# the in-app updater can trust them; the public key is in tauri.conf.json.
+#
 # Builds are unsigned. To sign later, add the secrets Tauri reads (APPLE_*
 # for macOS, a Windows certificate or signCommand) and pass them in `env`
 # below; nothing else changes.
@@ -133,6 +136,10 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the update bundles the in-app updater downloads; tauri-action
+          # then merges every platform into latest.json on the release.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           args: --target ${{ matrix.target }}
@@ -214,9 +221,20 @@ jobs:
           echo "$names"
           missing=0
           for suffix in _aarch64.dmg _x64.dmg _aarch64.app.zip _x64.app.zip -setup.exe .msi _portable.zip .AppImage .deb .rpm \
-            _aarch64-apple-darwin.tar.gz _x86_64-apple-darwin.tar.gz _x86_64-unknown-linux-gnu.tar.gz _x86_64-pc-windows-msvc.zip; do
+            _aarch64-apple-darwin.tar.gz _x86_64-apple-darwin.tar.gz _x86_64-unknown-linux-gnu.tar.gz _x86_64-pc-windows-msvc.zip \
+            latest.json; do
             if ! grep -q -- "$suffix\$" <<< "$names"; then
               echo "::error::No asset ending in $suffix"
+              missing=1
+            fi
+          done
+          [ "$missing" = 0 ] || exit 1
+          # The in-app updater needs every desktop platform in latest.json.
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --jq '.[] | select(.name == "latest.json") | .id')
+          gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$id" > latest.json
+          for platform in darwin-aarch64 darwin-x86_64 linux-x86_64 windows-x86_64; do
+            if ! jq -e --arg p "$platform" '.platforms | keys | any(startswith($p))' latest.json > /dev/null; then
+              echo "::error::latest.json has no $platform entry"
               missing=1
             fi
           done

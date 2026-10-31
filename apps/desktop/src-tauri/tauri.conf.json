@@ -41,6 +41,18 @@
     "macOS": {
       "signingIdentity": "-",
       "minimumSystemVersion": "11.0"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_THE_PUBLIC_KEY_FROM_tauri_signer_generate",
+      "endpoints": [
+        "https://github.com/Iruora/StormiX/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }
