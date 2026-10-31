@@ -144,7 +144,8 @@ jobs:
         run: cargo build --release -p stormix-cli
       - name: Build the app and installers
         # Signed update bundles need the release key, which only release.yml has.
-        run: pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        # A file rather than inline JSON, which PowerShell would strip the quotes from.
+        run: pnpm tauri build --config src-tauri/tauri.ci.conf.json
         working-directory: apps/desktop
       - uses: actions/upload-artifact@v4
         with:
