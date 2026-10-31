@@ -62,7 +62,7 @@ jobs:
           ./target/debug/examples/demo_api &
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:3999/health > /dev/null && break; sleep 1; done
       - name: Run examples/demo-api.stormix.yaml
-        run: ./target/debug/stormix run examples/demo-api.stormix.yaml --verbose --junit junit/test-file.xml
+        run: ./target/debug/stormix run examples/demo-api.stormix.yaml --verbose --junit junit/test-file.xml --html reports/test-file.html
       - name: Run the Postman collection unchanged
         if: always()
         run: ./target/debug/stormix run examples/collections/demo-api.postman_collection.json --verbose --junit junit/postman.xml
@@ -71,16 +71,17 @@ jobs:
         run: ./target/debug/stormix run examples/collections/bruno --env local --verbose --junit junit/bruno.xml
       - name: Load test the demo flow and check its thresholds
         if: always()
-        run: ./target/debug/stormix load examples/demo-api.stormix.yaml --junit junit/load.xml --out load-report.json
+        run: ./target/debug/stormix load examples/demo-api.stormix.yaml --junit junit/load.xml --out load-report.json --html reports/load.html
       - name: Load test the Bruno collection with virtual users
         if: always()
         run: ./target/debug/stormix load examples/collections/bruno --env local --vus 5 --duration 5s --threshold "errors < 1%" --threshold "checks > 99%" --junit junit/bruno-load.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: stormix-junit
+          name: stormix-reports
           path: |
             junit/
+            reports/
             load-report.json
           if-no-files-found: ignore
           retention-days: 14
