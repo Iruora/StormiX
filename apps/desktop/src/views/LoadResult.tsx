@@ -191,8 +191,14 @@ function Timeline({ seconds }: { seconds: Point[] }) {
             </g>
           );
         })}
+        <line x1={0} x2={width} y1={y(maxReq / 2, maxReq)} y2={y(maxReq / 2, maxReq)} className="stroke-line" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
         <polyline points={line} fill="none" className="stroke-warn" strokeWidth={2} vectorEffect="non-scaling-stroke" />
       </svg>
+      <div className="mono mt-0.5 flex justify-between text-[11px] text-subtle">
+        <span>{seconds[0].t}s</span>
+        <span>{seconds[Math.floor(seconds.length / 2)].t}s</span>
+        <span>{seconds[seconds.length - 1].t}s</span>
+      </div>
     </div>
   );
 }

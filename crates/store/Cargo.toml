@@ -1,0 +1,22 @@
+[package]
+name = "stormix-store"
+description = "Run history and run-to-run comparisons for Stormix"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[features]
+specta = ["dep:specta", "stormix-engine/specta"]
+
+[dependencies]
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+specta = { workspace = true, optional = true }
+stormix-engine.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+stormix-metrics.workspace = true
+tempfile.workspace = true

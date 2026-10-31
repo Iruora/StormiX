@@ -1,6 +1,9 @@
 mod commands;
 
+use std::sync::Mutex;
+
 use stormix_engine::{RunOptions, Runner};
+use stormix_store::Store;
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events};
 
@@ -13,6 +16,14 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::run_test_file,
             commands::import_collection,
             commands::run_load_test,
+            commands::list_runs,
+            commands::get_run,
+            commands::delete_run,
+            commands::diff_runs,
+            commands::export_run,
+            commands::read_text_file,
+            commands::write_text_file,
+            commands::test_file_to_yaml,
         ])
         .events(collect_events![commands::LoadProgress])
 }
@@ -46,6 +57,9 @@ pub fn run() {
         .setup(move |app| {
             builder.mount_events(app);
             app.manage(Runner::new(RunOptions::default())?);
+            let data = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&data)?;
+            app.manage(Mutex::new(Store::open(&data.join("runs.db"))?));
             Ok(())
         })
         .run(tauri::generate_context!())

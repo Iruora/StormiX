@@ -15,12 +15,14 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true
 specta.workspace = true
 specta-typescript.workspace = true
 stormix-collections.workspace = true
 stormix-engine = { workspace = true, features = ["specta"] }
 stormix-flow = { workspace = true, features = ["specta"] }
 stormix-metrics = { workspace = true, features = ["specta"] }
+stormix-store = { workspace = true, features = ["specta"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }

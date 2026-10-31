@@ -2,11 +2,13 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use stormix_engine::{run_load, FlowResult, LoadOptions, LoadReport, Runner, Variables};
 use stormix_flow::{Issue, Severity, TestFile};
+use stormix_store::{RunData, RunDiff, RunSummary, Store, StoredRun};
 use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
@@ -103,8 +105,10 @@ pub struct LoadProgress {
 pub async fn run_load_test(
     text: String,
     variables: BTreeMap<String, String>,
+    source: Option<String>,
     app: AppHandle,
     runner: State<'_, Runner>,
+    store: State<'_, Mutex<Store>>,
 ) -> Result<LoadReport, String> {
     let test = checked(&text)?;
     let Some(profile) = &test.load else {
@@ -112,7 +116,7 @@ pub async fn run_load_test(
     };
     let mut vars = Variables::new();
     vars.extend(variables);
-    Ok(run_load(
+    let report = run_load(
         &runner,
         &test.flow,
         &vars,
@@ -131,7 +135,18 @@ pub async fn run_load_test(
             .emit(&app);
         },
     )
-    .await)
+    .await;
+    save(&store, RunData::Load(report.clone()), source.as_deref());
+    Ok(report)
+}
+
+/// Keeps a run in the history. A history that cannot be written must not
+/// lose the result the user is waiting for, so failures are only logged.
+fn save(store: &Mutex<Store>, data: RunData, source: Option<&str>) {
+    let store = store.lock().unwrap_or_else(|e| e.into_inner());
+    if let Err(err) = store.save(&data, source) {
+        tracing::warn!("could not save the run: {err}");
+    }
 }
 
 /// Parses the file and refuses it if it has errors; the editor already
@@ -156,12 +171,110 @@ fn checked(text: &str) -> Result<TestFile, String> {
 pub async fn run_test_file(
     text: String,
     variables: BTreeMap<String, String>,
+    source: Option<String>,
     runner: State<'_, Runner>,
+    store: State<'_, Mutex<Store>>,
 ) -> Result<FlowResult, String> {
     let test = checked(&text)?;
     let mut vars = Variables::new();
     vars.extend(variables);
-    Ok(runner.run(&test.flow, &vars).await)
+    let result = runner.run(&test.flow, &vars).await;
+    save(
+        &store,
+        RunData::Functional(result.clone()),
+        source.as_deref(),
+    );
+    Ok(result)
+}
+
+/// The most recent runs first.
+#[tauri::command]
+#[specta::specta]
+pub fn list_runs(limit: u32, store: State<'_, Mutex<Store>>) -> Result<Vec<RunSummary>, String> {
+    lock(&store).list(limit).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_run(id: u32, store: State<'_, Mutex<Store>>) -> Result<StoredRun, String> {
+    lock(&store).get(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn delete_run(id: u32, store: State<'_, Mutex<Store>>) -> Result<(), String> {
+    lock(&store).delete(id).map_err(|e| e.to_string())
+}
+
+/// Compares an older run with a newer one.
+#[tauri::command]
+#[specta::specta]
+pub fn diff_runs(
+    before: u32,
+    after: u32,
+    store: State<'_, Mutex<Store>>,
+) -> Result<RunDiff, String> {
+    let store = lock(&store);
+    let (a, b) = (
+        store.get(before).map_err(|e| e.to_string())?,
+        store.get(after).map_err(|e| e.to_string())?,
+    );
+    Ok(stormix_store::diff(&a.data, &b.data))
+}
+
+/// Writes a stored run as a JSON or JUnit XML report.
+#[tauri::command]
+#[specta::specta]
+pub fn export_run(
+    id: u32,
+    path: String,
+    format: ReportFormat,
+    store: State<'_, Mutex<Store>>,
+) -> Result<(), String> {
+    let run = lock(&store).get(id).map_err(|e| e.to_string())?;
+    let text = match (format, &run.data) {
+        (ReportFormat::Json, RunData::Functional(r)) => to_json(r),
+        (ReportFormat::Json, RunData::Load(r)) => to_json(r),
+        (ReportFormat::Junit, RunData::Functional(r)) => stormix_engine::junit_report(r),
+        (ReportFormat::Junit, RunData::Load(r)) => stormix_engine::junit_load_report(r),
+    };
+    std::fs::write(&path, text).map_err(|e| format!("cannot write {path}: {e}"))
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ReportFormat {
+    Json,
+    Junit,
+}
+
+fn to_json(value: &impl Serialize) -> String {
+    serde_json::to_string_pretty(value).expect("results always serialize")
+}
+
+fn lock(store: &Mutex<Store>) -> std::sync::MutexGuard<'_, Store> {
+    store.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Reads a test file the user picked.
+#[tauri::command]
+#[specta::specta]
+pub fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("cannot read {path}: {e}"))
+}
+
+/// Saves the editor's text where the user chose.
+#[tauri::command]
+#[specta::specta]
+pub fn write_text_file(path: String, text: String) -> Result<(), String> {
+    std::fs::write(&path, text).map_err(|e| format!("cannot write {path}: {e}"))
+}
+
+/// The visual editor works on the parsed file and writes YAML back.
+#[tauri::command]
+#[specta::specta]
+pub fn test_file_to_yaml(test: TestFile) -> String {
+    test.to_yaml()
 }
 
 #[cfg(test)]
