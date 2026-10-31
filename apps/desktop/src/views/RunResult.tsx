@@ -2,6 +2,7 @@ import { CircleCheck, CircleMinus, CircleX, PanelRightOpen } from "lucide-react"
 import { useState } from "react";
 
 import type { FlowResult, StepResult } from "../bindings";
+import { methodText } from "../lib/methods";
 import { StepDetails } from "./StepDetails";
 
 /** The outcome of one functional run: a summary line, then each step with what failed. */
@@ -66,7 +67,7 @@ function Step({ step, onDetails }: { step: StepResult; onDetails: () => void }) 
       </div>
       {!step.skipped && (
         <div className="mono mt-0.5 truncate pl-[22px] text-xs text-subtle" title={step.url}>
-          {step.method} {step.url}
+          <span className={`font-semibold ${methodText(step.method)}`}>{step.method}</span> {step.url}
         </div>
       )}
       <ul className="mt-1 space-y-0.5 pl-[22px] text-[13px]">

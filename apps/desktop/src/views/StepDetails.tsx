@@ -2,6 +2,7 @@ import { Check, CircleCheck, CircleX, Copy, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { HeaderPair, Payload, StepResult } from "../bindings";
+import { methodText } from "../lib/methods";
 
 type Tab = "failure" | "request" | "response";
 
@@ -42,7 +43,7 @@ export function StepDetails({ step, onClose }: { step: StepResult; onClose: () =
           <div className="min-w-0 flex-1">
             <div className="font-semibold">{step.name}</div>
             <div className="mono truncate text-xs text-muted" title={step.url}>
-              <span className="font-semibold text-accent">{step.method}</span> {step.url}
+              <span className={`font-semibold ${methodText(step.method)}`}>{step.method}</span> {step.url}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2 text-xs text-muted">

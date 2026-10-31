@@ -20,6 +20,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   commands,
   events,
+  type FlowResult,
   type ImportedCollection,
   type Issue,
   type LoadProgress,
@@ -28,6 +29,8 @@ import {
 } from "./bindings";
 import { YamlEditor } from "./editor/YamlEditor";
 import { describeLoad } from "./lib/describe";
+import { methodText } from "./lib/methods";
+import { VariablesContext, variableTable } from "./lib/variables";
 import { LoadLive, LoadResult } from "./views/LoadResult";
 import { RunResult } from "./views/RunResult";
 import { RUNS_KEY, RunsView } from "./views/Runs";
@@ -97,6 +100,7 @@ function TestFileView() {
   const [path, setPath] = useState<string | null>(null);
   const [savedText, setSavedText] = useState<string | null>(null);
   const [tab, setTab] = useState<"steps" | "yaml">("steps");
+  const [lastRun, setLastRun] = useState<FlowResult | null>(null);
   // What the steps editor shows while its YAML is being written.
   const [draft, setDraft] = useState<TestFile | null>(null);
   const writes = useRef(0);
@@ -134,6 +138,8 @@ function TestFileView() {
       if (res.status === "error") throw new Error(res.error);
       return res.data;
     },
+    // Kept past edits, so hovering a variable a step extracts shows its last value.
+    onSuccess: (data) => setLastRun(data),
     onSettled: () => client.invalidateQueries({ queryKey: RUNS_KEY }),
   });
   const [points, setPoints] = useState<LoadProgress[]>([]);
@@ -152,6 +158,11 @@ function TestFileView() {
     onSettled: () => client.invalidateQueries({ queryKey: RUNS_KEY }),
   });
   const busy = run.isPending || load.isPending;
+  const shown = draft ?? result?.test ?? null;
+  const variables = useMemo(
+    () => variableTable(shown, envVars, envName, lastRun),
+    [shown, envVars, envName, lastRun],
+  );
   const edit = (next: string | null) => {
     writes.current += 1;
     setDraft(null);
@@ -337,12 +348,14 @@ function TestFileView() {
               value={source}
               onChange={edit}
               validation={result}
-              variables={Object.keys(envVars)}
+              variables={variables}
               onSave={() => file.mutate("save")}
             />
-          ) : (draft ?? result?.test) ? (
+          ) : shown ? (
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <StepsEditor test={(draft ?? result?.test)!} onChange={editSteps} />
+              <VariablesContext.Provider value={variables}>
+                <StepsEditor test={shown} onChange={editSteps} />
+              </VariablesContext.Provider>
               <p className="px-4 pb-4 text-xs text-subtle">
                 Editing here rewrites the YAML, so comments in it are dropped.
               </p>
@@ -454,7 +467,7 @@ function Summary({ test }: { test: TestFile }) {
         {flow.steps.map((step, i) => (
           <li key={i} className="flex items-baseline gap-3 px-4 py-2">
             <span className="w-4 text-right text-xs text-subtle">{i + 1}</span>
-            <span className="mono w-14 shrink-0 text-xs font-semibold text-accent">
+            <span className={`mono w-14 shrink-0 text-xs font-semibold ${methodText(step.request.method)}`}>
               {step.request.method}
             </span>
             <div className="min-w-0">
