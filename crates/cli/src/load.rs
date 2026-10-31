@@ -45,6 +45,9 @@ pub struct LoadArgs {
     /// Also write a JUnit XML report, one test case per threshold.
     #[arg(long, value_name = "FILE")]
     junit: Option<PathBuf>,
+    /// Also write a self-contained HTML report here.
+    #[arg(long, value_name = "FILE")]
+    html: Option<PathBuf>,
     #[arg(long, value_enum, default_value_t = Format::Text)]
     format: Format,
     /// No live progress.
@@ -103,6 +106,9 @@ pub fn load(args: LoadArgs) -> Result<ExitCode, String> {
     }
     if let Some(path) = &args.junit {
         write_report(path, &junit_load_report(&report))?;
+    }
+    if let Some(path) = &args.html {
+        write_report(path, &stormix_report::load_report(&report))?;
     }
     match args.format {
         Format::Json => println!("{}", to_json(&report)),

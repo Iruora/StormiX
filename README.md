@@ -9,9 +9,23 @@ Stormix is a free, open source alternative to k6 with a GUI. It does two jobs wi
 
 A flow that passes as a regression test can be replayed by hundreds of users as a load test, and the `stormix` CLI runs the same files in CI.
 
-> **Status:** early development (M4). Flows run end to end from the CLI and the desktop app, as functional tests or under load: variables, extraction, assertions, latency percentiles and thresholds, with text, JSON and JUnit reports. Postman and Bruno collections run unchanged, scripts included. The app keeps every run and shows what changed between two of them. See the [roadmap](docs/ROADMAP.md).
+> **Status:** 1.0. Installers for macOS, Windows and Linux, and the `stormix` CLI, are on the [Releases page](https://github.com/Iruora/StormiX/releases). See the [changelog](CHANGELOG.md) and the [roadmap](docs/ROADMAP.md).
 
 ![A load test in the Stormix desktop app](docs/screenshots/1-load-test-results.png)
+
+## Install
+
+Download the desktop app (`.dmg`, `.exe`/`.msi`, `.AppImage`/`.deb`/`.rpm`) or the CLI archive for your platform from the [latest release](https://github.com/Iruora/StormiX/releases/latest). The builds are not signed yet; [Getting started](docs/GETTING_STARTED.md#install) says how to open them the first time.
+
+## Documentation
+
+| | |
+|---|---|
+| [Getting started](docs/GETTING_STARTED.md) | From install to a regression run, a load test and CI, in ten minutes |
+| [Test files](docs/TEST_FILE.md) | Every field of the YAML format: steps, assertions, variables, load profiles, thresholds |
+| [CLI](docs/CLI.md) | Every command, option and exit code |
+| [Collections](docs/COLLECTIONS.md) | Running Postman and Bruno collections, scripts included |
+| [Compatibility](docs/COMPATIBILITY.md) | What carries over from Postman, Bruno and k6, feature by feature |
 
 ## Test files
 
@@ -102,7 +116,7 @@ Latency is measured per request with HDR histograms, so percentiles are exact to
 | `--vus N`, `--rate N` with `--duration`, `--think-time` | Replace the file's load profile (collections have none) |
 | `--duration` alone | Change the length of a constant-rate or virtual-user profile |
 | `--threshold RULE` | Add a threshold; repeatable |
-| `--out FILE`, `--junit FILE`, `--format json` | Full JSON report, one JUnit test case per threshold, or JSON on stdout |
+| `--out FILE`, `--junit FILE`, `--html FILE`, `--format json` | Full JSON report, one JUnit test case per threshold, a self-contained HTML report, or JSON on stdout |
 | `--max-in-flight N`, `--grace 30s`, `-q` | Cap on concurrent iterations, finishing time at the end, no live progress |
 
 `bench/compare.sh` runs the same flow with Stormix and k6 under the same load; CI publishes the comparison on each run.
@@ -134,35 +148,12 @@ stormix import ./my-bruno-collection -o my-api.stormix.yaml
 ```sh
 stormix init                                   # write stormix.yaml
 stormix validate stormix.yaml
-stormix run stormix.yaml --env staging.json --var password=secret --junit report.xml
+stormix run stormix.yaml --env staging.json --junit report.xml --html report.html
+stormix load stormix.yaml --threshold "p95 < 300ms"
 stormix import collection.json -o stormix.yaml # Postman export or Bruno folder
-stormix load stormix.yaml                      # see Load tests above
 ```
 
-`run` sends each step once and prints what failed:
-
-```
-Log in, then read the profile
-
-  ✓ Log in            POST    200    134 ms
-  ✗ Read the profile  GET     401     12 ms
-      ✗ status is 200: got 401
-
-2 steps: 1 passed, 1 failed · 3/4 checks passed · 0.15 s
-```
-
-| Option | |
-|---|---|
-| `--var NAME=VALUE` | Set a variable; repeatable |
-| `--env FILE` | Variables from a YAML or JSON map, a Postman environment export or a Bruno `.bru` environment; for a Bruno collection, an environment name |
-| `--junit FILE` | Also write a JUnit XML report for your CI's test tab |
-| `--format json` | Print the full result as JSON |
-| `-v`, `--verbose` | Show passed checks and extracted values too |
-| `--bail` | Stop at the first failed step |
-| `--timeout 30s`, `--insecure`, `--no-follow-redirects` | Per-request timeout, accept invalid TLS certificates, report redirects instead of following them |
-| `--script-timeout 5s` | Time allowed for each pre-request or test script |
-
-`run` and `validate` exit with 0 on success, 1 when a check or validation fails (warnings too with `validate --strict`), and 2 when the file cannot be read or run. From a checkout, use `cargo run -p stormix-cli -- <command>`.
+`run` exits with 1 when a check fails, `load` when a threshold fails, and both with 2 when the file cannot be run. The [CLI reference](docs/CLI.md) has every option. From a checkout, use `cargo run -p stormix-cli -- <command>`.
 
 ## Development
 
@@ -187,6 +178,7 @@ crates/metrics/      HDR latency histograms, load summaries, threshold checks
 crates/script/       sandboxed QuickJS for Postman (`pm.*`) and Bruno (`bru.*`) scripts
 crates/collections/  Postman and Bruno importers
 crates/store/        run history (SQLite) and run-to-run diffs
+crates/report/       self-contained HTML reports
 crates/cli/          `stormix`, the command line for CI and quick runs
 examples/            example test files, and fixture collections CI runs against the demo API
 bench/               the k6 comparison

@@ -18,6 +18,7 @@ stormix-collections.workspace = true
 stormix-engine.workspace = true
 stormix-flow.workspace = true
 stormix-metrics.workspace = true
+stormix-report.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]

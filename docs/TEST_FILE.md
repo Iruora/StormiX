@@ -1,0 +1,185 @@
+# Test files
+
+A Stormix test file is YAML with three parts: a **flow** (the requests), an optional **load** profile and optional **thresholds**. Files usually end in `.stormix.yaml`. `stormix validate` checks one without sending anything, and `stormix init` writes an example to start from.
+
+```yaml
+version: 1
+flow:
+  name: Log in, then read the profile
+  description: Smoke test for the auth service   # optional
+  variables:
+    base_url: https://api.example.com
+    user: demo
+  steps:
+    - name: Log in
+      request:
+        method: POST
+        url: "{{base_url}}/login"
+        body:
+          json: { user: "{{user}}", password: "{{password}}" }
+      extract:
+        token: { json: $.token }
+      assert:
+        - status: 200
+        - header: { name: content-type, contains: json }
+    - name: Read the profile
+      request:
+        method: GET
+        url: "{{base_url}}/me"
+        headers:
+          - { name: Authorization, value: "Bearer {{token}}" }
+      assert:
+        - status: 200
+        - json: { path: $.user, equals: "{{user}}" }
+        - max_duration_ms: 500
+load:
+  ramping:
+    start_rate: 0
+    stages:
+      - { duration: 30s, target: 50 }
+      - { duration: 2m, target: 50 }
+      - { duration: 30s, target: 0 }
+thresholds:
+  - p95 < 300ms
+  - errors < 1%
+  - checks > 99%
+```
+
+## `version`
+
+Always `1` for now. A file with an unknown version is rejected rather than misread.
+
+## `flow`
+
+| Field | Required | |
+|---|---|---|
+| `name` | yes | Shown in reports and in the run history |
+| `description` | no | Free text |
+| `variables` | no | A map of names to string values, used as `{{name}}` |
+| `steps` | yes | One or more steps, run in order |
+
+One virtual user runs the steps in order. In a load test, each iteration is one pass through all the steps, with its own copy of the variables.
+
+## Steps
+
+| Field | Required | |
+|---|---|---|
+| `name` | yes | Unique names make reports and comparisons clearer |
+| `request` | yes | See below |
+| `extract` | no | Variables to set from the response |
+| `assert` | no | Checks on the response |
+| `scripts` | no | `pre_request` and `test` JavaScript, in the Postman or Bruno style |
+
+### `request`
+
+| Field | |
+|---|---|
+| `method` | `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD` or `OPTIONS` |
+| `url` | The full URL; query strings go here too |
+| `headers` | A list of `{ name, value }`. A list rather than a map, because HTTP allows a header to repeat |
+| `body` | One of the four kinds below |
+
+| Body | Sent as |
+|---|---|
+| `json: <any YAML value>` | `application/json`, unless a `Content-Type` header says otherwise |
+| `raw: <text>` | As written, with the step's own `Content-Type` header |
+| `form: [{ key, value }]` | `application/x-www-form-urlencoded` |
+| `multipart: [{ key, value }]` | `multipart/form-data`, text fields only |
+
+### `extract`
+
+Each entry sets a variable for the steps after it. A source that matches nothing fails the step, so a missing token shows up where it went missing.
+
+| Source | Example | Takes |
+|---|---|---|
+| `json` | `token: { json: $.data.token }` | A JSONPath into the body. Strings come out as they are; other values as JSON |
+| `header` | `etag: { header: ETag }` | A response header, matched case-insensitively |
+| `regex` | `csrf: { regex: 'name="csrf" value="([^"]+)"' }` | The first capture group, else the whole match |
+
+### `assert`
+
+| Assertion | Passes when |
+|---|---|
+| `status: 200` | The status code is exactly 200 |
+| `max_duration_ms: 500` | The full response arrived within 500 ms |
+| `header: { name: content-type }` | The header is present |
+| `header: { name: content-type, equals: application/json }` | It equals the value exactly |
+| `header: { name: content-type, contains: json }` | It contains the text |
+| `json: { path: $.items }` | The JSONPath matches something |
+| `json: { path: $.items[0].id, equals: 7 }` | The match equals the value (any YAML value; `"7"` also matches the number 7) |
+| `json: { path: $.error, exists: false }` | The path matches nothing |
+| `body_contains: "ok"` | The body contains the text |
+
+Variables work in every value, such as `equals: "{{user}}"`. With no assertion on a step, a 4xx or 5xx status still counts as a failed request under load, but a functional run passes it.
+
+### `scripts`
+
+```yaml
+scripts:
+  pre_request: |
+    pm.variables.set("ts", Date.now().toString());
+  test: |
+    pm.test("has an id", () => pm.expect(pm.response.json().id).to.be.a("number"));
+```
+
+Each `pm.test` or `test` becomes a check with that name. Scripts run sandboxed, with no network or file access. [Collections](COLLECTIONS.md) lists the API they can use.
+
+## Variables
+
+`{{name}}` is replaced when the request is sent, in the URL, headers, body, assertion values and scripts' `pm.variables`. Values come from these places, and a later one wins:
+
+1. The flow's `variables`
+2. An environment: `--env FILE` on the CLI, or the environment picked in the app
+3. `--var NAME=VALUE` on the CLI
+4. Values that earlier steps extract or scripts set
+
+These are generated fresh each time they are used:
+
+| Variable | Value |
+|---|---|
+| `{{$guid}}`, `{{$randomUUID}}` | A random UUID v4 |
+| `{{$timestamp}}` | Unix time in seconds |
+| `{{$timestampMs}}` | Unix time in milliseconds |
+| `{{$randomInt}}` | An integer from 0 to 1000 |
+
+A `{{name}}` that has no value is sent as written. The run shows a warning on that step, and `validate` warns about it beforehand.
+
+An environment file is a YAML or JSON map (`base_url: https://staging.example.com`), a Postman environment export, or a Bruno `.bru` environment.
+
+## Load profiles
+
+Without a `load` section, the flow runs once as a functional test. With one, `stormix load` and the app's **Load test** button run it under that profile. `stormix run` still runs it once.
+
+| Model | Fields | Use it to |
+|---|---|---|
+| `constant_rate` | `rate`, `duration` | Hold a steady arrival rate: `rate` iterations start each second, however slow the API gets |
+| `ramping` | `start_rate` (default 0), `stages: [{ duration, target }]` | Ramp up, hold and ramp down. The rate moves linearly to each stage's `target` over its `duration` |
+| `virtual_users` | `count`, `duration`, `think_time` (optional) | Simulate a fixed number of users who each loop the flow, pausing `think_time` between loops |
+
+`constant_rate` and `ramping` are *open* models: the load does not drop when the API slows down, which is what real traffic does, and what exposes queueing. `virtual_users` is a *closed* model: a slow API gets fewer requests. In open models, if 1000 iterations (`--max-in-flight`) are already running, new ones are dropped and counted rather than delayed.
+
+Durations are whole numbers with a unit: `250ms`, `30s`, `2m`, `1h`.
+
+```yaml
+load:
+  constant_rate: { rate: 100, duration: 5m }
+```
+
+```yaml
+load:
+  virtual_users: { count: 25, duration: 10m, think_time: 1s }
+```
+
+## Thresholds
+
+A threshold is `<metric> <operator> <value>`. The operator is `<`, `<=`, `>` or `>=`. When a threshold fails, `stormix load` exits with 1, so a CI job fails too.
+
+| Metric | Value | Example |
+|---|---|---|
+| `p50`, `p90`, `p95`, `p99`, or any `pNN` | Latency, in `ms` or `s` | `p95 < 300ms`, `p99 < 1s` |
+| `avg`, `max` | Latency, in `ms` or `s` | `avg < 100ms` |
+| `errors` | Failed requests, in percent | `errors < 1%` |
+| `checks` | Passed assertions and script tests, in percent | `checks > 99%` |
+| `rps` | Requests per second over the run, a plain number | `rps > 200` |
+
+Thresholds apply only under load. `stormix load --threshold "p95 < 300ms"` adds one from the command line.

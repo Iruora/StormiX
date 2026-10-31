@@ -222,7 +222,7 @@ pub fn diff_runs(
     Ok(stormix_store::diff(&a.data, &b.data))
 }
 
-/// Writes a stored run as a JSON or JUnit XML report.
+/// Writes a stored run as a JSON, JUnit XML or HTML report.
 #[tauri::command]
 #[specta::specta]
 pub fn export_run(
@@ -237,6 +237,8 @@ pub fn export_run(
         (ReportFormat::Json, RunData::Load(r)) => to_json(r),
         (ReportFormat::Junit, RunData::Functional(r)) => stormix_engine::junit_report(r),
         (ReportFormat::Junit, RunData::Load(r)) => stormix_engine::junit_load_report(r),
+        (ReportFormat::Html, RunData::Functional(r)) => stormix_report::flow_report(r),
+        (ReportFormat::Html, RunData::Load(r)) => stormix_report::load_report(r),
     };
     std::fs::write(&path, text).map_err(|e| format!("cannot write {path}: {e}"))
 }
@@ -246,6 +248,7 @@ pub fn export_run(
 pub enum ReportFormat {
     Json,
     Junit,
+    Html,
 }
 
 fn to_json(value: &impl Serialize) -> String {
