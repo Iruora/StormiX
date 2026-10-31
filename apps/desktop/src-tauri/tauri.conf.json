@@ -46,7 +46,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_THE_PUBLIC_KEY_FROM_tauri_signer_generate",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZCQ0E2QTFDMEFBRDQxNjUKUldSbFFhMEtIR3JLYTBuNUsvSFphMU50aGFPTG5xWHJFYVEyZjNIeTA5SU50Tm12c25mWXd0bDcK",
       "endpoints": [
         "https://github.com/Iruora/StormiX/releases/latest/download/latest.json"
       ],
