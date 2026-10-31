@@ -9,7 +9,7 @@ Stormix is a free, open source alternative to k6 with a GUI. It does two jobs wi
 
 A flow that passes as a regression test can be replayed by hundreds of users as a load test, and the `stormix` CLI runs the same files in CI.
 
-> **Status:** early development (M3). Flows run end to end from the CLI and the desktop app, as functional tests or under load: variables, extraction, assertions, latency percentiles and thresholds, with text, JSON and JUnit reports. Postman and Bruno collections run unchanged, scripts included. See the [roadmap](docs/ROADMAP.md).
+> **Status:** early development (M4). Flows run end to end from the CLI and the desktop app, as functional tests or under load: variables, extraction, assertions, latency percentiles and thresholds, with text, JSON and JUnit reports. Postman and Bruno collections run unchanged, scripts included. The app keeps every run and shows what changed between two of them. See the [roadmap](docs/ROADMAP.md).
 
 ![A load test in the Stormix desktop app](docs/screenshots/1-load-test-results.png)
 
@@ -107,6 +107,18 @@ Latency is measured per request with HDR histograms, so percentiles are exact to
 
 `bench/compare.sh` runs the same flow with Stormix and k6 under the same load; CI publishes the comparison on each run.
 
+## Desktop app
+
+Open a test file or import a Postman or Bruno collection, then edit it as steps (method, URL, headers, body, expected status, load profile, thresholds) or as YAML. **Run once** checks the flow; **Load test** runs it under its load profile with a live chart.
+
+Every run is kept in a local history (`runs.db` in the app's data folder). On the **Runs** page, open a run to export it as JSON or JUnit, or tick two runs to compare them: which steps broke or were fixed and which checks changed, or, for load tests, how throughput and latency moved (more than 10% counts as worse or better).
+
+![Comparing two runs: both steps broke after a password change](docs/screenshots/4-regression-diff.png)
+
+| | |
+|---|---|
+| ![The visual steps editor](docs/screenshots/5-steps-editor.png) | ![Comparing two load tests](docs/screenshots/6-load-diff.png) |
+
 ## Collections
 
 `stormix run` takes a Postman collection export (`.json`) or a Bruno collection folder directly, and runs its pre-request scripts, test scripts and assertions in an embedded JavaScript engine. `stormix import` turns one into a test file. [docs/COLLECTIONS.md](docs/COLLECTIONS.md) lists what carries over and what does not yet.
@@ -174,6 +186,7 @@ crates/engine/       runs flows once or under load: HTTP client, variables, asse
 crates/metrics/      HDR latency histograms, load summaries, threshold checks
 crates/script/       sandboxed QuickJS for Postman (`pm.*`) and Bruno (`bru.*`) scripts
 crates/collections/  Postman and Bruno importers
+crates/store/        run history (SQLite) and run-to-run diffs
 crates/cli/          `stormix`, the command line for CI and quick runs
 examples/            example test files, and fixture collections CI runs against the demo API
 bench/               the k6 comparison

@@ -179,7 +179,11 @@ pub async fn run_test_file(
     let mut vars = Variables::new();
     vars.extend(variables);
     let result = runner.run(&test.flow, &vars).await;
-    save(&store, RunData::Functional(result.clone()), source.as_deref());
+    save(
+        &store,
+        RunData::Functional(result.clone()),
+        source.as_deref(),
+    );
     Ok(result)
 }
 
@@ -205,7 +209,11 @@ pub fn delete_run(id: u32, store: State<'_, Mutex<Store>>) -> Result<(), String>
 /// Compares an older run with a newer one.
 #[tauri::command]
 #[specta::specta]
-pub fn diff_runs(before: u32, after: u32, store: State<'_, Mutex<Store>>) -> Result<RunDiff, String> {
+pub fn diff_runs(
+    before: u32,
+    after: u32,
+    store: State<'_, Mutex<Store>>,
+) -> Result<RunDiff, String> {
     let store = lock(&store);
     let (a, b) = (
         store.get(before).map_err(|e| e.to_string())?,

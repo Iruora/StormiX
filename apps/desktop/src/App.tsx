@@ -1,20 +1,21 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { open } from "@tauri-apps/plugin-dialog";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   CircleAlert,
   CircleCheck,
   FileCode,
   FileJson,
+  FilePlus,
   FolderOpen,
   Gauge,
   History,
   LoaderCircle,
   Play,
-  RotateCcw,
+  Save,
   TriangleAlert,
   Zap,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
   commands,
@@ -23,13 +24,17 @@ import {
   type Issue,
   type LoadProgress,
   type TestFile,
+  type TestFile_Deserialize,
 } from "./bindings";
 import { describeLoad } from "./lib/describe";
 import { LoadLive, LoadResult } from "./views/LoadResult";
 import { RunResult } from "./views/RunResult";
+import { RUNS_KEY, RunsView } from "./views/Runs";
+import { StepsEditor } from "./views/StepsEditor";
 
 export function App() {
   const info = useQuery({ queryKey: ["app-info"], queryFn: commands.getAppInfo });
+  const [view, setView] = useState<"file" | "runs">("file");
 
   return (
     <div className="flex h-full">
@@ -40,14 +45,18 @@ export function App() {
           </span>
           <span className="text-base font-extrabold tracking-tight">Stormix</span>
         </div>
-        <NavItem icon={<FileCode size={16} />} label="Test file" active />
-        <NavItem icon={<History size={16} />} label="Runs" soon="M4" />
+        <NavItem icon={<FileCode size={16} />} label="Test file" active={view === "file"} onClick={() => setView("file")} />
+        <NavItem icon={<History size={16} />} label="Runs" active={view === "runs"} onClick={() => setView("runs")} />
         <div className="mt-auto px-4 py-3 text-xs text-subtle">
           {info.data ? `v${info.data.version}` : ""}
         </div>
       </nav>
       <main className="min-w-0 flex-1">
-        <TestFileView />
+        {/* Kept mounted so the editor keeps its text while the history is open. */}
+        <div className={view === "file" ? "h-full" : "hidden"}>
+          <TestFileView />
+        </div>
+        {view === "runs" && <RunsView />}
       </main>
     </div>
   );
@@ -57,26 +66,24 @@ function NavItem({
   icon,
   label,
   active,
-  soon,
+  onClick,
 }: {
   icon: ReactNode;
   label: string;
   active?: boolean;
-  soon?: string;
+  onClick: () => void;
 }) {
   return (
-    <div
-      className={`mx-2 flex items-center gap-2 rounded-md px-2 py-1.5 ${
-        active ? "bg-accent-soft font-medium text-accent" : "text-subtle"
+    <button
+      type="button"
+      onClick={onClick}
+      className={`mx-2 flex items-center gap-2 rounded-md px-2 py-1.5 text-left ${
+        active ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-surface-2"
       }`}
-      title={soon ? `Coming in ${soon}` : undefined}
     >
       {icon}
       <span>{label}</span>
-      {soon && (
-        <span className="ml-auto rounded bg-surface-2 px-1.5 text-[11px] text-subtle">{soon}</span>
-      )}
-    </div>
+    </button>
   );
 }
 
@@ -86,7 +93,15 @@ function TestFileView() {
   const [text, setText] = useState<string | null>(null);
   const [imported, setImported] = useState<ImportedCollection | null>(null);
   const [envName, setEnvName] = useState("");
+  const [path, setPath] = useState<string | null>(null);
+  const [savedText, setSavedText] = useState<string | null>(null);
+  const [tab, setTab] = useState<"steps" | "yaml">("steps");
+  // What the steps editor shows while its YAML is being written.
+  const [draft, setDraft] = useState<TestFile | null>(null);
+  const writes = useRef(0);
+  const client = useQueryClient();
   const source = text ?? example.data ?? "";
+  const dirty = path != null && source !== savedText;
   const debounced = useDebounced(source, 250);
 
   const validation = useQuery({
@@ -110,10 +125,11 @@ function TestFileView() {
 
   const run = useMutation({
     mutationFn: async (yaml: string) => {
-      const res = await commands.runTestFile(yaml, envVars);
+      const res = await commands.runTestFile(yaml, envVars, path);
       if (res.status === "error") throw new Error(res.error);
       return res.data;
     },
+    onSettled: () => client.invalidateQueries({ queryKey: RUNS_KEY }),
   });
   const [points, setPoints] = useState<LoadProgress[]>([]);
   const load = useMutation({
@@ -121,20 +137,66 @@ function TestFileView() {
       setPoints([]);
       const unlisten = await events.loadProgress.listen((e) => setPoints((p) => [...p, e.payload]));
       try {
-        const res = await commands.runLoadTest(yaml, envVars);
+        const res = await commands.runLoadTest(yaml, envVars, path);
         if (res.status === "error") throw new Error(res.error);
         return res.data;
       } finally {
         unlisten();
       }
     },
+    onSettled: () => client.invalidateQueries({ queryKey: RUNS_KEY }),
   });
   const busy = run.isPending || load.isPending;
   const edit = (next: string | null) => {
+    writes.current += 1;
+    setDraft(null);
     setText(next);
     run.reset();
     load.reset();
   };
+  /** The steps editor changed the file: show it at once, then write its YAML. */
+  const editSteps = async (next: TestFile) => {
+    setDraft(next);
+    run.reset();
+    load.reset();
+    const id = ++writes.current;
+    const yaml = await commands.testFileToYaml(next as TestFile_Deserialize);
+    if (id === writes.current) setText(yaml);
+  };
+
+  const file = useMutation({
+    mutationFn: async (action: "open" | "save" | "saveAs") => {
+      if (action === "open") {
+        const picked = await open({
+          title: "Open a test file",
+          filters: [{ name: "Stormix test file", extensions: ["yaml", "yml"] }],
+        });
+        if (typeof picked !== "string") return;
+        const res = await commands.readTextFile(picked);
+        if (res.status === "error") throw new Error(res.error);
+        setImported(null);
+        setEnvName("");
+        edit(res.data);
+        setPath(picked);
+        setSavedText(res.data);
+        return;
+      }
+      let target = action === "save" ? path : null;
+      if (!target) {
+        const name = (result?.test?.flow.name ?? "test").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        target = await save({
+          title: "Save the test file",
+          defaultPath: `${name || "test"}.stormix.yaml`,
+          filters: [{ name: "Stormix test file", extensions: ["yaml", "yml"] }],
+        });
+        if (!target) return;
+      }
+      const res = await commands.writeTextFile(target, source);
+      if (res.status === "error") throw new Error(res.error);
+      setPath(target);
+      setSavedText(source);
+    },
+  });
 
   const importFrom = useMutation({
     mutationFn: async (kind: "postman" | "bruno") => {
@@ -152,6 +214,7 @@ function TestFileView() {
       if (!collection) return;
       setImported(collection);
       setEnvName(Object.keys(collection.environments)[0] ?? "");
+      setPath(null);
       edit(collection.yaml);
     },
   });
@@ -205,12 +268,13 @@ function TestFileView() {
           onClick={() => {
             setImported(null);
             setEnvName("");
+            setPath(null);
             edit(null);
           }}
           className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
         >
-          <RotateCcw size={13} />
-          Reset to example
+          <FilePlus size={13} />
+          New from example
         </button>
         <button
           type="button"
@@ -239,14 +303,52 @@ function TestFileView() {
         </button>
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
-        <textarea
-          aria-label="Test file YAML"
-          spellCheck={false}
-          wrap="off"
-          value={source}
-          onChange={(e) => edit(e.target.value)}
-          className="mono resize-none border-r border-line bg-surface p-4 text-[13px] leading-5 outline-none"
-        />
+        <div className="flex min-h-0 flex-col border-r border-line">
+          <div className="flex items-center gap-1 border-b border-line bg-surface px-3 py-1.5">
+            {(["steps", "yaml"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                className={`rounded px-2 py-0.5 text-xs font-medium ${
+                  tab === t ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface-2"
+                }`}
+              >
+                {t === "steps" ? "Steps" : "YAML"}
+              </button>
+            ))}
+            <span className="mono ml-3 min-w-0 truncate text-xs text-muted" title={path ?? undefined}>
+              {path ? path.split(/[\\/]/).pop() : imported ? "Imported, not saved" : "Unsaved example"}
+              {dirty && <span className="text-warn"> ●</span>}
+            </span>
+            <span className="ml-auto" />
+            <FileButton label="Open" icon={<FolderOpen size={13} />} onClick={() => file.mutate("open")} />
+            <FileButton label="Save" icon={<Save size={13} />} onClick={() => file.mutate("save")} />
+            <FileButton label="Save as" onClick={() => file.mutate("saveAs")} />
+          </div>
+          {file.error && <div className="border-b border-line bg-bad-soft px-3 py-1 text-xs text-bad">{file.error.message}</div>}
+          {tab === "yaml" ? (
+            <textarea
+              aria-label="Test file YAML"
+              spellCheck={false}
+              wrap="off"
+              value={source}
+              onChange={(e) => edit(e.target.value)}
+              className="mono min-h-0 flex-1 resize-none bg-surface p-4 text-[13px] leading-5 outline-none"
+            />
+          ) : (draft ?? result?.test) ? (
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <StepsEditor test={(draft ?? result?.test)!} onChange={editSteps} />
+              <p className="px-4 pb-4 text-xs text-subtle">
+                Editing here rewrites the YAML, so comments in it are dropped.
+              </p>
+            </div>
+          ) : (
+            <div className="p-4 text-muted">
+              {result?.parseError ? "Fix the YAML first; the steps show once it parses." : "Loading…"}
+            </div>
+          )}
+        </div>
         <aside className="min-h-0 overflow-y-auto p-4">
           {result?.parseError ? (
             <Banner tone="bad" icon={<CircleAlert size={16} />} title="The file does not parse">
@@ -293,6 +395,19 @@ function TestFileView() {
         </aside>
       </div>
     </div>
+  );
+}
+
+function FileButton({ label, icon, onClick }: { label: string; icon?: ReactNode; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-ink"
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 
