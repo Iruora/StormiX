@@ -1,7 +1,9 @@
 import { ArrowDown, ArrowUp, Copy, Plus, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
-import type { Assertion, Body, Header, LoadProfile, Method, Step, TestFile } from "../bindings";
+import type { Assertion, Body, Header, KeyValue, LoadProfile, Method, Step, TestFile } from "../bindings";
+import { methodText, methodTone } from "../lib/methods";
+import { VarField } from "./VarField";
 
 const METHODS: Method[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
@@ -129,17 +131,20 @@ function StepCard({
             aria-label="Method"
             value={request.method}
             onChange={(e) => setRequest({ method: e.target.value as Method })}
-            className={`${input} mono w-24 font-semibold text-accent`}
+            className={`${input} mono w-24 font-semibold ${methodTone(request.method)}`}
           >
             {METHODS.map((m) => (
-              <option key={m}>{m}</option>
+              <option key={m} className={`bg-surface ${methodText(m)}`}>
+                {m}
+              </option>
             ))}
           </select>
-          <input
+          <VarField
             aria-label="URL"
             value={request.url}
-            onChange={(e) => setRequest({ url: e.target.value })}
-            className={`${input} mono min-w-0 flex-1 text-xs`}
+            onChange={(url) => setRequest({ url })}
+            wrap="flex-1"
+            className={`${input} mono text-xs`}
           />
           <label className="flex items-center gap-1.5 text-xs text-subtle">
             expect
@@ -205,12 +210,13 @@ function Pairs({
             onChange={(e) => onChange(rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))}
             className={`${input} mono w-2/5 text-xs`}
           />
-          <input
+          <VarField
             aria-label={placeholder[1]}
             placeholder={placeholder[1]}
             value={v}
-            onChange={(e) => onChange(rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))}
-            className={`${input} mono min-w-0 flex-1 text-xs`}
+            onChange={(value) => onChange(rows.map((r, j) => (j === i ? [r[0], value] : r)))}
+            wrap="flex-1"
+            className={`${input} mono text-xs`}
           />
           <IconButton label="Remove" onClick={() => onChange(rows.filter((_, j) => j !== i))}>
             <X size={13} />
@@ -221,30 +227,67 @@ function Pairs({
   );
 }
 
-type BodyKind = "none" | "json" | "raw" | "form";
+type BodyKind = "none" | "json" | "raw" | "form" | "multipart";
 
-/** JSON and raw bodies are edited as text; JSON is kept only once it parses. */
+const BODY_KINDS: BodyKind[] = ["none", "json", "raw", "form", "multipart"];
+
+function bodyKind(body: Body | null): BodyKind {
+  if (!body) return "none";
+  if ("json" in body) return "json";
+  if ("raw" in body) return "raw";
+  if ("form" in body) return "form";
+  return "multipart";
+}
+
+/**
+ * JSON and raw bodies are edited as text; JSON is kept only once it parses.
+ * Switching kinds carries the content over where it can (raw text that is
+ * JSON becomes a JSON body, and back), and each kind remembers what it held,
+ * so trying another kind and coming back loses nothing.
+ */
 function BodyEditor({ body, onChange }: { body: Body | null; onChange: (body: Body | null) => void }) {
-  const kind: BodyKind = !body ? "none" : "json" in body ? "json" : "raw" in body ? "raw" : "form";
+  const kind = bodyKind(body);
   const [draft, setDraft] = useState<string | null>(null);
   const [bad, setBad] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const remembered = useRef<Partial<Record<BodyKind, Body>>>({});
   const text =
     draft ?? (body && "json" in body ? JSON.stringify(body.json, null, 2) : body && "raw" in body ? body.raw ?? "" : "");
 
   const switchTo = (next: BodyKind) => {
+    if (next === kind) return;
+    if (body) remembered.current[kind] = body;
+    setNotice(null);
+    // A JSON body being typed but not parsing yet is still kept, as raw text.
+    const current = kind === "json" && bad ? text : kind === "json" || kind === "raw" ? text : null;
+    const fields = body && "form" in body ? body.form : body && "multipart" in body ? body.multipart : null;
+    let replacement: Body | null;
+    if (next === "none") {
+      replacement = null;
+    } else if (next === "json") {
+      replacement = current != null ? parseJson(current) : null;
+      if (current != null && current.trim() && !replacement) {
+        // Templated JSON like `{"id": {{id}}}` is not JSON until sent; keep it raw.
+        setNotice("This body is not valid JSON on its own (often because of unquoted {{variables}}), so it stays raw. Raw bodies are sent as written, with the Content-Type header.");
+        return;
+      }
+      replacement ??= remembered.current.json ?? { json: {} };
+    } else if (next === "raw") {
+      replacement = current != null ? { raw: current } : remembered.current.raw ?? { raw: fields ? encodeFields(fields) : "" };
+    } else {
+      const kept = remembered.current[next];
+      replacement = kept ?? (next === "form" ? { form: fields ?? [] } : { multipart: fields ?? [] });
+    }
     setDraft(null);
     setBad(false);
-    if (next === "none") onChange(null);
-    else if (next === "json") onChange({ json: {} });
-    else if (next === "raw") onChange({ raw: text });
-    else onChange({ form: [] });
+    onChange(replacement);
   };
 
   return (
     <div>
       <div className="flex items-center gap-2 text-xs text-subtle">
         Body
-        {(["none", "json", "raw", "form"] as const).map((k) => (
+        {BODY_KINDS.map((k) => (
           <button
             key={k}
             type="button"
@@ -256,26 +299,26 @@ function BodyEditor({ body, onChange }: { body: Body | null; onChange: (body: Bo
         ))}
         {bad && <span className="text-bad">not valid JSON yet</span>}
       </div>
+      {notice && <div className="mt-1 rounded border border-warn/30 bg-warn-soft px-2 py-1 text-xs text-warn">{notice}</div>}
       {(kind === "json" || kind === "raw") && (
-        <textarea
-          aria-label="Body"
-          spellCheck={false}
-          rows={Math.min(8, Math.max(2, text.split("\n").length))}
-          value={text}
-          onChange={(e) => {
-            const value = e.target.value;
-            setDraft(value);
-            if (kind === "raw") return onChange({ raw: value });
-            try {
-              onChange({ json: JSON.parse(value) });
-              setBad(false);
-            } catch {
-              setBad(true);
-            }
-          }}
-          onBlur={() => !bad && setDraft(null)}
-          className={`${input} mono mt-1 block w-full resize-y text-xs ${bad ? "border-bad" : ""}`}
-        />
+        <div className="mt-1">
+          <VarField
+            multiline
+            aria-label="Body"
+            rows={Math.min(8, Math.max(2, text.split("\n").length))}
+            value={text}
+            onChange={(value) => {
+              setDraft(value);
+              setNotice(null);
+              if (kind === "raw") return onChange({ raw: value });
+              const parsed = parseJson(value);
+              if (parsed) onChange(parsed);
+              setBad(!parsed);
+            }}
+            onBlur={() => !bad && setDraft(null)}
+            className={`${input} mono block resize-y text-xs ${bad ? "border-bad" : ""}`}
+          />
+        </div>
       )}
       {body && ("form" in body || "multipart" in body) && (
         <div className="mt-1">
@@ -292,6 +335,19 @@ function BodyEditor({ body, onChange }: { body: Body | null; onChange: (body: Bo
       )}
     </div>
   );
+}
+
+function parseJson(text: string): Body | null {
+  if (!text.trim()) return null;
+  try {
+    return { json: JSON.parse(text) };
+  } catch {
+    return null;
+  }
+}
+
+function encodeFields(fields: KeyValue[]): string {
+  return fields.map((f) => `${f.key}=${f.value}`).join("&");
 }
 
 type LoadKind = "none" | "constant_rate" | "ramping" | "virtual_users";

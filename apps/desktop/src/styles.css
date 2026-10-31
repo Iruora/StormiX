@@ -30,6 +30,10 @@
   --syn-number: #b45309;
   --syn-comment: #8a90a3;
   --syn-meta: #a21caf;
+  --var: #0369a1;
+  --var-soft: #e0f2fe;
+  --var-runtime: #7c3aed;
+  --var-runtime-soft: #f1eafe;
 
   --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
 
@@ -62,6 +66,10 @@
     --syn-number: #fbbf24;
     --syn-comment: #6d7390;
     --syn-meta: #f0abfc;
+    --var: #7dd3fc;
+    --var-soft: #0c2a3d;
+    --var-runtime: #c4b5fd;
+    --var-runtime-soft: #2a2050;
 
     color-scheme: dark;
   }
@@ -104,4 +112,43 @@ body {
 
 .mono {
   font-family: var(--font-mono);
+}
+
+/* {{variables}} in fields and in the YAML editor. */
+.var-defined,
+.var-runtime,
+.var-generated,
+.var-missing {
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px transparent;
+}
+.var-defined {
+  color: var(--var);
+  background: var(--var-soft);
+}
+.var-runtime,
+.var-generated {
+  color: var(--var-runtime);
+  background: var(--var-runtime-soft);
+}
+.var-missing {
+  color: var(--warn);
+  background: var(--warn-soft);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+/* In the YAML editor the string highlight sits inside or outside the mark. */
+.cm-content .var-defined,
+.cm-content .var-defined * {
+  color: var(--var) !important;
+}
+.cm-content .var-runtime,
+.cm-content .var-runtime *,
+.cm-content .var-generated,
+.cm-content .var-generated * {
+  color: var(--var-runtime) !important;
+}
+.cm-content .var-missing,
+.cm-content .var-missing * {
+  color: var(--warn) !important;
 }

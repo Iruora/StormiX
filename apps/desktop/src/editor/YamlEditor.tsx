@@ -28,7 +28,9 @@ import { CircleAlert, CircleCheck, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { Validation } from "../bindings";
+import type { VariableTable } from "../lib/variables";
 import { testFileCompletions } from "./complete";
+import { variableMarks } from "./variables";
 import { diagnose } from "./diagnostics";
 
 type Props = {
@@ -36,8 +38,8 @@ type Props = {
   onChange: (text: string) => void;
   /** The validator's result for (about) this text; its issues are shown inline. */
   validation?: Validation;
-  /** Variable names that come from outside the file, such as the chosen environment. */
-  variables?: string[];
+  /** What each `{{variable}}` stands for: coloured in the text, shown on hover. */
+  variables?: VariableTable;
   onSave?: () => void;
 };
 
@@ -45,7 +47,7 @@ type Props = {
  * The test file as YAML, with highlighting, folding, completion of the
  * format's keys, and problems underlined where they are as you type.
  */
-export function YamlEditor({ value, onChange, validation, variables = [], onSave }: Props) {
+export function YamlEditor({ value, onChange, validation, variables = EMPTY, onSave }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   // The editor is built once; these let its callbacks see the latest props.
@@ -93,9 +95,10 @@ export function YamlEditor({ value, onChange, validation, variables = [], onSave
           EditorState.tabSize.of(2),
           yaml(),
           syntaxHighlighting(highlight),
+          variableMarks(() => latest.current.variables, revalidated),
           theme,
           autocompletion({
-            override: [testFileCompletions(() => latest.current.variables)],
+            override: [testFileCompletions(() => [...latest.current.variables.keys()])],
             icons: false,
           }),
           linter(
@@ -159,7 +162,7 @@ export function YamlEditor({ value, onChange, validation, variables = [], onSave
   // A new validator result: place its issues without waiting for a keystroke.
   useEffect(() => {
     view.current?.dispatch({ effects: revalidated.of(null) });
-  }, [validation]);
+  }, [validation, variables]);
 
   const tone = status.errors > 0 ? "text-bad" : status.warnings > 0 ? "text-warn" : "text-ok";
   return (
@@ -200,7 +203,9 @@ export function YamlEditor({ value, onChange, validation, variables = [], onSave
   );
 }
 
-/** The validator answered; place its issues without waiting for a keystroke. */
+const EMPTY: VariableTable = new Map();
+
+/** The validator answered or the variables changed; refresh without waiting for a keystroke. */
 const revalidated = StateEffect.define<null>();
 
 function count(n: number, noun: string): string {
@@ -264,5 +269,9 @@ const theme = EditorView.theme({
   ".cm-completionInfo": { padding: "6px 10px", fontSize: "12px", maxWidth: "320px" },
   ".cm-panels": { backgroundColor: "var(--surface-2)", color: "var(--ink)", borderColor: "var(--line)" },
   ".cm-panel input, .cm-panel button": { fontSize: "12px" },
+  ".cm-var-tip": { padding: "6px 10px", fontSize: "12px", maxWidth: "380px" },
+  ".cm-var-tip-value": { fontFamily: "var(--font-mono)", wordBreak: "break-all" },
+  ".cm-var-tip-missing": { color: "var(--warn)" },
+  ".cm-var-tip-source": { color: "var(--subtle)", marginTop: "2px" },
   ".cm-searchMatch": { backgroundColor: "color-mix(in srgb, var(--bolt) 30%, transparent)" },
 });

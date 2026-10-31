@@ -6,6 +6,9 @@
 
 - The YAML tab is a code editor (CodeMirror): highlighting, line numbers, folding, search, and errors underlined in place as you type. Syntax errors are found on each keystroke; format errors (an unknown key, a wrong method, a bad value) and warnings from the validator are placed on the key or value they are about. The status bar counts problems and jumps to the next one (F8). Ctrl/Cmd+S saves.
 - Completion of the test file's keys where the cursor is, of methods, thresholds, and `{{variables}}` (the flow's, extracted ones, the chosen environment's and generated ones).
+- `{{variables}}` are coloured in the steps editor and the YAML editor (defined, set at run time by an extraction or a script, generated, or undefined), and hovering one shows its value and where it comes from, including what the last run extracted.
+- Each HTTP method has its own colour in the method selector and wherever a method is shown.
+- Fixed: switching a body between none, json, raw and form in the steps editor dropped its content, for example a Bruno JSON body imported as raw. JSON text now carries over between json and raw, each kind remembers its content, and templated JSON that does not parse yet stays raw with a note.
 - A **Details** button on each step of a run, and on each of a load test's most common failures, opens the failed checks, the error, the request as sent (headers and body) and the response as received, with JSON bodies indented and a **Copy as cURL** button.
 
 ### Engine

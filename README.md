@@ -133,6 +133,7 @@ Every run is kept in a local history (`runs.db` in the app's data folder). On th
 |---|---|
 | ![The visual steps editor](docs/screenshots/5-steps-editor.png) | ![Comparing two load tests](docs/screenshots/6-load-diff.png) |
 | ![Errors underlined in the YAML editor](docs/screenshots/8-yaml-editor-errors.png) | ![Details of a failed step](docs/screenshots/9-failure-details.png) |
+| ![Variables coloured, with their value on hover, and a colour per method](docs/screenshots/10-variables-and-methods.png) | |
 
 ## Collections
 
