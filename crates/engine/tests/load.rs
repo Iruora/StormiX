@@ -165,6 +165,12 @@ load:
     assert_eq!(s.steps[1].failed, s.iterations);
     assert_eq!(s.failures[0].reason, "missing: status 404");
     assert!(!report.passed());
+    // One sample of the failing step, with its exchange; none of the passing one.
+    assert_eq!(report.samples.len(), 1);
+    let sample = &report.samples[0];
+    assert_eq!(sample.name, "missing");
+    let response = sample.exchange.as_ref().unwrap().response.as_ref().unwrap();
+    assert_eq!(response.status_text, "Not Found");
     assert!((report.thresholds[0].actual - 50.0).abs() < 0.01);
 }
 

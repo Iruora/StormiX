@@ -22,7 +22,7 @@ export const commands = {
 	 *  Runs the file's flow under its load profile and checks its thresholds,
 	 *  sending [`LoadProgress`] events as it goes.
 	 */
-	runLoadTest: (text: string, variables: { [key in string]: string }, source: string | null) => typedError<LoadReport, string>(__TAURI_INVOKE("run_load_test", { text, variables, source })),
+	runLoadTest: (text: string, variables: { [key in string]: string }, source: string | null) => typedError<LoadReport_Serialize, string>(__TAURI_INVOKE("run_load_test", { text, variables, source })),
 	/**  The most recent runs first. */
 	listRuns: (limit: number) => typedError<RunSummary_Serialize[], string>(__TAURI_INVOKE("list_runs", { limit })),
 	getRun: (id: number) => typedError<StoredRun_Serialize, string>(__TAURI_INVOKE("get_run", { id })),
@@ -114,6 +114,27 @@ export type Check_Serialize = {
 	message: string | null,
 };
 
+/**  One request and its response, as they went over the wire. */
+export type Exchange = Exchange_Serialize | Exchange_Deserialize;
+
+/**  One request and its response, as they went over the wire. */
+export type Exchange_Deserialize = {
+	/**  Headers as sent, including the ones Stormix adds like `Content-Type`. */
+	requestHeaders: HeaderPair[],
+	requestBody?: Payload | null,
+	/**  `None` when no response came back. */
+	response?: ResponseRecord_Deserialize | null,
+};
+
+/**  One request and its response, as they went over the wire. */
+export type Exchange_Serialize = {
+	/**  Headers as sent, including the ones Stormix adds like `Content-Type`. */
+	requestHeaders: HeaderPair[],
+	requestBody: Payload | null,
+	/**  `None` when no response came back. */
+	response: ResponseRecord_Serialize | null,
+};
+
 export type ExtractSource = 
 /**  A JSONPath into the response body, like `$.data.token`. */
 ({ json: string }) & { header?: never; regex?: never } | 
@@ -199,6 +220,11 @@ export type HeaderAssertion_Serialize = {
 	name: string,
 	equals?: string,
 	contains?: string,
+};
+
+export type HeaderPair = {
+	name: string,
+	value: string,
 };
 
 /**  A collection converted to a test file, ready for the editor. */
@@ -319,10 +345,30 @@ export type LoadProgress = {
 	active: number,
 };
 
-export type LoadReport = {
+export type LoadReport = LoadReport_Serialize | LoadReport_Deserialize;
+
+export type LoadReport_Deserialize = {
 	name: string,
 	summary: Summary,
 	thresholds: ThresholdResult[],
+	/**
+	 *  The first failure of each step, with the request and response, so
+	 *  a failure count can be traced to a real exchange. Empty in reports
+	 *  saved before 1.1.
+	 */
+	samples?: StepResult_Deserialize[],
+};
+
+export type LoadReport_Serialize = {
+	name: string,
+	summary: Summary,
+	thresholds: ThresholdResult[],
+	/**
+	 *  The first failure of each step, with the request and response, so
+	 *  a failure count can be traced to a real exchange. Empty in reports
+	 *  saved before 1.1.
+	 */
+	samples: StepResult_Serialize[],
 };
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
@@ -338,6 +384,17 @@ export type Metric = {
 	worse: boolean,
 	/**  Moved the right way by more than 10%. */
 	better: boolean,
+};
+
+/**  A body, as text. Binary bodies are described rather than kept. */
+export type Payload = {
+	text: string,
+	/**  The full size, which can be more than `text` holds. */
+	bytes: number,
+	/**  `text` stops at [`Payload::LIMIT`] bytes. */
+	truncated: boolean,
+	/**  Not UTF-8; `text` only describes it. */
+	binary: boolean,
 };
 
 export type ReportFormat = "json" | "junit" | "html";
@@ -358,14 +415,30 @@ export type Request_Serialize = {
 	body?: Body,
 };
 
+export type ResponseRecord = ResponseRecord_Serialize | ResponseRecord_Deserialize;
+
+export type ResponseRecord_Deserialize = {
+	/**  Like `Not Found`; empty for codes without a standard reason. */
+	statusText: string,
+	headers: HeaderPair[],
+	body?: Payload | null,
+};
+
+export type ResponseRecord_Serialize = {
+	/**  Like `Not Found`; empty for codes without a standard reason. */
+	statusText: string,
+	headers: HeaderPair[],
+	body: Payload | null,
+};
+
 /**  What a run produced. */
 export type RunData = RunData_Serialize | RunData_Deserialize;
 
 /**  What a run produced. */
-export type RunData_Deserialize = { kind: "functional"; result: FlowResult_Deserialize } | { kind: "load"; result: LoadReport };
+export type RunData_Deserialize = { kind: "functional"; result: FlowResult_Deserialize } | { kind: "load"; result: LoadReport_Deserialize };
 
 /**  What a run produced. */
-export type RunData_Serialize = { kind: "functional"; result: FlowResult_Serialize } | { kind: "load"; result: LoadReport };
+export type RunData_Serialize = { kind: "functional"; result: FlowResult_Serialize } | { kind: "load"; result: LoadReport_Serialize };
 
 export type RunDiff = RunDiff_Serialize | RunDiff_Deserialize;
 
@@ -535,6 +608,12 @@ export type StepResult_Deserialize = {
 	error?: string | null,
 	/**  Not run because an earlier step failed and the run stops at the first failure. */
 	skipped: boolean,
+	/**
+	 *  What was sent and what came back. Kept for every step of a single
+	 *  run; under load, only for failed steps. Missing from runs saved
+	 *  before 1.1.
+	 */
+	exchange?: Exchange_Deserialize | null,
 };
 
 export type StepResult_Serialize = {
@@ -559,6 +638,12 @@ export type StepResult_Serialize = {
 	error: string | null,
 	/**  Not run because an earlier step failed and the run stops at the first failure. */
 	skipped: boolean,
+	/**
+	 *  What was sent and what came back. Kept for every step of a single
+	 *  run; under load, only for failed steps. Missing from runs saved
+	 *  before 1.1.
+	 */
+	exchange?: Exchange_Serialize,
 };
 
 export type StepSummary = {

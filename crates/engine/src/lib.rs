@@ -14,6 +14,6 @@ mod variables;
 
 pub use junit::{junit_load_report, junit_report};
 pub use load::{run_load, LoadOptions, LoadReport, Progress};
-pub use result::{Check, FlowResult, StepResult};
-pub use runner::{RunOptions, Runner, RunnerError};
+pub use result::{Check, Exchange, FlowResult, HeaderPair, Payload, ResponseRecord, StepResult};
+pub use runner::{Exchanges, RunOptions, Runner, RunnerError};
 pub use variables::Variables;

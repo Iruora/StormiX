@@ -153,6 +153,7 @@ mod tests {
             logs: Vec::new(),
             error: error.map(Into::into),
             skipped,
+            exchange: None,
         }
     }
 

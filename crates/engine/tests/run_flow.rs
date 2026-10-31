@@ -7,7 +7,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::Router;
 use serde_json::{json, Value};
-use stormix_engine::{RunOptions, Runner, Variables};
+use stormix_engine::{Exchanges, Payload, RunOptions, Runner, Variables};
 use stormix_flow::TestFile;
 
 async fn login(Json(body): Json<Value>) -> (StatusCode, Json<Value>) {
@@ -251,4 +251,63 @@ async fn scripts_set_variables_change_requests_and_add_checks() {
         profile.checks[2].message.as_deref(),
         Some("ReferenceError: oops is not defined")
     );
+}
+
+#[tokio::test]
+async fn keeps_what_was_sent_and_received() {
+    let url = serve().await;
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let mut vars = base(&url);
+    vars.set("password", "wrong");
+    let result = runner.run(&flow(LOGIN), &vars).await;
+
+    let login = &result.steps[0];
+    assert!(!login.passed());
+    let exchange = login.exchange.as_ref().unwrap();
+    let header = |name: &str| {
+        exchange
+            .request_headers
+            .iter()
+            .find(|h| h.name == name)
+            .map(|h| h.value.as_str())
+    };
+    assert_eq!(header("content-type"), Some("application/json"));
+    assert!(header("user-agent").unwrap().starts_with("stormix/"));
+    let sent = exchange.request_body.as_ref().unwrap();
+    assert_eq!(sent.text, r#"{"user":"demo","password":"wrong"}"#);
+    let response = exchange.response.as_ref().unwrap();
+    assert_eq!(response.status_text, "Unauthorized");
+    assert_eq!(
+        response.body.as_ref().unwrap().text,
+        r#"{"error":"bad password"}"#
+    );
+
+    // Failed-only keeping drops the exchange of steps that passed.
+    let runner = Runner::new(RunOptions {
+        exchanges: Exchanges::FailedOnly,
+        ..RunOptions::default()
+    })
+    .unwrap();
+    let result = runner.run(&flow(LOGIN), &base(&url)).await;
+    assert!(result.passed());
+    assert!(result.steps.iter().all(|s| s.exchange.is_none()));
+
+    // A refused connection keeps the request but has no response.
+    let result = runner.run(&flow(LOGIN), &base("http://127.0.0.1:9")).await;
+    let exchange = result.steps[0].exchange.as_ref().unwrap();
+    assert!(exchange.response.is_none());
+    assert!(exchange.request_body.is_some());
+}
+
+#[test]
+fn payloads_are_cut_on_a_character_boundary_and_binary_is_described() {
+    let long = "é".repeat(Payload::LIMIT);
+    let payload = Payload::new(long.as_bytes());
+    assert!(payload.truncated && !payload.binary);
+    assert_eq!(payload.text.len(), Payload::LIMIT);
+    assert_eq!(payload.bytes as usize, long.len());
+
+    let payload = Payload::new(&[0xff, 0xfe, 0x00]);
+    assert!(payload.binary);
+    assert_eq!(payload.text, "3 bytes of binary data");
 }

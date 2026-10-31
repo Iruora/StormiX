@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Args;
-use stormix_engine::{junit_report, FlowResult, RunOptions, Runner, Variables};
+use stormix_engine::{junit_report, Exchanges, FlowResult, RunOptions, Runner, Variables};
 use stormix_flow::{Duration, Severity, TestFile};
 
 use crate::vars::{parse_var, read_env};
@@ -127,6 +127,9 @@ impl Target {
             follow_redirects: !self.no_follow_redirects,
             bail,
             script_timeout: self.script_timeout.into(),
+            // JSON reports carry the exchange of each failed step, which
+            // is what a CI log needs, without every passing body.
+            exchanges: Exchanges::FailedOnly,
         })
         .map_err(|e| e.to_string())?;
         Ok(Prepared {
@@ -302,6 +305,7 @@ mod tests {
             logs: Vec::new(),
             error: None,
             skipped: false,
+            exchange: None,
         }
     }
 

@@ -15,7 +15,7 @@ import {
   TriangleAlert,
   Zap,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   commands,
@@ -26,6 +26,7 @@ import {
   type TestFile,
   type TestFile_Deserialize,
 } from "./bindings";
+import { YamlEditor } from "./editor/YamlEditor";
 import { describeLoad } from "./lib/describe";
 import { LoadLive, LoadResult } from "./views/LoadResult";
 import { RunResult } from "./views/RunResult";
@@ -110,17 +111,21 @@ function TestFileView() {
     enabled: debounced.length > 0,
     placeholderData: (previous) => previous,
   });
-  const environments = imported?.environments ?? {};
-  const envVars = environments[envName] ?? {};
+  const environments = useMemo(() => imported?.environments ?? {}, [imported]);
+  const envVars = useMemo(() => environments[envName] ?? {}, [environments, envName]);
   // The validator does not know the chosen environment; drop its warnings
   // about variables that environment provides.
-  const result = validation.data && {
-    ...validation.data,
-    issues: validation.data.issues.filter((i) => {
-      const name = /^`\{\{([^}]+)\}\}` is not defined/.exec(i.message)?.[1];
-      return !(name && name in envVars);
-    }),
-  };
+  const result = useMemo(
+    () =>
+      validation.data && {
+        ...validation.data,
+        issues: validation.data.issues.filter((i) => {
+          const name = /^`\{\{([^}]+)\}\}` is not defined/.exec(i.message)?.[1];
+          return !(name && name in envVars);
+        }),
+      },
+    [validation.data, envVars],
+  );
   const canRun = !!result?.test && !result.issues.some((i) => i.severity === "error");
 
   const run = useMutation({
@@ -328,13 +333,12 @@ function TestFileView() {
           </div>
           {file.error && <div className="border-b border-line bg-bad-soft px-3 py-1 text-xs text-bad">{file.error.message}</div>}
           {tab === "yaml" ? (
-            <textarea
-              aria-label="Test file YAML"
-              spellCheck={false}
-              wrap="off"
+            <YamlEditor
               value={source}
-              onChange={(e) => edit(e.target.value)}
-              className="mono min-h-0 flex-1 resize-none bg-surface p-4 text-[13px] leading-5 outline-none"
+              onChange={edit}
+              validation={result}
+              variables={Object.keys(envVars)}
+              onSave={() => file.mutate("save")}
             />
           ) : (draft ?? result?.test) ? (
             <div className="min-h-0 flex-1 overflow-y-auto">

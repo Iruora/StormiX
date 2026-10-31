@@ -15,7 +15,7 @@ use stormix_metrics::{check_thresholds, Recorder, Sample, Second, Summary, Thres
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
-use crate::{FlowResult, Runner, Variables};
+use crate::{Exchanges, FlowResult, Runner, StepResult, Variables};
 
 #[derive(Debug, Clone)]
 pub struct LoadOptions {
@@ -55,7 +55,15 @@ pub struct LoadReport {
     pub name: String,
     pub summary: Summary,
     pub thresholds: Vec<ThresholdResult>,
+    /// The first failure of each step, with the request and response, so
+    /// a failure count can be traced to a real exchange. Empty in reports
+    /// saved before 1.1.
+    #[serde(default)]
+    pub samples: Vec<StepResult>,
 }
+
+/// Enough to show what each failing step did without keeping thousands.
+const MAX_SAMPLES: usize = 20;
 
 impl LoadReport {
     /// Every threshold held. A test without thresholds passes.
@@ -76,7 +84,7 @@ pub async fn run_load(
     mut on_second: impl FnMut(&Progress<'_>),
 ) -> LoadReport {
     let shared = Arc::new(Shared {
-        runner: runner.clone(),
+        runner: runner.keeping(Exchanges::FailedOnly),
         flow: flow.clone(),
         overrides: overrides.clone(),
         active: AtomicU32::new(0),
@@ -93,13 +101,14 @@ pub async fn run_load(
     ));
 
     let mut recorder = Recorder::new();
+    let mut samples = Vec::new();
     let mut tick = tokio::time::interval_at(
         tokio::time::Instant::from_std(started) + Duration::from_secs(1),
         Duration::from_secs(1),
     );
     let outcome = loop {
         tokio::select! {
-            Some(result) = rx.recv() => record(&mut recorder, &result),
+            Some(result) = rx.recv() => record(&mut recorder, &mut samples, result),
             _ = tick.tick() => {
                 let elapsed = started.elapsed();
                 let target = target(profile, elapsed.min(total));
@@ -112,7 +121,7 @@ pub async fn run_load(
     };
     let elapsed = started.elapsed();
     while let Ok(result) = rx.try_recv() {
-        record(&mut recorder, &result);
+        record(&mut recorder, &mut samples, result);
     }
     // The last, partial second, so its requests reach the timeline too.
     recorder.close_second(0);
@@ -124,6 +133,7 @@ pub async fn run_load(
         name: flow.name.clone(),
         thresholds: check_thresholds(thresholds, &summary, &recorder),
         summary,
+        samples,
     }
 }
 
@@ -237,7 +247,7 @@ async fn drive(
     }
 }
 
-fn record(recorder: &mut Recorder, result: &FlowResult) {
+fn record(recorder: &mut Recorder, samples: &mut Vec<StepResult>, result: FlowResult) {
     for step in result.steps.iter().filter(|s| !s.skipped) {
         let failed: Vec<&str> = step
             .checks
@@ -256,6 +266,15 @@ fn record(recorder: &mut Recorder, result: &FlowResult) {
         });
     }
     recorder.iteration(result.passed());
+    for step in result.steps {
+        if samples.len() < MAX_SAMPLES
+            && !step.skipped
+            && (!step.passed() || step.status.is_some_and(|s| s >= 400))
+            && !samples.iter().any(|s| s.name == step.name)
+        {
+            samples.push(step);
+        }
+    }
 }
 
 fn target(profile: &LoadProfile, elapsed: Duration) -> f64 {
