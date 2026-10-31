@@ -8,6 +8,7 @@ use stormix_flow::Severity;
 #[cfg(test)]
 use stormix_flow::TestFile;
 
+mod load;
 mod run;
 mod source;
 mod vars;
@@ -39,6 +40,8 @@ enum Command {
     /// Run a test file or collection once and check every assertion and
     /// script test, as a functional test.
     Run(run::RunArgs),
+    /// Run a test file or collection under load and check its thresholds.
+    Load(load::LoadArgs),
     /// Convert a Postman collection (.json) or Bruno collection (folder)
     /// into a Stormix test file.
     Import {
@@ -60,7 +63,7 @@ enum Command {
     },
 }
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Format {
     Text,
     Json,
@@ -75,6 +78,7 @@ fn main() -> ExitCode {
             strict,
         } => validate(&file, format, strict),
         Command::Run(args) => run::run(args),
+        Command::Load(args) => load::load(args),
         Command::Import {
             collection,
             output,

@@ -9,7 +9,9 @@ Stormix is a free, open source alternative to k6 with a GUI. It does two jobs wi
 
 A flow that passes as a regression test can be replayed by hundreds of users as a load test, and the `stormix` CLI runs the same files in CI.
 
-> **Status:** early development (M2). Flows run end to end from the CLI and the desktop app: variables, extraction and assertions, with text, JSON and JUnit reports. Postman and Bruno collections run unchanged, scripts included. Load testing lands in M3. See the [roadmap](docs/ROADMAP.md).
+> **Status:** early development (M3). Flows run end to end from the CLI and the desktop app, as functional tests or under load: variables, extraction, assertions, latency percentiles and thresholds, with text, JSON and JUnit reports. Postman and Bruno collections run unchanged, scripts included. See the [roadmap](docs/ROADMAP.md).
+
+![A load test in the Stormix desktop app](docs/screenshots/1-load-test-results.png)
 
 ## Test files
 
@@ -59,6 +61,52 @@ thresholds:
 
 A step can also carry `scripts: { pre_request: ..., test: ... }`, JavaScript in the Postman or Bruno style. Imported collections use them; see [Collections](docs/COLLECTIONS.md).
 
+## Load tests
+
+`stormix load` runs the flow under the file's `load` profile, shows live progress, and exits with 1 when a threshold fails, so it can gate a CI pipeline. The desktop app's **Load test** button does the same with a live chart.
+
+```sh
+stormix load examples/demo-api.stormix.yaml
+stormix load my-api.postman_collection.json --vus 20 --duration 1m --threshold "p95 < 300ms"
+stormix load stormix.yaml --rate 200 --duration 30s --out report.json --junit load.xml
+```
+
+```
+Demo API login · ramping from 10/s: 100/s over 5s, 100/s over 10s, 0/s over 5s (20s in all)
+
+  requests    3050 (152.2/s), 0 failed (0.00%)
+  iterations  1525, 0 failed
+  checks      10675/10675 passed (100.00%)
+  latency     min 0.1 ms  avg 0.4 ms  p50 0.3 ms  p90 0.5 ms  p95 0.5 ms  p99 0.9 ms  max 6.7 ms
+
+  step              requests  failed        p50        p95        p99
+  Log in                1525       0     0.4 ms     0.6 ms     0.9 ms
+  Read the profile      1525       0     0.2 ms     0.4 ms     0.6 ms
+
+  thresholds
+    ✓ p95 < 50ms           0.5 ms
+    ✓ errors < 1%          0.00%
+    ✓ checks > 99%         100.00%
+```
+
+| Model | Meaning |
+|---|---|
+| `constant_rate` | Starts `rate` flow iterations a second for `duration`, however slow the API gets (an open model) |
+| `ramping` | Like `constant_rate`, moving linearly from `start_rate` to each stage's `target` over its `duration` |
+| `virtual_users` | `count` users each loop the flow for `duration`, pausing `think_time` between iterations (a closed model) |
+
+Latency is measured per request with HDR histograms, so percentiles are exact to three significant digits at any volume. A request counts as failed when no response came back, a check on it failed, or, if nothing checks it, its status is 4xx or 5xx. In open models, iterations due while `--max-in-flight` (1000) are already running are dropped and reported, rather than silently slowing the arrival rate. When the test ends, running iterations get `--grace` (30s) to finish.
+
+| Option | |
+|---|---|
+| `--vus N`, `--rate N` with `--duration`, `--think-time` | Replace the file's load profile (collections have none) |
+| `--duration` alone | Change the length of a constant-rate or virtual-user profile |
+| `--threshold RULE` | Add a threshold; repeatable |
+| `--out FILE`, `--junit FILE`, `--format json` | Full JSON report, one JUnit test case per threshold, or JSON on stdout |
+| `--max-in-flight N`, `--grace 30s`, `-q` | Cap on concurrent iterations, finishing time at the end, no live progress |
+
+`bench/compare.sh` runs the same flow with Stormix and k6 under the same load; CI publishes the comparison on each run.
+
 ## Collections
 
 `stormix run` takes a Postman collection export (`.json`) or a Bruno collection folder directly, and runs its pre-request scripts, test scripts and assertions in an embedded JavaScript engine. `stormix import` turns one into a test file. [docs/COLLECTIONS.md](docs/COLLECTIONS.md) lists what carries over and what does not yet.
@@ -76,6 +124,7 @@ stormix init                                   # write stormix.yaml
 stormix validate stormix.yaml
 stormix run stormix.yaml --env staging.json --var password=secret --junit report.xml
 stormix import collection.json -o stormix.yaml # Postman export or Bruno folder
+stormix load stormix.yaml                      # see Load tests above
 ```
 
 `run` sends each step once and prints what failed:
@@ -121,11 +170,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 ```
 apps/desktop/        Tauri app: src-tauri/ (Rust shell, IPC) and src/ (React UI)
 crates/flow/         flow model, test file format, validation (no Tauri deps)
-crates/engine/       runs flows: HTTP client, variables, extraction, assertions, JUnit
+crates/engine/       runs flows once or under load: HTTP client, variables, assertions, JUnit
+crates/metrics/      HDR latency histograms, load summaries, threshold checks
 crates/script/       sandboxed QuickJS for Postman (`pm.*`) and Bruno (`bru.*`) scripts
 crates/collections/  Postman and Bruno importers
 crates/cli/          `stormix`, the command line for CI and quick runs
 examples/            example test files, and fixture collections CI runs against the demo API
+bench/               the k6 comparison
 ```
 
 ## License

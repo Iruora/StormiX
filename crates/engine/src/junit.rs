@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use crate::FlowResult;
+use crate::{FlowResult, LoadReport};
 
 /// One `<testsuite>` for the flow and one `<testcase>` per step. A failed
 /// check or a missing response is a `<failure>`; a step not run because of
@@ -66,6 +66,50 @@ pub fn junit_report(result: &FlowResult) -> String {
         }
         xml.push_str("    </testcase>\n");
     }
+    xml.push_str("  </testsuite>\n</testsuites>\n");
+    xml
+}
+
+/// One `<testcase>` per threshold, so a load test in CI shows which ones
+/// held. The run's figures go in `<system-out>`.
+pub fn junit_load_report(report: &LoadReport) -> String {
+    let s = &report.summary;
+    let failures = report.thresholds.iter().filter(|t| !t.passed).count();
+    let time = s.duration_ms / 1000.0;
+    let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    let _ = writeln!(
+        xml,
+        r#"<testsuites name="stormix load" tests="{}" failures="{failures}" time="{time:.3}">"#,
+        report.thresholds.len(),
+    );
+    let _ = writeln!(
+        xml,
+        r#"  <testsuite name="{}" tests="{}" failures="{failures}" time="{time:.3}">"#,
+        escape(&report.name),
+        report.thresholds.len(),
+    );
+    for t in &report.thresholds {
+        let _ = write!(
+            xml,
+            r#"    <testcase classname="{}" name="{}""#,
+            escape(&report.name),
+            escape(&t.threshold),
+        );
+        if t.passed {
+            xml.push_str("/>\n");
+        } else {
+            let _ = writeln!(
+                xml,
+                ">\n      <failure message=\"measured {:.2}\" type=\"threshold\"/>\n    </testcase>",
+                t.actual
+            );
+        }
+    }
+    let _ = writeln!(
+        xml,
+        "    <system-out>{} requests ({:.1}/s), {} failed; p95 {:.1} ms, p99 {:.1} ms</system-out>",
+        s.requests, s.rps, s.failed_requests, s.latency.p95, s.latency.p99,
+    );
     xml.push_str("  </testsuite>\n</testsuites>\n");
     xml
 }

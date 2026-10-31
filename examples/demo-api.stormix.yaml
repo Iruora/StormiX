@@ -1,6 +1,7 @@
 # Runs against the demo API in crates/engine/examples/demo_api.rs:
 #   cargo run -p stormix-engine --example demo_api
 #   cargo run -p stormix-cli -- run examples/demo-api.stormix.yaml
+#   cargo run -p stormix-cli -- load examples/demo-api.stormix.yaml
 version: 1
 flow:
   name: Demo API login
@@ -30,3 +31,15 @@ flow:
         - json: { path: $.user, equals: "{{user}}" }
         - json: { path: "$.roles[0]", equals: tester }
         - max_duration_ms: 1000
+# `stormix load` ramps up to 100 log-ins a second, holds, then ramps down.
+load:
+  ramping:
+    start_rate: 10
+    stages:
+      - { duration: 5s, target: 100 }
+      - { duration: 10s, target: 100 }
+      - { duration: 5s, target: 0 }
+thresholds:
+  - p95 < 50ms
+  - errors < 1%
+  - checks > 99%

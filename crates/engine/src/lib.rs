@@ -2,16 +2,18 @@
 //! request from the variables, sends it, extracts new variables from the
 //! response and checks its assertions.
 //!
-//! The load engine (M3) will drive this same step runner from many virtual
-//! users; the CLI and the desktop app use it directly for functional runs.
+//! [`run_load`] drives the same runner from many concurrent iterations,
+//! following a test file's load profile, and measures the result.
 
 mod checks;
 mod junit;
+mod load;
 mod result;
 mod runner;
 mod variables;
 
-pub use junit::junit_report;
+pub use junit::{junit_load_report, junit_report};
+pub use load::{run_load, LoadOptions, LoadReport, Progress};
 pub use result::{Check, FlowResult, StepResult};
 pub use runner::{RunOptions, Runner, RunnerError};
 pub use variables::Variables;

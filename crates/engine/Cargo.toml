@@ -8,7 +8,7 @@ license.workspace = true
 
 [features]
 # Derives `specta::Type` on results so the desktop app can export them to TypeScript.
-specta = ["dep:specta", "stormix-flow/specta"]
+specta = ["dep:specta", "stormix-flow/specta", "stormix-metrics/specta"]
 
 [dependencies]
 fastrand.workspace = true
@@ -19,6 +19,7 @@ serde_json.workspace = true
 serde_json_path.workspace = true
 specta = { workspace = true, optional = true }
 stormix-flow.workspace = true
+stormix-metrics.workspace = true
 stormix-script.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

@@ -16,8 +16,16 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { commands, type ImportedCollection, type Issue, type TestFile } from "./bindings";
+import {
+  commands,
+  events,
+  type ImportedCollection,
+  type Issue,
+  type LoadProgress,
+  type TestFile,
+} from "./bindings";
 import { describeLoad } from "./lib/describe";
+import { LoadLive, LoadResult } from "./views/LoadResult";
 import { RunResult } from "./views/RunResult";
 
 export function App() {
@@ -33,7 +41,6 @@ export function App() {
           <span className="text-base font-extrabold tracking-tight">Stormix</span>
         </div>
         <NavItem icon={<FileCode size={16} />} label="Test file" active />
-        <NavItem icon={<Gauge size={16} />} label="Load tests" soon="M3" />
         <NavItem icon={<History size={16} />} label="Runs" soon="M4" />
         <div className="mt-auto px-4 py-3 text-xs text-subtle">
           {info.data ? `v${info.data.version}` : ""}
@@ -88,20 +95,45 @@ function TestFileView() {
     enabled: debounced.length > 0,
     placeholderData: (previous) => previous,
   });
-  const result = validation.data;
+  const environments = imported?.environments ?? {};
+  const envVars = environments[envName] ?? {};
+  // The validator does not know the chosen environment; drop its warnings
+  // about variables that environment provides.
+  const result = validation.data && {
+    ...validation.data,
+    issues: validation.data.issues.filter((i) => {
+      const name = /^`\{\{([^}]+)\}\}` is not defined/.exec(i.message)?.[1];
+      return !(name && name in envVars);
+    }),
+  };
   const canRun = !!result?.test && !result.issues.some((i) => i.severity === "error");
 
-  const environments = imported?.environments ?? {};
   const run = useMutation({
     mutationFn: async (yaml: string) => {
-      const res = await commands.runTestFile(yaml, environments[envName] ?? {});
+      const res = await commands.runTestFile(yaml, envVars);
       if (res.status === "error") throw new Error(res.error);
       return res.data;
     },
   });
+  const [points, setPoints] = useState<LoadProgress[]>([]);
+  const load = useMutation({
+    mutationFn: async (yaml: string) => {
+      setPoints([]);
+      const unlisten = await events.loadProgress.listen((e) => setPoints((p) => [...p, e.payload]));
+      try {
+        const res = await commands.runLoadTest(yaml, envVars);
+        if (res.status === "error") throw new Error(res.error);
+        return res.data;
+      } finally {
+        unlisten();
+      }
+    },
+  });
+  const busy = run.isPending || load.isPending;
   const edit = (next: string | null) => {
     setText(next);
     run.reset();
+    load.reset();
   };
 
   const importFrom = useMutation({
@@ -129,7 +161,7 @@ function TestFileView() {
       <header className="flex items-center gap-3 border-b border-line bg-surface px-5 py-3">
         <h1 className="text-[15px] font-semibold">Test file</h1>
         <span className="text-xs text-muted">
-          A flow, an optional load profile and thresholds. Load tests arrive in M3.
+          A flow, an optional load profile and thresholds.
         </span>
         <span className="ml-auto text-xs text-muted">Import</span>
         <button
@@ -182,12 +214,28 @@ function TestFileView() {
         </button>
         <button
           type="button"
-          disabled={!canRun || run.isPending}
-          onClick={() => run.mutate(source)}
+          disabled={!canRun || busy}
+          onClick={() => {
+            load.reset();
+            run.mutate(source);
+          }}
           className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
         >
           {run.isPending ? <LoaderCircle size={13} className="animate-spin" /> : <Play size={13} />}
           Run once
+        </button>
+        <button
+          type="button"
+          disabled={!canRun || !result?.test?.load || busy}
+          title={result?.test?.load ? describeLoad(result.test.load) : "Add a load section to run a load test"}
+          onClick={() => {
+            run.reset();
+            load.mutate(source);
+          }}
+          className="flex items-center gap-1.5 rounded-md border border-accent px-3 py-1 text-xs font-semibold text-accent hover:bg-accent-soft disabled:opacity-50"
+        >
+          {load.isPending ? <LoaderCircle size={13} className="animate-spin" /> : <Gauge size={13} />}
+          Load test
         </button>
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
@@ -229,14 +277,16 @@ function TestFileView() {
                 </div>
               )}
               <Issues issues={result.issues} />
-              {run.error && (
+              {(run.error ?? load.error) && (
                 <div className="mt-4">
                   <Banner tone="bad" icon={<CircleAlert size={16} />} title="The run could not start">
-                    {run.error.message}
+                    {(run.error ?? load.error)?.message}
                   </Banner>
                 </div>
               )}
               {run.data && <RunResult result={run.data} />}
+              {load.isPending && <LoadLive points={points} />}
+              {load.data && <LoadResult report={load.data} />}
               <Summary test={result.test} />
             </>
           ) : null}
