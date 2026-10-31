@@ -22,6 +22,7 @@ stormix-collections.workspace = true
 stormix-engine = { workspace = true, features = ["specta"] }
 stormix-flow = { workspace = true, features = ["specta"] }
 stormix-metrics = { workspace = true, features = ["specta"] }
+stormix-report.workspace = true
 stormix-store = { workspace = true, features = ["specta"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"

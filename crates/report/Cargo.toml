@@ -1,0 +1,12 @@
+[package]
+name = "stormix-report"
+description = "Self-contained HTML reports for Stormix runs and load tests"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+stormix-engine.workspace = true
+stormix-metrics.workspace = true
+

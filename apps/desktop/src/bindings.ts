@@ -29,7 +29,7 @@ export const commands = {
 	deleteRun: (id: number) => typedError<null, string>(__TAURI_INVOKE("delete_run", { id })),
 	/**  Compares an older run with a newer one. */
 	diffRuns: (before: number, after: number) => typedError<RunDiff_Serialize, string>(__TAURI_INVOKE("diff_runs", { before, after })),
-	/**  Writes a stored run as a JSON or JUnit XML report. */
+	/**  Writes a stored run as a JSON, JUnit XML or HTML report. */
 	exportRun: (id: number, path: string, format: ReportFormat) => typedError<null, string>(__TAURI_INVOKE("export_run", { id, path, format })),
 	/**  Reads a test file the user picked. */
 	readTextFile: (path: string) => typedError<string, string>(__TAURI_INVOKE("read_text_file", { path })),
@@ -340,7 +340,7 @@ export type Metric = {
 	better: boolean,
 };
 
-export type ReportFormat = "json" | "junit";
+export type ReportFormat = "json" | "junit" | "html";
 
 export type Request = Request_Serialize | Request_Deserialize;
 

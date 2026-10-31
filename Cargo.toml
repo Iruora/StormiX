@@ -7,6 +7,7 @@ members = [
     "crates/engine",
     "crates/flow",
     "crates/metrics",
+    "crates/report",
     "crates/script",
     "crates/store",
 ]
@@ -22,6 +23,7 @@ stormix-collections = { path = "crates/collections" }
 stormix-engine = { path = "crates/engine" }
 stormix-flow = { path = "crates/flow" }
 stormix-metrics = { path = "crates/metrics" }
+stormix-report = { path = "crates/report" }
 stormix-script = { path = "crates/script" }
 stormix-store = { path = "crates/store" }
 

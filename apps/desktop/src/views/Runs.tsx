@@ -178,6 +178,12 @@ function RunRow({
   );
 }
 
+const EXPORTS: Record<ReportFormat, { name: string; ext: string }> = {
+  html: { name: "HTML report", ext: "html" },
+  json: { name: "JSON", ext: "json" },
+  junit: { name: "JUnit XML", ext: "xml" },
+};
+
 function RunDetail({
   id,
   previous,
@@ -193,10 +199,11 @@ function RunDetail({
   const exportTo = useMutation({
     mutationFn: async (format: ReportFormat) => {
       const name = `${slug(run.data?.summary.name ?? "run")}-${id}`;
+      const kind = EXPORTS[format];
       const path = await save({
-        title: format === "json" ? "Export the run as JSON" : "Export the run as JUnit XML",
-        defaultPath: format === "json" ? `${name}.json` : `${name}.xml`,
-        filters: [format === "json" ? { name: "JSON", extensions: ["json"] } : { name: "JUnit XML", extensions: ["xml"] }],
+        title: `Export the run as ${kind.name}`,
+        defaultPath: `${name}.${kind.ext}`,
+        filters: [{ name: kind.name, extensions: [kind.ext] }],
       });
       if (!path) return null;
       await unwrap(commands.exportRun(id, path, format));
@@ -222,6 +229,9 @@ function RunDetail({
               Compare with previous
             </ToolButton>
           )}
+          <ToolButton onClick={() => exportTo.mutate("html")} icon={<Download size={13} />}>
+            HTML report
+          </ToolButton>
           <ToolButton onClick={() => exportTo.mutate("json")} icon={<Download size={13} />}>
             JSON
           </ToolButton>

@@ -45,6 +45,9 @@ pub struct RunArgs {
     /// Also write a JUnit XML report here, for CI test tabs.
     #[arg(long, value_name = "FILE")]
     junit: Option<PathBuf>,
+    /// Also write a self-contained HTML report here.
+    #[arg(long, value_name = "FILE")]
+    html: Option<PathBuf>,
     #[arg(long, value_enum, default_value_t = Format::Text)]
     format: Format,
     /// Show passed checks and extracted values, not only failures.
@@ -159,6 +162,9 @@ pub fn run(args: RunArgs) -> Result<ExitCode, String> {
 
     if let Some(path) = &args.junit {
         write_report(path, &junit_report(&result))?;
+    }
+    if let Some(path) = &args.html {
+        write_report(path, &stormix_report::flow_report(&result))?;
     }
     match args.format {
         Format::Json => println!(
