@@ -47,6 +47,7 @@ What Stormix 1.0 runs from Postman and Bruno collections, feature by feature. An
 |---|---|---|---|
 | Pre-request scripts | ✓ collection, folder, request | ✓ `script:pre-request` at every level | Run in that order |
 | Test scripts | ✓ | ✓ `script:post-response`, `tests` | |
+| Top-level `await` | ✓ | ✓ | Scripts run as async functions, as in Postman and Bruno |
 | `pm.test` / `test` | ✓ | ✓ | Each one is a check in every report |
 | Legacy `tests["…"]` | ✓ | n/a | |
 | Declarative assertions | n/a | ✓ `assert`, every operator | |

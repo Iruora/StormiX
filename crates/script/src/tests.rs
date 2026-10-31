@@ -324,3 +324,41 @@ fn base64_helpers() {
     assert_eq!(out.variables["a"], Some("ZGVtbzpzZWNyZXQ=".into()));
     assert_eq!(out.variables["b"], Some("ababcd".into()));
 }
+
+#[test]
+fn top_level_await_works_like_bruno() {
+    let res = response(200, USER);
+    let out = test_with(
+        "const name = await Promise.resolve(res.getBody().name)\nbru.setVar('who', name)\ntest('async test', async () => {\n  expect(await Promise.resolve(1)).to.equal(1)\n})",
+        &res,
+    );
+    assert_eq!(out.error, None);
+    assert_eq!(out.variables.get("who"), Some(&Some("Ada".into())));
+}
+
+#[test]
+fn rejected_await_is_the_script_error() {
+    let res = response(200, USER);
+    let out = test_with(
+        "bru.setVar('before', '1')\nawait Promise.reject(new TypeError('nope'))\nbru.setVar('after', '1')",
+        &res,
+    );
+    assert_eq!(out.error.as_deref(), Some("TypeError: nope"));
+    assert!(out.variables.contains_key("before"));
+    assert!(!out.variables.contains_key("after"));
+}
+
+#[test]
+fn awaiting_forever_is_reported() {
+    let out = pre("await new Promise(() => {})");
+    assert_eq!(
+        out.error.as_deref(),
+        Some("the script awaited something that never finished")
+    );
+}
+
+#[test]
+fn awaiting_in_a_loop_still_times_out() {
+    let out = pre("while (true) { await null }");
+    assert!(out.error.unwrap().contains("did not finish within"));
+}

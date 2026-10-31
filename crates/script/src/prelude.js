@@ -535,12 +535,34 @@ globalThis.__bruAssert = function (actual, op, raw) {
 
 // ---------------------------------------------------------------- run
 
+const __describe = (e) =>
+  e && e.message ? (e.name && e.name !== "Error" ? e.name + ": " : "") + e.message : String(e);
+let __error = null;
+let __settled = false;
+
+// Bruno and Postman run scripts as async functions, so top-level `await`
+// works. Do the same: start the script here, let Rust drain the job queue,
+// then collect the results with `__finish`.
 globalThis.__run = function (source) {
-  let error = null;
+  const AsyncFunction = (async function () {}).constructor;
+  let body;
   try {
-    new Function(source)();
+    body = new AsyncFunction(source);
   } catch (e) {
-    error = e && e.message ? (e.name && e.name !== "Error" ? e.name + ": " : "") + e.message : String(e);
+    __error = __describe(e);
+    __settled = true;
+    return;
+  }
+  body().then(
+    () => { __settled = true; },
+    (e) => { __error = __describe(e); __settled = true; },
+  );
+};
+
+globalThis.__finish = function () {
+  let error = __error;
+  if (!__settled && error === null) {
+    error = "the script awaited something that never finished";
   }
   for (const name of Object.keys(globalThis.tests)) {
     __tests.push({ name, passed: Boolean(globalThis.tests[name]), message: globalThis.tests[name] ? undefined : "was falsy" });

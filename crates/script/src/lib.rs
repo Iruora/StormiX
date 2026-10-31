@@ -106,11 +106,29 @@ fn run_inner(
         Context::full(&runtime).map_err(|e| format!("cannot start the script engine: {e}"))?;
 
     let input_json = serde_json::to_string(input).expect("script input always serializes");
-    let result = context.with(|ctx| -> rquickjs::Result<String> {
+    let started = context.with(|ctx| -> rquickjs::Result<()> {
         ctx.globals().set("__INPUT", input_json)?;
         ctx.eval::<(), _>(PRELUDE)?;
         let run: rquickjs::Function = ctx.globals().get("__run")?;
         run.call((source,))
+    });
+    // Let `await` in the script resume until nothing is left to do. A job
+    // that throws only ends up rejecting the script's promise, which
+    // `__run` already records, so job errors need no handling here.
+    let result = started.and_then(|()| {
+        while runtime.is_job_pending() {
+            if Instant::now() > deadline {
+                break;
+            }
+            let _ = runtime.execute_pending_job();
+        }
+        if Instant::now() > deadline {
+            return Err(rquickjs::Error::Exception);
+        }
+        context.with(|ctx| -> rquickjs::Result<String> {
+            let finish: rquickjs::Function = ctx.globals().get("__finish")?;
+            finish.call(())
+        })
     });
     match result {
         Ok(json) => {
