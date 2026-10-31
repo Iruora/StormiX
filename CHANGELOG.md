@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 (2026-10-31)
 
 ### Desktop app
 
+- **Auto-update.** At launch the app checks the latest GitHub release and, when there is a newer version, offers to install it and restart. Update bundles are signed, and the app only installs ones signed with the project's key. Updates start working from 1.1.0; people on 1.0 download 1.1 by hand once.
 - The YAML tab is a code editor (CodeMirror): highlighting, line numbers, folding, search, and errors underlined in place as you type. Syntax errors are found on each keystroke; format errors (an unknown key, a wrong method, a bad value) and warnings from the validator are placed on the key or value they are about. The status bar counts problems and jumps to the next one (F8). Ctrl/Cmd+S saves.
 - Completion of the test file's keys where the cursor is, of methods, thresholds, and `{{variables}}` (the flow's, extracted ones, the chosen environment's and generated ones).
 - `{{variables}}` are coloured in the steps editor and the YAML editor (defined, set at run time by an extraction or a script, generated, or undefined), and hovering one shows its value and where it comes from, including what the last run extracted.

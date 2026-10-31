@@ -35,6 +35,7 @@ import { LoadLive, LoadResult } from "./views/LoadResult";
 import { RunResult } from "./views/RunResult";
 import { RUNS_KEY, RunsView } from "./views/Runs";
 import { StepsEditor } from "./views/StepsEditor";
+import { UpdateBanner } from "./views/UpdateBanner";
 
 export function App() {
   const info = useQuery({ queryKey: ["app-info"], queryFn: commands.getAppInfo });
@@ -55,12 +56,17 @@ export function App() {
           {info.data ? `v${info.data.version}` : ""}
         </div>
       </nav>
-      <main className="min-w-0 flex-1">
+      <main className="flex min-w-0 flex-1 flex-col">
+        <UpdateBanner />
         {/* Kept mounted so the editor keeps its text while the history is open. */}
-        <div className={view === "file" ? "h-full" : "hidden"}>
+        <div className={view === "file" ? "min-h-0 flex-1" : "hidden"}>
           <TestFileView />
         </div>
-        {view === "runs" && <RunsView />}
+        {view === "runs" && (
+          <div className="min-h-0 flex-1">
+            <RunsView />
+          </div>
+        )}
       </main>
     </div>
   );

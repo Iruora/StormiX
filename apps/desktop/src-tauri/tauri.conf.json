@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Stormix",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "identifier": "io.github.iruora.stormix",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -41,6 +41,18 @@
     "macOS": {
       "signingIdentity": "-",
       "minimumSystemVersion": "11.0"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZCQ0E2QTFDMEFBRDQxNjUKUldSbFFhMEtIR3JLYTBuNUsvSFphMU50aGFPTG5xWHJFYVEyZjNIeTA5SU50Tm12c25mWXd0bDcK",
+      "endpoints": [
+        "https://github.com/Iruora/StormiX/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }
