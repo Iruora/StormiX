@@ -15,14 +15,28 @@ export const commands = {
 	 *  environment) over the flow's own. Refuses a file that does not parse or
 	 *  has errors; the editor already shows why.
 	 */
-	runTestFile: (text: string, variables: { [key in string]: string }) => typedError<FlowResult_Serialize, string>(__TAURI_INVOKE("run_test_file", { text, variables })),
+	runTestFile: (text: string, variables: { [key in string]: string }, source: string | null) => typedError<FlowResult_Serialize, string>(__TAURI_INVOKE("run_test_file", { text, variables, source })),
 	/**  Imports a Postman `.json` export or a Bruno collection folder. */
 	importCollection: (path: string) => typedError<ImportedCollection, string>(__TAURI_INVOKE("import_collection", { path })),
 	/**
 	 *  Runs the file's flow under its load profile and checks its thresholds,
 	 *  sending [`LoadProgress`] events as it goes.
 	 */
-	runLoadTest: (text: string, variables: { [key in string]: string }) => typedError<LoadReport, string>(__TAURI_INVOKE("run_load_test", { text, variables })),
+	runLoadTest: (text: string, variables: { [key in string]: string }, source: string | null) => typedError<LoadReport, string>(__TAURI_INVOKE("run_load_test", { text, variables, source })),
+	/**  The most recent runs first. */
+	listRuns: (limit: number) => typedError<RunSummary_Serialize[], string>(__TAURI_INVOKE("list_runs", { limit })),
+	getRun: (id: number) => typedError<StoredRun_Serialize, string>(__TAURI_INVOKE("get_run", { id })),
+	deleteRun: (id: number) => typedError<null, string>(__TAURI_INVOKE("delete_run", { id })),
+	/**  Compares an older run with a newer one. */
+	diffRuns: (before: number, after: number) => typedError<RunDiff_Serialize, string>(__TAURI_INVOKE("diff_runs", { before, after })),
+	/**  Writes a stored run as a JSON or JUnit XML report. */
+	exportRun: (id: number, path: string, format: ReportFormat) => typedError<null, string>(__TAURI_INVOKE("export_run", { id, path, format })),
+	/**  Reads a test file the user picked. */
+	readTextFile: (path: string) => typedError<string, string>(__TAURI_INVOKE("read_text_file", { path })),
+	/**  Saves the editor's text where the user chose. */
+	writeTextFile: (path: string, text: string) => typedError<null, string>(__TAURI_INVOKE("write_text_file", { path, text })),
+	/**  The visual editor works on the parsed file and writes YAML back. */
+	testFileToYaml: (test: TestFile_Deserialize) => __TAURI_INVOKE<string>("test_file_to_yaml", { test }),
 };
 
 /** Events */
@@ -65,6 +79,24 @@ export type Body =
 
 /**  One assertion or extraction and how it went. */
 export type Check = Check_Serialize | Check_Deserialize;
+
+export type CheckChange = CheckChange_Serialize | CheckChange_Deserialize;
+
+export type CheckChange_Deserialize = {
+	name: string,
+	before?: boolean | null,
+	after?: boolean | null,
+	/**  Why it fails now, if it does. */
+	message?: string | null,
+};
+
+export type CheckChange_Serialize = {
+	name: string,
+	before: boolean | null,
+	after: boolean | null,
+	/**  Why it fails now, if it does. */
+	message: string | null,
+};
 
 /**  One assertion or extraction and how it went. */
 export type Check_Deserialize = {
@@ -218,6 +250,18 @@ export type Latency = {
 	max: number | null,
 };
 
+export type LoadDiff = LoadDiff_Serialize | LoadDiff_Deserialize;
+
+export type LoadDiff_Deserialize = {
+	metrics: Metric[],
+	steps: StepLoadDiff_Deserialize[],
+};
+
+export type LoadDiff_Serialize = {
+	metrics: Metric[],
+	steps: StepLoadDiff_Serialize[],
+};
+
 /**
  *  Open models (`constant_rate`, `ramping`) start flow iterations on a clock,
  *  so a slow API does not lower the load. The closed model (`virtual_users`)
@@ -283,6 +327,21 @@ export type LoadReport = {
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
+/**  One figure in both runs. */
+export type Metric = {
+	name: string,
+	/**  `ms`, `%` or `/s`. */
+	unit: string,
+	before: number | null,
+	after: number | null,
+	/**  Moved the wrong way by more than 10%. */
+	worse: boolean,
+	/**  Moved the right way by more than 10%. */
+	better: boolean,
+};
+
+export type ReportFormat = "json" | "junit";
+
 export type Request = Request_Serialize | Request_Deserialize;
 
 export type Request_Deserialize = {
@@ -297,6 +356,70 @@ export type Request_Serialize = {
 	url: string,
 	headers?: Header[],
 	body?: Body,
+};
+
+/**  What a run produced. */
+export type RunData = RunData_Serialize | RunData_Deserialize;
+
+/**  What a run produced. */
+export type RunData_Deserialize = { kind: "functional"; result: FlowResult_Deserialize } | { kind: "load"; result: LoadReport };
+
+/**  What a run produced. */
+export type RunData_Serialize = { kind: "functional"; result: FlowResult_Serialize } | { kind: "load"; result: LoadReport };
+
+export type RunDiff = RunDiff_Serialize | RunDiff_Deserialize;
+
+export type RunDiff_Deserialize = { kind: "functional"; 
+/**  In the newer run's order; steps only the older run had come last. */
+steps: StepDiff_Deserialize[]; broke: number; fixed: number } | {
+	kind: "load",
+} & LoadDiff_Deserialize | 
+/**  A functional run against a load test: nothing to line up. */
+({ kind: "mismatch" }) & { broke?: never; fixed?: never; steps?: never };
+
+export type RunDiff_Serialize = { kind: "functional"; 
+/**  In the newer run's order; steps only the older run had come last. */
+steps: StepDiff_Serialize[]; broke: number; fixed: number } | {
+	kind: "load",
+} & LoadDiff_Serialize | 
+/**  A functional run against a load test: nothing to line up. */
+({ kind: "mismatch" }) & { broke?: never; fixed?: never; steps?: never };
+
+/**  One line of the history list. */
+export type RunSummary = RunSummary_Serialize | RunSummary_Deserialize;
+
+/**  One line of the history list. */
+export type RunSummary_Deserialize = {
+	id: number,
+	/**  `functional` or `load`. */
+	kind: string,
+	/**  The flow's name. */
+	name: string,
+	/**  The file it came from, when it was saved or imported from one. */
+	source?: string | null,
+	/**  Milliseconds since the Unix epoch. */
+	startedAt: number | null,
+	durationMs: number | null,
+	passed: boolean,
+	/**  A few words on the outcome, like `5/6 steps passed` or `p95 12 ms, 340 req/s`. */
+	headline: string,
+};
+
+/**  One line of the history list. */
+export type RunSummary_Serialize = {
+	id: number,
+	/**  `functional` or `load`. */
+	kind: string,
+	/**  The flow's name. */
+	name: string,
+	/**  The file it came from, when it was saved or imported from one. */
+	source: string | null,
+	/**  Milliseconds since the Unix epoch. */
+	startedAt: number | null,
+	durationMs: number | null,
+	passed: boolean,
+	/**  A few words on the outcome, like `5/6 steps passed` or `p95 12 ms, 340 req/s`. */
+	headline: string,
 };
 
 /**  JavaScript carried over from Postman or Bruno, run in an embedded engine. */
@@ -339,6 +462,54 @@ export type Stage = {
 };
 
 export type Step = Step_Serialize | Step_Deserialize;
+
+export type StepChange = "broke" | "fixed" | "still_failing" | "still_passing" | "added" | "removed";
+
+export type StepDiff = StepDiff_Serialize | StepDiff_Deserialize;
+
+export type StepDiff_Deserialize = {
+	name: string,
+	change: StepChange,
+	beforeStatus?: number | null,
+	afterStatus?: number | null,
+	beforeMs?: number | null,
+	afterMs?: number | null,
+	/**  Only checks that changed, appeared or disappeared. */
+	checks: CheckChange_Deserialize[],
+	/**  The newer run's error, when it has one. */
+	error?: string | null,
+};
+
+export type StepDiff_Serialize = {
+	name: string,
+	change: StepChange,
+	beforeStatus: number | null,
+	afterStatus: number | null,
+	beforeMs: number | null,
+	afterMs: number | null,
+	/**  Only checks that changed, appeared or disappeared. */
+	checks: CheckChange_Serialize[],
+	/**  The newer run's error, when it has one. */
+	error: string | null,
+};
+
+export type StepLoadDiff = StepLoadDiff_Serialize | StepLoadDiff_Deserialize;
+
+export type StepLoadDiff_Deserialize = {
+	name: string,
+	beforeP95?: number | null,
+	afterP95?: number | null,
+	beforeFailed?: number | null,
+	afterFailed?: number | null,
+};
+
+export type StepLoadDiff_Serialize = {
+	name: string,
+	beforeP95: number | null,
+	afterP95: number | null,
+	beforeFailed: number | null,
+	afterFailed: number | null,
+};
 
 export type StepResult = StepResult_Serialize | StepResult_Deserialize;
 
@@ -415,6 +586,18 @@ export type Step_Serialize = {
 	/**  Declarative checks on the response. Script tests are reported alongside. */
 	assert?: Assertion_Serialize[],
 	scripts?: Scripts_Serialize,
+};
+
+export type StoredRun = StoredRun_Serialize | StoredRun_Deserialize;
+
+export type StoredRun_Deserialize = {
+	summary: RunSummary_Deserialize,
+	data: RunData_Deserialize,
+};
+
+export type StoredRun_Serialize = {
+	summary: RunSummary_Serialize,
+	data: RunData_Serialize,
 };
 
 /**

@@ -3891,12 +3891,14 @@ name = "stormix-desktop"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "specta",
  "specta-typescript",
  "stormix-collections",
  "stormix-engine",
  "stormix-flow",
  "stormix-metrics",
+ "stormix-store",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
