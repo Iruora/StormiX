@@ -1,6 +1,9 @@
 import { CircleCheck, CircleX, LoaderCircle } from "lucide-react";
+import { useState } from "react";
 
-import type { LoadProgress, LoadReport, Second, ThresholdResult } from "../bindings";
+import type { LoadProgress, LoadReport, Second, StepResult, ThresholdResult } from "../bindings";
+import { DetailsButton } from "./RunResult";
+import { StepDetails } from "./StepDetails";
 
 /** Live figures while a load test runs: progress, the current second and a throughput chart. */
 export function LoadLive({ points }: { points: LoadProgress[] }) {
@@ -36,6 +39,11 @@ export function LoadResult({ report }: { report: LoadReport }) {
   const passed = report.thresholds.every((t) => t.passed);
   const errorRate = s.requests ? (s.failedRequests / s.requests) * 100 : 0;
   const l = s.latency;
+  const samples = report.samples ?? [];
+  const [open, setOpen] = useState<StepResult | null>(null);
+  // Reasons are `step: check`, `step: status N`, or a connection error.
+  const sampleFor = (reason: string) =>
+    samples.find((x) => reason.startsWith(`${x.name}: `) || (x.error != null && reason === x.error));
   return (
     <section className="mt-4 rounded-lg border border-line bg-surface">
       <div className="flex items-center gap-2 border-b border-line px-4 py-3">
@@ -104,12 +112,16 @@ export function LoadResult({ report }: { report: LoadReport }) {
         <div className="border-t border-line px-4 py-3">
           <div className="mb-1 text-xs font-medium text-subtle">Most common failures</div>
           <ul className="space-y-0.5 text-[13px]">
-            {s.failures.map((f) => (
-              <li key={f.reason} className="flex gap-2">
-                <span className="mono w-12 shrink-0 text-right text-xs text-bad">{f.count}×</span>
-                <span className="min-w-0 break-words">{f.reason}</span>
-              </li>
-            ))}
+            {s.failures.map((f) => {
+              const sample = sampleFor(f.reason);
+              return (
+                <li key={f.reason} className="flex items-start gap-2">
+                  <span className="mono w-12 shrink-0 pt-px text-right text-xs text-bad">{f.count}×</span>
+                  <span className="min-w-0 flex-1 break-words">{f.reason}</span>
+                  {sample && <DetailsButton failed onClick={() => setOpen(sample)} />}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -119,6 +131,7 @@ export function LoadResult({ report }: { report: LoadReport }) {
           {s.interruptedIterations > 0 && `${s.interruptedIterations} iterations were cut off at the end.`}
         </div>
       )}
+      {open && <StepDetails step={open} onClose={() => setOpen(null)} />}
     </section>
   );
 }

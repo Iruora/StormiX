@@ -1,6 +1,8 @@
-import { CircleCheck, CircleMinus, CircleX } from "lucide-react";
+import { CircleCheck, CircleMinus, CircleX, PanelRightOpen } from "lucide-react";
+import { useState } from "react";
 
 import type { FlowResult, StepResult } from "../bindings";
+import { StepDetails } from "./StepDetails";
 
 /** The outcome of one functional run: a summary line, then each step with what failed. */
 export function RunResult({ result }: { result: FlowResult }) {
@@ -9,6 +11,7 @@ export function RunResult({ result }: { result: FlowResult }) {
   const checks = ran.flatMap((s) => s.checks);
   const passedChecks = checks.filter((c) => c.passed).length;
   const ok = failed === 0 && ran.length === result.steps.length;
+  const [open, setOpen] = useState<StepResult | null>(null);
 
   return (
     <section className="mt-4 rounded-lg border border-line bg-surface">
@@ -25,14 +28,15 @@ export function RunResult({ result }: { result: FlowResult }) {
       </div>
       <ol className="divide-y divide-line">
         {result.steps.map((step, i) => (
-          <Step key={i} step={step} />
+          <Step key={i} step={step} onDetails={() => setOpen(step)} />
         ))}
       </ol>
+      {open && <StepDetails step={open} onClose={() => setOpen(null)} />}
     </section>
   );
 }
 
-function Step({ step }: { step: StepResult }) {
+function Step({ step, onDetails }: { step: StepResult; onDetails: () => void }) {
   const passed = stepPassed(step);
   const failedChecks = step.checks.filter((c) => !c.passed);
   const passedChecks = step.checks.filter((c) => c.passed);
@@ -55,6 +59,7 @@ function Step({ step }: { step: StepResult }) {
             <>
               {step.status != null && <StatusPill status={step.status} />}
               <span className="mono">{formatMs(step.durationMs ?? 0)}</span>
+              <DetailsButton failed={!passed} onClick={onDetails} />
             </>
           )}
         </span>
@@ -94,6 +99,24 @@ function Step({ step }: { step: StepResult }) {
         </details>
       )}
     </li>
+  );
+}
+
+/** Prominent on failed steps; passed ones keep a quieter one for their response. */
+export function DetailsButton({ failed, onClick }: { failed: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex items-center gap-1 rounded border px-1.5 py-px text-xs font-medium ${
+        failed
+          ? "border-bad/40 bg-bad-soft text-bad hover:border-bad"
+          : "border-line text-muted hover:bg-surface-2 hover:text-ink"
+      }`}
+    >
+      <PanelRightOpen size={12} />
+      Details
+    </button>
   );
 }
 

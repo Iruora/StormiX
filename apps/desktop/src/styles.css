@@ -24,6 +24,15 @@
   --bad: #b91c1c;
   --bad-soft: #fdeaea;
 
+  /* YAML highlighting in the editor. */
+  --syn-key: #4338ca;
+  --syn-string: #0f766e;
+  --syn-number: #b45309;
+  --syn-comment: #8a90a3;
+  --syn-meta: #a21caf;
+
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+
   color-scheme: light;
 }
 
@@ -47,6 +56,12 @@
     --warn-soft: #33270e;
     --bad: #f87171;
     --bad-soft: #3a1717;
+
+    --syn-key: #a5b4fc;
+    --syn-string: #5eead4;
+    --syn-number: #fbbf24;
+    --syn-comment: #6d7390;
+    --syn-meta: #f0abfc;
 
     color-scheme: dark;
   }
@@ -88,5 +103,5 @@ body {
 }
 
 .mono {
-  font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }

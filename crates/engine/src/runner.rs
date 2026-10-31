@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::error::Error as _;
 use std::time::{Duration, Instant};
 
-use reqwest::header::CONTENT_TYPE;
+use reqwest::header::{HeaderMap, CONTENT_TYPE};
 use reqwest::redirect::Policy;
 use stormix_flow::{Body, Flow, KeyValue, Request, Step};
 use stormix_script::{
@@ -12,6 +12,7 @@ use stormix_script::{
 };
 
 use crate::checks::{self, Response};
+use crate::result::{Exchange, HeaderPair, Payload, ResponseRecord};
 use crate::{Check, FlowResult, StepResult, Variables};
 
 #[derive(Debug, Clone)]
@@ -25,6 +26,16 @@ pub struct RunOptions {
     pub bail: bool,
     /// For each pre-request or test script.
     pub script_timeout: Duration,
+    /// Which steps keep the request and response they exchanged.
+    pub exchanges: Exchanges,
+}
+
+/// Keeping headers and bodies costs a copy per request, which a load test
+/// only pays for the requests worth looking at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Exchanges {
+    All,
+    FailedOnly,
 }
 
 impl Default for RunOptions {
@@ -35,6 +46,7 @@ impl Default for RunOptions {
             follow_redirects: true,
             bail: false,
             script_timeout: Duration::from_secs(5),
+            exchanges: Exchanges::All,
         }
     }
 }
@@ -55,7 +67,7 @@ pub struct Runner {
 impl Runner {
     pub fn new(options: RunOptions) -> Result<Self, RunnerError> {
         let client = reqwest::Client::builder()
-            .user_agent(concat!("stormix/", env!("CARGO_PKG_VERSION")))
+            .user_agent(USER_AGENT)
             .timeout(options.timeout)
             .redirect(if options.follow_redirects {
                 Policy::limited(10)
@@ -65,6 +77,13 @@ impl Runner {
             .tls_danger_accept_invalid_certs(options.insecure)
             .build()?;
         Ok(Self { client, options })
+    }
+
+    /// The same client and connection pool, with other exchange keeping.
+    pub(crate) fn keeping(&self, exchanges: Exchanges) -> Self {
+        let mut runner = self.clone();
+        runner.options.exchanges = exchanges;
+        runner
     }
 
     /// Runs every step once. `overrides` win over the flow's own variables.
@@ -140,6 +159,7 @@ impl Runner {
             logs,
             error: None,
             skipped: false,
+            exchange: None,
         };
         let method = match reqwest::Method::from_bytes(outgoing.method.as_bytes()) {
             Ok(method) => method,
@@ -150,6 +170,7 @@ impl Runner {
         };
 
         let mut builder = self.client.request(method, &url);
+        let mut multipart_text = None;
         let mut has_content_type = false;
         for (name, value) in &outgoing.headers {
             has_content_type |= name.eq_ignore_ascii_case("content-type");
@@ -174,9 +195,14 @@ impl Runner {
             }
             OutBody::Multipart(fields) => {
                 let mut form = reqwest::multipart::Form::new();
+                let mut shown = Vec::with_capacity(fields.len());
                 for (k, v) in fields {
-                    form = form.text(render(k, &mut missing), render(v, &mut missing));
+                    let (k, v) = (render(k, &mut missing), render(v, &mut missing));
+                    shown.push(format!("{k}={v}"));
+                    form = form.text(k, v);
                 }
+                // The form is streamed, so it cannot be read back once built.
+                multipart_text = Some(shown.join("\n"));
                 builder.multipart(form)
             }
         };
@@ -186,12 +212,22 @@ impl Runner {
             ));
         }
 
+        let request = match builder.build() {
+            Ok(request) => request,
+            Err(err) => {
+                result.error = Some(describe(&err, self.options.timeout));
+                return result;
+            }
+        };
+        let sent = Sent::of(&request, multipart_text);
+
         let started = Instant::now();
-        let response = match builder.send().await {
+        let response = match self.client.execute(request).await {
             Ok(response) => response,
             Err(err) => {
                 result.duration_ms = millis(started.elapsed());
                 result.error = Some(describe(&err, self.options.timeout));
+                result.exchange = Some(sent.into_exchange(None));
                 return result;
             }
         };
@@ -204,6 +240,11 @@ impl Runner {
                 result.duration_ms = millis(started.elapsed());
                 result.status = Some(status.as_u16());
                 result.error = Some(describe(&err, self.options.timeout));
+                result.exchange = Some(sent.into_exchange(Some(ResponseRecord {
+                    status_text: status.canonical_reason().unwrap_or_default().to_owned(),
+                    headers: header_pairs(&headers),
+                    body: None,
+                })));
                 return result;
             }
         };
@@ -267,9 +308,83 @@ impl Runner {
                 .extend(script_checks("test script", out.tests, out.error));
             result.logs.extend(out.logs);
         }
+        // Under load an unchecked 4xx or 5xx counts as failed too.
+        if self.options.exchanges == Exchanges::All || !result.passed() || status.as_u16() >= 400 {
+            result.exchange = Some(sent.into_exchange(Some(ResponseRecord {
+                status_text: status.canonical_reason().unwrap_or_default().to_owned(),
+                headers: header_pairs(&headers),
+                body: (!body.is_empty()).then(|| Payload::new(&body)),
+            })));
+        }
         result
     }
 }
+
+/// The request as built, held until the step knows whether to keep it.
+/// Cloning a request built from bytes shares the body rather than copying it.
+struct Sent {
+    copy: Option<reqwest::Request>,
+    /// Streamed bodies cannot be cloned; their headers and text are kept instead.
+    headers: Option<HeaderMap>,
+    multipart: Option<String>,
+}
+
+impl Sent {
+    fn of(request: &reqwest::Request, multipart: Option<String>) -> Self {
+        let copy = request.try_clone();
+        Self {
+            headers: copy.is_none().then(|| request.headers().clone()),
+            copy,
+            multipart,
+        }
+    }
+
+    fn into_exchange(self, response: Option<ResponseRecord>) -> Exchange {
+        let empty = HeaderMap::new();
+        let headers = match (&self.copy, &self.headers) {
+            (Some(copy), _) => copy.headers(),
+            (None, Some(headers)) => headers,
+            (None, None) => &empty,
+        };
+        let body = self
+            .copy
+            .as_ref()
+            .and_then(|c| c.body())
+            .and_then(|b| b.as_bytes());
+        let mut request_headers = header_pairs(headers);
+        // The client adds these to every request.
+        for (name, value) in [("user-agent", USER_AGENT), ("accept", "*/*")] {
+            if !headers.contains_key(name) {
+                request_headers.push(HeaderPair {
+                    name: name.to_owned(),
+                    value: value.to_owned(),
+                });
+            }
+        }
+        let request_body = match (body, self.multipart) {
+            (Some(body), _) if !body.is_empty() => Some(Payload::new(body)),
+            (_, Some(text)) => Some(Payload::new(text.as_bytes())),
+            _ => None,
+        };
+        Exchange {
+            request_headers,
+            request_body,
+            response,
+        }
+    }
+}
+
+fn header_pairs(headers: &HeaderMap) -> Vec<HeaderPair> {
+    headers
+        .iter()
+        .map(|(k, v)| HeaderPair {
+            name: k.as_str().to_owned(),
+            value: String::from_utf8_lossy(v.as_bytes()).into_owned(),
+        })
+        .collect()
+}
+
+const USER_AGENT: &str = concat!("stormix/", env!("CARGO_PKG_VERSION"));
 
 /// The request being built, in the shape scripts can read and change.
 struct Outgoing {
@@ -408,6 +523,7 @@ fn skipped(step: &Step) -> StepResult {
         logs: Vec::new(),
         error: None,
         skipped: true,
+        exchange: None,
     }
 }
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Desktop app
+
+- The YAML tab is a code editor (CodeMirror): highlighting, line numbers, folding, search, and errors underlined in place as you type. Syntax errors are found on each keystroke; format errors (an unknown key, a wrong method, a bad value) and warnings from the validator are placed on the key or value they are about. The status bar counts problems and jumps to the next one (F8). Ctrl/Cmd+S saves.
+- Completion of the test file's keys where the cursor is, of methods, thresholds, and `{{variables}}` (the flow's, extracted ones, the chosen environment's and generated ones).
+- A **Details** button on each step of a run, and on each of a load test's most common failures, opens the failed checks, the error, the request as sent (headers and body) and the response as received, with JSON bodies indented and a **Copy as cURL** button.
+
+### Engine
+
+- Each step result can carry its `exchange`: request headers and body as sent and the response status text, headers and body, bodies cut at 64 KB. The app keeps it for every step; load tests and the CLI keep it only for failed steps, so a `--format json` report shows what a failing request sent and got back.
+- Load reports carry `samples`: the first failure of each step, with its exchange. Runs saved by 1.0 still open.
+
 ## 1.0.0
 
 The first stable release: one engine for API regression runs and load tests, in a desktop app for macOS, Windows and Linux and in the `stormix` CLI.
