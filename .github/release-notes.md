@@ -1,10 +1,11 @@
-Stormix 1.0 is the first stable release: API regression runs and load tests from one engine, in a desktop app and the `stormix` CLI. Postman and Bruno collections run as they are, scripts included.
+Stormix 1.1 makes the desktop app easier to edit test files in and to debug failures with.
 
-- Desktop app: import collections, edit flows as steps or YAML, run once or under load with a live chart, keep every run, and compare two runs to see what broke.
-- CLI for CI: `stormix run` and `stormix load` with JUnit XML, JSON and self-contained HTML reports, and thresholds that set the exit code.
-- Load engine: constant-rate, ramping and virtual-user models with HDR latency percentiles. 42.7k req/s against k6's 22.3k at 50 VUs on the same machine, in 13 MB of memory.
+- **A real YAML editor.** Syntax errors and test-file mistakes (an unknown key, a wrong method, an undefined `{{variable}}`) are underlined as you type, with a hint and a jump to the next problem. Keys, methods, thresholds and variables autocomplete.
+- **Details on failures.** Every step of a run, and each common failure of a load test, opens the failed checks, the request as sent, the response as received, and a **Copy as cURL** button. JSON reports from the CLI include the request and response of each failed step.
+- **Variables and methods at a glance.** `{{variables}}` are coloured by where they come from, and hovering one shows its value, including what the last run extracted. Each HTTP method has its own colour.
+- **Fixed:** switching a request body between json, raw and form no longer drops its content, such as a Bruno JSON body.
 
-See the [changelog](https://github.com/Iruora/StormiX/blob/main/CHANGELOG.md) for everything in this release and [Getting started](https://github.com/Iruora/StormiX/blob/main/docs/GETTING_STARTED.md) to begin.
+See the [changelog](https://github.com/Iruora/StormiX/blob/main/CHANGELOG.md) for details and [Getting started](https://github.com/Iruora/StormiX/blob/main/docs/GETTING_STARTED.md) to begin.
 
 ## Install
 
