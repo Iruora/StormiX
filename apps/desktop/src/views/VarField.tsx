@@ -149,8 +149,8 @@ function VariableTip({
   return (
     <div
       role="tooltip"
-      className="pointer-events-none fixed z-[60] max-w-sm rounded-md border border-line bg-surface px-2.5 py-1.5 text-xs shadow-lg"
-      style={{ left: Math.min(x, window.innerWidth - 340), top: y, transform: above ? "translateY(-100%)" : undefined }}
+      className="pointer-events-none fixed z-[60] max-w-[min(24rem,calc(100vw-1rem))] rounded-md border border-line bg-surface px-2.5 py-1.5 text-xs shadow-lg"
+      style={{ left: Math.max(8, Math.min(x, window.innerWidth - tipWidth())), top: y, transform: above ? "translateY(-100%)" : undefined }}
     >
       {info?.value != null ? (
         <>
@@ -166,4 +166,10 @@ function VariableTip({
       )}
     </div>
   );
+}
+
+/** The widest the tooltip gets, in pixels, plus a margin: 24rem at the current text size. */
+function tipWidth(): number {
+  const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  return Math.min(24 * rem, window.innerWidth - 16) + 8;
 }

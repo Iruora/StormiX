@@ -57,11 +57,11 @@ export function App() {
           className="mb-3 grid size-8 place-items-center rounded-lg bg-accent text-bolt"
           title={info.data ? `Stormix v${info.data.version}` : "Stormix"}
         >
-          <Zap size={17} fill="currentColor" />
+          <Zap size="1.0625rem" fill="currentColor" />
         </span>
-        <NavItem icon={<FileCode size={18} />} label="Test file" active={view === "file"} onClick={() => setView("file")} />
-        <NavItem icon={<History size={18} />} label="Runs" active={view === "runs"} onClick={() => setView("runs")} />
-        <div className="mt-auto text-[10px] text-subtle">{info.data ? `v${info.data.version}` : ""}</div>
+        <NavItem icon={<FileCode size="1.125rem" />} label="Test file" active={view === "file"} onClick={() => setView("file")} />
+        <NavItem icon={<History size="1.125rem" />} label="Runs" active={view === "runs"} onClick={() => setView("runs")} />
+        <div className="mt-auto text-[0.625rem] text-subtle">{info.data ? `v${info.data.version}` : ""}</div>
       </nav>
       <main className="flex min-w-0 flex-1 flex-col">
         <UpdateBanner />
@@ -343,7 +343,7 @@ function TestFileView() {
 
   const editorPane = (
     <>
-      <div className="flex items-center gap-1 border-b border-line bg-surface px-3 py-1.5">
+      <div className="flex flex-wrap items-center gap-1 whitespace-nowrap border-b border-line bg-surface px-3 py-1.5">
         {(["steps", "flow", "yaml"] as const).map((t) => (
           <button
             key={t}
@@ -356,13 +356,12 @@ function TestFileView() {
             {t === "steps" ? "Steps" : t === "flow" ? "Flow" : "YAML"}
           </button>
         ))}
-        <span className="mono ml-3 min-w-0 truncate text-xs text-muted" title={path ?? undefined}>
+        <span className="mono ml-3 min-w-0 flex-1 basis-24 truncate text-xs text-muted" title={path ?? undefined}>
           {path ? path.split(/[\\/]/).pop() : imported ? "Imported, not saved" : "Unsaved example"}
           {dirty && <span className="text-warn"> ●</span>}
         </span>
-        <span className="ml-auto" />
-        <FileButton label="Open" icon={<FolderOpen size={13} />} onClick={() => file.mutate("open")} />
-        <FileButton label="Save" icon={<Save size={13} />} onClick={() => file.mutate("save")} />
+        <FileButton label="Open" icon={<FolderOpen size="0.8125rem" />} onClick={() => file.mutate("open")} />
+        <FileButton label="Save" icon={<Save size="0.8125rem" />} onClick={() => file.mutate("save")} />
         <FileButton label="Save as" onClick={() => file.mutate("saveAs")} />
         <PanelToggle
           open={panel.open}
@@ -415,21 +414,21 @@ function TestFileView() {
   const resultsPane = (
     <>
       {result?.parseError ? (
-        <Banner tone="bad" icon={<CircleAlert size={16} />} title="The file does not parse">
+        <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="The file does not parse">
           <pre className="mono whitespace-pre-wrap text-xs">{result.parseError}</pre>
         </Banner>
       ) : result?.test ? (
         <>
           {envError && (
             <div className="mb-4">
-              <Banner tone="bad" icon={<CircleAlert size={16} />} title="Environment">
+              <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="Environment">
                 {envError}
               </Banner>
             </div>
           )}
           {importFrom.error && (
             <div className="mb-4">
-              <Banner tone="bad" icon={<CircleAlert size={16} />} title="The collection could not be imported">
+              <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="The collection could not be imported">
                 {importFrom.error.message}
               </Banner>
             </div>
@@ -438,7 +437,7 @@ function TestFileView() {
             <div className="mb-4">
               <Banner
                 tone="warn"
-                icon={<TriangleAlert size={16} />}
+                icon={<TriangleAlert size="1rem" />}
                 title={`${count(imported.warnings.length, "thing")} did not carry over`}
               >
                 <ul className="space-y-1">
@@ -452,7 +451,7 @@ function TestFileView() {
           <Issues issues={result.issues} />
           {(run.error ?? load.error) && (
             <div className="mt-4">
-              <Banner tone="bad" icon={<CircleAlert size={16} />} title="The run could not start">
+              <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="The run could not start">
                 {(run.error ?? load.error)?.message}
               </Banner>
             </div>
@@ -498,116 +497,119 @@ function TestFileView() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-3 whitespace-nowrap border-b border-line bg-surface px-5 py-3">
-        <h1 className="text-[15px] font-semibold">Test file</h1>
-        <span className="min-w-0 truncate text-xs text-muted">
-          A flow, an optional load profile and thresholds.
-        </span>
-        <span className="ml-auto text-xs text-muted">Import</span>
-        <button
-          type="button"
-          disabled={importFrom.isPending}
-          onClick={() => importFrom.mutate("postman")}
-          className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
-        >
-          <FileJson size={13} />
-          Postman
-        </button>
-        <button
-          type="button"
-          disabled={importFrom.isPending}
-          onClick={() => importFrom.mutate("bruno")}
-          className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
-        >
-          <FolderOpen size={13} />
-          Bruno
-        </button>
-        <div className="flex items-center rounded-md border border-line">
-          {envNames.length > 0 && (
-            <select
-              aria-label="Environment"
-              value={envName}
-              onChange={(e) => {
-                setEnvName(e.target.value);
-                run.reset();
-              }}
-              className="max-w-40 rounded-l-md border-r border-line bg-surface px-2 py-1 text-xs"
-            >
-              <option value="">No environment</option>
-              {envNames.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          )}
-          {env && env.secrets.length > 0 && (
-            <EnvSecrets
-              names={env.secrets}
-              values={secretValues}
-              onChange={(name, value) => {
-                setSecretValues((v) => ({ ...v, [name]: value }));
-                run.reset();
-              }}
-            />
-          )}
-          {env && (
-            <button
-              type="button"
-              aria-label={`Remove the ${envName} environment`}
-              title="Remove this environment from the list"
-              onClick={() => removeEnv(envName)}
-              className="border-r border-line px-1.5 py-1 text-muted hover:bg-surface-2 hover:text-ink"
-            >
-              <X size={13} />
-            </button>
-          )}
+      {/* Wraps onto more lines when the window is narrow or the text is large. */}
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 whitespace-nowrap border-b border-line bg-surface px-5 py-3">
+        <div className="flex min-w-0 flex-1 basis-48 items-baseline gap-3">
+          <h1 className="shrink-0 text-[0.9375rem] font-semibold">Test file</h1>
+          <span className="min-w-0 truncate text-xs text-muted">A flow, an optional load profile and thresholds.</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="text-xs text-muted">Import</span>
           <button
             type="button"
-            disabled={importEnv.isPending}
-            onClick={() => importEnv.mutate()}
-            title="Import an environment file: YAML or JSON variables, a Postman environment export or a Bruno .bru environment"
-            className="flex items-center gap-1.5 rounded-r-md px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
+            disabled={importFrom.isPending}
+            onClick={() => importFrom.mutate("postman")}
+            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
           >
-            <FileUp size={13} />
-            {envNames.length > 0 ? "Env" : "Import env"}
+            <FileJson size="0.8125rem" />
+            Postman
+          </button>
+          <button
+            type="button"
+            disabled={importFrom.isPending}
+            onClick={() => importFrom.mutate("bruno")}
+            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
+          >
+            <FolderOpen size="0.8125rem" />
+            Bruno
+          </button>
+          <div className="flex items-center rounded-md border border-line">
+            {envNames.length > 0 && (
+              <select
+                aria-label="Environment"
+                value={envName}
+                onChange={(e) => {
+                  setEnvName(e.target.value);
+                  run.reset();
+                }}
+                className="max-w-40 rounded-l-md border-r border-line bg-surface px-2 py-1 text-xs"
+              >
+                <option value="">No environment</option>
+                {envNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {env && env.secrets.length > 0 && (
+              <EnvSecrets
+                names={env.secrets}
+                values={secretValues}
+                onChange={(name, value) => {
+                  setSecretValues((v) => ({ ...v, [name]: value }));
+                  run.reset();
+                }}
+              />
+            )}
+            {env && (
+              <button
+                type="button"
+                aria-label={`Remove the ${envName} environment`}
+                title="Remove this environment from the list"
+                onClick={() => removeEnv(envName)}
+                className="border-r border-line px-1.5 py-1 text-muted hover:bg-surface-2 hover:text-ink"
+              >
+                <X size="0.8125rem" />
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={importEnv.isPending}
+              onClick={() => importEnv.mutate()}
+              title="Import an environment file: YAML or JSON variables, a Postman environment export or a Bruno .bru environment"
+              className="flex items-center gap-1.5 rounded-r-md px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
+            >
+              <FileUp size="0.8125rem" />
+              {envNames.length > 0 ? "Env" : "Import env"}
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setImported(null);
+              setPath(null);
+              edit(null);
+            }}
+            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
+          >
+            <FilePlus size="0.8125rem" />
+            New from example
+          </button>
+          <button
+            type="button"
+            disabled={!canRun || busy}
+            onClick={() => {
+              load.reset();
+              panel.setOpen(true);
+              run.mutate(source);
+            }}
+            className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {run.isPending ? <LoaderCircle size="0.8125rem" className="animate-spin" /> : <Play size="0.8125rem" />}
+            Run once
+          </button>
+          <button
+            type="button"
+            disabled={!canRun || busy}
+            title={result?.test?.load ? describeLoad(result.test.load) : "Choose the endpoints and load profile, then run"}
+            onClick={() => setSetupOpen(true)}
+            className="flex items-center gap-1.5 rounded-md border border-accent px-3 py-1 text-xs font-semibold text-accent hover:bg-accent-soft disabled:opacity-50"
+          >
+            {load.isPending ? <LoaderCircle size="0.8125rem" className="animate-spin" /> : <Gauge size="0.8125rem" />}
+            Load test
           </button>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setImported(null);
-            setPath(null);
-            edit(null);
-          }}
-          className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
-        >
-          <FilePlus size={13} />
-          New from example
-        </button>
-        <button
-          type="button"
-          disabled={!canRun || busy}
-          onClick={() => {
-            load.reset();
-            panel.setOpen(true);
-            run.mutate(source);
-          }}
-          className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
-        >
-          {run.isPending ? <LoaderCircle size={13} className="animate-spin" /> : <Play size={13} />}
-          Run once
-        </button>
-        <button
-          type="button"
-          disabled={!canRun || busy}
-          title={result?.test?.load ? describeLoad(result.test.load) : "Choose the endpoints and load profile, then run"}
-          onClick={() => setSetupOpen(true)}
-          className="flex items-center gap-1.5 rounded-md border border-accent px-3 py-1 text-xs font-semibold text-accent hover:bg-accent-soft disabled:opacity-50"
-        >
-          {load.isPending ? <LoaderCircle size={13} className="animate-spin" /> : <Gauge size={13} />}
-          Load test
-        </button>
       </header>
       {setupOpen && result?.test && (
         <LoadSetup
@@ -633,7 +635,7 @@ function PanelToggle({ open, onClick, alert }: { open: boolean; onClick: () => v
       title={label}
       className="relative ml-1 grid size-6 place-items-center rounded text-muted hover:bg-surface-2 hover:text-ink"
     >
-      {open ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+      {open ? <PanelRightClose size="0.9375rem" /> : <PanelRightOpen size="0.9375rem" />}
       {/* While the panel is hidden, a dot says it has something to show. */}
       {!open && alert && (
         <span className={`absolute right-0.5 top-0.5 size-1.5 rounded-full ${alert === "bad" ? "bg-bad" : "bg-warn"}`} />
@@ -658,7 +660,7 @@ function FileButton({ label, icon, onClick }: { label: string; icon?: ReactNode;
 function Issues({ issues }: { issues: Issue[] }) {
   if (issues.length === 0) {
     return (
-      <Banner tone="ok" icon={<CircleCheck size={16} />} title="Valid">
+      <Banner tone="ok" icon={<CircleCheck size="1rem" />} title="Valid">
         No problems found.
       </Banner>
     );
@@ -667,7 +669,7 @@ function Issues({ issues }: { issues: Issue[] }) {
   return (
     <Banner
       tone={errors > 0 ? "bad" : "warn"}
-      icon={errors > 0 ? <CircleAlert size={16} /> : <TriangleAlert size={16} />}
+      icon={errors > 0 ? <CircleAlert size="1rem" /> : <TriangleAlert size="1rem" />}
       title={`${count(errors, "error")}, ${count(issues.length - errors, "warning")}`}
     >
       <ul className="space-y-1.5">
@@ -700,8 +702,8 @@ function Summary({ test }: { test: TestFile }) {
             <span className={`mono w-14 shrink-0 text-xs font-semibold ${methodText(step.request.method)}`}>
               {step.request.method}
             </span>
-            <div className="min-w-0">
-              <div>{step.name}</div>
+            <div className="min-w-0 flex-1">
+              <div className="break-words">{step.name}</div>
               <div className="mono truncate text-xs text-muted">{step.request.url}</div>
             </div>
           </li>
@@ -748,7 +750,7 @@ function Banner({
         {icon}
         {title}
       </div>
-      <div className="mt-1.5 text-[13px] text-ink">{children}</div>
+      <div className="mt-1.5 text-[0.8125rem] text-ink">{children}</div>
     </div>
   );
 }

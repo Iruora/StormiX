@@ -5,6 +5,7 @@
 ### Desktop app
 
 - The Flow tab has an **All steps** switch that turns every step on, or, when they are all on, turns them all off. It replaces the **Turn all on** button.
+- The layout follows the system text size and display scaling. Text, icons, spacing and the results panel are sized in rem, so a larger text setting scales the whole app evenly instead of only part of it. The header and the editor toolbar wrap onto more lines instead of pushing **Run once** and **Load test** off screen. The results panel stays at least 18 rem wide and always leaves the editor at least 26 rem; when the window is too small for both they share it. The Flow tab puts the Set aside tray under the flow when it is narrow, and step rows, run results and load test figures wrap instead of overlapping.
 
 ### Flows
 

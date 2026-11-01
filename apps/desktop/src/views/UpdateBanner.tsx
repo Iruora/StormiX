@@ -41,8 +41,8 @@ export function UpdateBanner() {
 
   const percent = progress.total ? Math.round((progress.done / progress.total) * 100) : null;
   return (
-    <div className="flex items-center gap-3 border-b border-accent/30 bg-accent-soft px-4 py-2 text-[13px]">
-      <Download size={15} className="shrink-0 text-accent" />
+    <div className="flex items-center gap-3 border-b border-accent/30 bg-accent-soft px-4 py-2 text-[0.8125rem]">
+      <Download size="0.9375rem" className="shrink-0 text-accent" />
       <span className="min-w-0 flex-1 truncate">
         {state === "error" ? (
           <span className="text-bad">The update could not be installed: {error}</span>
@@ -73,10 +73,10 @@ export function UpdateBanner() {
           Install and restart
         </button>
       )}
-      {state === "downloading" && <LoaderCircle size={15} className="shrink-0 animate-spin text-accent" />}
+      {state === "downloading" && <LoaderCircle size="0.9375rem" className="shrink-0 animate-spin text-accent" />}
       {state !== "downloading" && (
         <button type="button" aria-label="Later" title="Later" onClick={() => setHidden(true)} className="rounded p-1 text-muted hover:bg-surface">
-          <X size={14} />
+          <X size="0.875rem" />
         </button>
       )}
     </div>

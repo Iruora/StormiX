@@ -168,7 +168,7 @@ export function YamlEditor({ value, onChange, validation, variables = EMPTY, onS
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div ref={host} className="min-h-0 flex-1 overflow-hidden" />
-      <div className="flex items-center gap-3 border-t border-line bg-surface px-3 py-1 text-xs text-muted">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-t border-line bg-surface px-3 py-1 text-xs text-muted">
         <button
           type="button"
           title={status.errors + status.warnings > 0 ? "Go to the next problem (F8)" : undefined}
@@ -181,11 +181,11 @@ export function YamlEditor({ value, onChange, validation, variables = EMPTY, onS
           className={`flex min-w-0 items-center gap-1.5 ${tone}`}
         >
           {status.errors > 0 ? (
-            <CircleAlert size={13} />
+            <CircleAlert size="0.8125rem" />
           ) : status.warnings > 0 ? (
-            <TriangleAlert size={13} />
+            <TriangleAlert size="0.8125rem" />
           ) : (
-            <CircleCheck size={13} />
+            <CircleCheck size="0.8125rem" />
           )}
           <span className="shrink-0">
             {status.errors + status.warnings === 0
@@ -222,11 +222,11 @@ const highlight = HighlightStyle.define([
 ]);
 
 const theme = EditorView.theme({
-  "&": { height: "100%", backgroundColor: "var(--surface)", color: "var(--ink)", fontSize: "13px" },
+  "&": { height: "100%", backgroundColor: "var(--surface)", color: "var(--ink)", fontSize: "0.8125rem" },
   "&.cm-focused": { outline: "none" },
-  ".cm-scroller": { fontFamily: "var(--font-mono)", lineHeight: "20px" },
-  ".cm-content": { padding: "12px 0", caretColor: "var(--accent)" },
-  ".cm-line": { padding: "0 12px 0 6px" },
+  ".cm-scroller": { fontFamily: "var(--font-mono)", lineHeight: "1.54" },
+  ".cm-content": { padding: "0.75rem 0", caretColor: "var(--accent)" },
+  ".cm-line": { padding: "0 0.75rem 0 0.375rem" },
   ".cm-gutters": { backgroundColor: "var(--surface-2)", color: "var(--subtle)", border: "none", borderRight: "1px solid var(--line)" },
   ".cm-activeLineGutter": { backgroundColor: "var(--accent-soft)", color: "var(--accent)" },
   ".cm-activeLine": { backgroundColor: "color-mix(in srgb, var(--accent-soft) 45%, transparent)" },
@@ -259,17 +259,17 @@ const theme = EditorView.theme({
     overflow: "hidden",
   },
   ".cm-tooltip-lint": { padding: "0" },
-  ".cm-diagnostic": { padding: "6px 10px", borderLeftWidth: "3px", fontSize: "12.5px", maxWidth: "460px" },
+  ".cm-diagnostic": { padding: "0.375rem 0.625rem", borderLeftWidth: "3px", fontSize: "0.78rem", maxWidth: "min(28.75rem, 90vw)" },
   ".cm-diagnostic-error": { borderLeftColor: "var(--bad)" },
   ".cm-diagnostic-warning": { borderLeftColor: "var(--warn)" },
-  ".cm-diagnosticSource": { fontFamily: "var(--font-mono)", color: "var(--subtle)", fontSize: "11px", marginTop: "2px" },
-  ".cm-tooltip-autocomplete > ul": { fontFamily: "var(--font-mono)", fontSize: "12.5px", maxHeight: "16em" },
+  ".cm-diagnosticSource": { fontFamily: "var(--font-mono)", color: "var(--subtle)", fontSize: "0.6875rem", marginTop: "2px" },
+  ".cm-tooltip-autocomplete > ul": { fontFamily: "var(--font-mono)", fontSize: "0.78rem", maxHeight: "16em" },
   ".cm-tooltip-autocomplete > ul > li": { padding: "2px 10px !important" },
   ".cm-tooltip-autocomplete > ul > li[aria-selected]": { backgroundColor: "var(--accent-soft)", color: "var(--accent)" },
-  ".cm-completionInfo": { padding: "6px 10px", fontSize: "12px", maxWidth: "320px" },
+  ".cm-completionInfo": { padding: "0.375rem 0.625rem", fontSize: "0.75rem", maxWidth: "min(20rem, 90vw)" },
   ".cm-panels": { backgroundColor: "var(--surface-2)", color: "var(--ink)", borderColor: "var(--line)" },
-  ".cm-panel input, .cm-panel button": { fontSize: "12px" },
-  ".cm-var-tip": { padding: "6px 10px", fontSize: "12px", maxWidth: "380px" },
+  ".cm-panel input, .cm-panel button": { fontSize: "0.75rem" },
+  ".cm-var-tip": { padding: "0.375rem 0.625rem", fontSize: "0.75rem", maxWidth: "min(23.75rem, 90vw)" },
   ".cm-var-tip-value": { fontFamily: "var(--font-mono)", wordBreak: "break-all" },
   ".cm-var-tip-missing": { color: "var(--warn)" },
   ".cm-var-tip-source": { color: "var(--subtle)", marginTop: "2px" },
