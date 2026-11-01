@@ -1,8 +1,8 @@
-Stormix 1.5.1 shows what the app is doing while slow actions run.
+Stormix 1.6.0 supports GraphQL natively.
 
-- **Progress while you wait:** a strip under the toolbar names what is under way, with a progress bar. A Bruno collection import counts its files as it reads them ("37 of 120 files"), and opening, saving, reopening a workspace, importing an environment and starting a load test show there too. **Run once** shows which step it is on.
-- **Busy buttons:** the button you pressed shows a spinner, and buttons that would clash with it wait until it finishes. Saving shows **Saved**. Exporting reports, deleting runs and downloading updates show progress as well.
-- **No more freezes:** importing a large collection, and reading or saving files, no longer freezes the window.
+- **GraphQL steps:** a new `graphql` body with `query`, `variables` and `operation_name`, plus a GraphQL editor in the Steps tab. A `{{variable}}` is sent as the type the query declares, so `id: "{{user_id}}"` goes out as a number for `$id: Int!`.
+- **GraphQL errors fail the step:** a response with an `errors` array fails the step even with status 200, and load tests count it as an error. Set `allow_errors: true` for a step that expects errors.
+- **Imports fixed:** GraphQL requests from Postman and Bruno whose variables use bare `{{variables}}`, like `{ "id": {{userId}} }`, were sent with `null` variables. They now keep their variables and fill them in when sent.
 
 If you are on 1.1 or later, the app offers this update by itself. On 1.0, download it once from the table below.
 
