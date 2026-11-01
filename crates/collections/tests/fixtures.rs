@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use stormix_collections::{detect, import, Format};
+use stormix_collections::{detect, import, import_with_progress, Format};
 use stormix_flow::{Body, Header};
 
 fn fixture(name: &str) -> PathBuf {
@@ -78,6 +78,36 @@ fn postman_collection() {
 
     // Scripts set every variable the requests use that the collection does not.
     assert_eq!(imported.test.validate(), []);
+}
+
+#[test]
+fn bruno_import_reports_each_request_file() {
+    let mut seen = Vec::new();
+    let imported = import_with_progress(&fixture("bruno"), &mut |p| {
+        seen.push((
+            p.done,
+            p.total,
+            p.file.file_name().unwrap().to_string_lossy().into_owned(),
+        ))
+    })
+    .unwrap();
+    assert_eq!(imported.test.flow.steps.len(), 6);
+    let files: Vec<_> = seen.iter().map(|s| s.2.as_str()).collect();
+    assert_eq!(
+        files,
+        [
+            "health.bru",
+            "login.bru",
+            "profile.bru",
+            "admin.bru",
+            "echo.bru",
+            "get-user.bru"
+        ]
+    );
+    assert!(seen
+        .iter()
+        .enumerate()
+        .all(|(i, s)| s.0 == i + 1 && s.1 == 6));
 }
 
 #[test]

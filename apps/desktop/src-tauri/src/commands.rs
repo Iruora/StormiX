@@ -3,11 +3,12 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use stormix_engine::{
-    run_load, CachedStep, FlowResult, LoadOptions, LoadReport, Runner, Variables,
+    run_load, CachedStep, FlowResult, LoadOptions, LoadReport, Runner, StepStart, Variables,
 };
 use stormix_flow::{Issue, Severity, TestFile};
 use stormix_store::{RunData, RunDiff, RunSummary, Store, StoredRun};
@@ -61,7 +62,7 @@ pub fn example_test_file() -> String {
     EXAMPLE.to_owned()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn validate_test_file(text: String) -> Validation {
     match TestFile::from_yaml(&text) {
@@ -78,12 +79,52 @@ pub fn validate_test_file(text: String) -> Validation {
     }
 }
 
-/// Imports a Postman `.json` export or a Bruno collection folder.
+/// Sent while a Bruno folder is imported, at most every 50 ms and for the
+/// last file.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportProgress {
+    pub done: u32,
+    pub total: u32,
+    /// The file just read, relative to the collection folder.
+    pub file: String,
+}
+
+/// Imports a Postman `.json` export or a Bruno collection folder, sending
+/// [`ImportProgress`] events as a folder's files are read. It runs off the
+/// main thread, so the window stays responsive while a large one loads.
 #[tauri::command]
 #[specta::specta]
-pub fn import_collection(path: String) -> Result<ImportedCollection, String> {
-    let path = Path::new(&path);
-    let imported = stormix_collections::import(path).map_err(|e| e.to_string())?;
+pub async fn import_collection(path: String, app: AppHandle) -> Result<ImportedCollection, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = Path::new(&path);
+        let mut last: Option<Instant> = None;
+        import_collection_at(&path, &mut |p| {
+            let due = last.is_none_or(|t| t.elapsed() >= Duration::from_millis(50));
+            if !due && p.done < p.total {
+                return;
+            }
+            last = Some(Instant::now());
+            let file = p.file.strip_prefix(root).unwrap_or(&p.file);
+            let _ = ImportProgress {
+                done: p.done as u32,
+                total: p.total as u32,
+                file: file.to_string_lossy().into_owned(),
+            }
+            .emit(&app);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn import_collection_at(
+    path: &str,
+    on_progress: &mut dyn FnMut(stormix_collections::bruno::Progress),
+) -> Result<ImportedCollection, String> {
+    let path = Path::new(path);
+    let imported =
+        stormix_collections::import_with_progress(path, on_progress).map_err(|e| e.to_string())?;
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     Ok(ImportedCollection {
         yaml: format!("# Imported from {name}.\n{}", imported.test.to_yaml()),
@@ -108,7 +149,7 @@ pub struct LoadedEnvironment {
 
 /// Reads an environment file: flat YAML or JSON, a Postman environment
 /// export or a Bruno `.bru` environment.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn read_environment(path: String) -> Result<LoadedEnvironment, String> {
     let env =
@@ -123,7 +164,7 @@ pub fn read_environment(path: String) -> Result<LoadedEnvironment, String> {
 
 /// The environments in the `environments/` folder next to a test file,
 /// where `stormix import` writes a collection's.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn environments_beside(path: String) -> Result<Vec<LoadedEnvironment>, String> {
     let dir = stormix_collections::environment::dir_for(Path::new(&path));
@@ -158,7 +199,7 @@ pub fn environment_path_beside(path: String, name: String) -> String {
 /// Writes an environment to `path` in that file's own format (see
 /// `environment::write_file`) and reads it back. Secrets are saved by
 /// name only, never with a value.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn save_environment(
     path: String,
@@ -251,22 +292,42 @@ fn checked(text: &str) -> Result<TestFile, String> {
     Ok(test)
 }
 
+/// Sent as each step of a single run starts.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct RunProgress {
+    /// From 0, among the steps that run.
+    pub index: u32,
+    pub total: u32,
+    pub name: String,
+}
+
 /// Runs the file's flow once, as a functional test, with `variables` (an
-/// environment) over the flow's own. Refuses a file that does not parse or
-/// has errors; the editor already shows why.
+/// environment) over the flow's own, sending [`RunProgress`] events. Refuses
+/// a file that does not parse or has errors; the editor already shows why.
 #[tauri::command]
 #[specta::specta]
 pub async fn run_test_file(
     text: String,
     variables: BTreeMap<String, String>,
     source: Option<String>,
+    app: AppHandle,
     runner: State<'_, Runner>,
     store: State<'_, Mutex<Store>>,
 ) -> Result<FlowResult, String> {
     let test = checked(&text)?;
     let mut vars = Variables::new();
     vars.extend(variables);
-    let result = runner.run(&test.flow, &vars).await;
+    let result = runner
+        .run_with_progress(&test.flow, &vars, |s: StepStart<'_>| {
+            let _ = RunProgress {
+                index: s.index as u32,
+                total: s.total as u32,
+                name: s.name.to_owned(),
+            }
+            .emit(&app);
+        })
+        .await;
     save(
         &store,
         RunData::Functional(result.clone()),
@@ -291,26 +352,26 @@ pub fn clear_cache(flow: Option<String>, step: Option<String>, runner: State<'_,
 }
 
 /// The most recent runs first.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn list_runs(limit: u32, store: State<'_, Mutex<Store>>) -> Result<Vec<RunSummary>, String> {
     lock(&store).list(limit).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn get_run(id: u32, store: State<'_, Mutex<Store>>) -> Result<StoredRun, String> {
     lock(&store).get(id).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn delete_run(id: u32, store: State<'_, Mutex<Store>>) -> Result<(), String> {
     lock(&store).delete(id).map_err(|e| e.to_string())
 }
 
 /// Compares an older run with a newer one.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn diff_runs(
     before: u32,
@@ -326,7 +387,7 @@ pub fn diff_runs(
 }
 
 /// Writes a stored run as a JSON, JUnit XML or HTML report.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn export_run(
     id: u32,
@@ -363,14 +424,14 @@ fn lock(store: &Mutex<Store>) -> std::sync::MutexGuard<'_, Store> {
 }
 
 /// Reads a test file the user picked.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("cannot read {path}: {e}"))
 }
 
 /// Saves the editor's text where the user chose.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn write_text_file(path: String, text: String) -> Result<(), String> {
     std::fs::write(&path, text).map_err(|e| format!("cannot write {path}: {e}"))
@@ -436,7 +497,7 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../../examples/collections/bruno"
         );
-        let imported = import_collection(path.into()).unwrap();
+        let imported = import_collection_at(path, &mut |_| {}).unwrap();
         assert_eq!(imported.warnings, Vec::<String>::new());
         assert!(imported.environments.contains_key("local"));
         let v = validate_test_file(imported.yaml);

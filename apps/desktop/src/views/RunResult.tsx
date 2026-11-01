@@ -1,9 +1,35 @@
 import { CircleCheck, CircleMinus, CircleX, PanelRightOpen } from "lucide-react";
 import { useState } from "react";
 
-import type { FlowResult, StepResult } from "../bindings";
+import type { FlowResult, RunProgress, StepResult } from "../bindings";
 import { methodText } from "../lib/methods";
+import { ProgressBar, Spinner } from "./Busy";
 import { StepDetails } from "./StepDetails";
+
+/** While a single run goes: which step it is on, out of how many. */
+export function RunLive({ name, progress }: { name: string; progress: RunProgress | null }) {
+  return (
+    <section className="mt-4 rounded-lg border border-line bg-surface" aria-busy>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line px-4 py-3">
+        <Spinner size="1rem" className="text-accent" />
+        <span className="min-w-0 truncate font-semibold">Running {name}</span>
+        <span className="ml-auto text-xs tabular-nums text-muted">
+          {progress ? `Step ${progress.index + 1} of ${progress.total}` : "Starting"}
+        </span>
+      </div>
+      <ProgressBar className="rounded-none" value={progress ? progress.index / Math.max(1, progress.total) : null} />
+      <div className="truncate px-4 py-2.5 text-xs text-muted">
+        {progress ? (
+          <>
+            Waiting for <span className="text-ink">{progress.name}</span>
+          </>
+        ) : (
+          "Preparing the requests"
+        )}
+      </div>
+    </section>
+  );
+}
 
 /** The outcome of one functional run: a summary line, then each step with what failed. */
 export function RunResult({ result }: { result: FlowResult }) {

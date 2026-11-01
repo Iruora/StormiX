@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.1 (2026-11-01)
+
+### Desktop app
+
+- **Feedback while things happen.** A strip under the toolbar says what the app is doing, with a progress bar: importing a collection (a Bruno folder counts its files as it reads them, "37 of 120 files", with the file being read), opening, reopening and saving a file, importing an environment, and running. **Run once** shows which step it is waiting for, step by step, in the results panel and the strip. A load test says it is starting (setup steps and warm-up) until its first second is in. The button that started the action shows a spinner, and buttons that would clash with it are disabled until it finishes. Saving shows **Saved** beside the file name. In Runs, exporting a report or deleting a run shows a spinner, and loading a run or a comparison says so. Downloading an update shows a progress bar.
+- Importing a collection, opening and saving files, reading environments and exporting reports now run off the window's main thread, so the window no longer freezes while a large collection loads.
+
 ## 1.5.0 (2026-11-01)
 
 ### Desktop app

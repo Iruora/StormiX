@@ -32,6 +32,7 @@ import {
   type ImportedCollection,
   type Issue,
   type LoadProgress,
+  type RunProgress,
   type TestFile,
   type TestFile_Deserialize,
   type Workspace_Serialize as Workspace,
@@ -42,9 +43,10 @@ import { describeLoad } from "./lib/describe";
 import { methodText } from "./lib/methods";
 import { VariablesContext, variableTable } from "./lib/variables";
 import { newWorkspace, WORKSPACES_KEY, workspaceTitle } from "./lib/workspace";
+import { type Activity, ActivityStrip, BusyIcon, Loading } from "./views/Busy";
 import { LoadLive, LoadResult } from "./views/LoadResult";
 import { LoadSetup, type LoadSetupChoice } from "./views/LoadSetup";
-import { RunResult, stepPassed } from "./views/RunResult";
+import { RunLive, RunResult, stepPassed } from "./views/RunResult";
 import { RUNS_KEY, RunsView } from "./views/Runs";
 import { SplitView, usePanel } from "./views/SidePanel";
 import { applyOverrides, EnvEditor, type EnvOverrides } from "./views/EnvEditor";
@@ -340,11 +342,19 @@ function TestFileView({
   );
   const canRun = !!result?.test && !result.issues.some((i) => i.severity === "error");
 
+  // The step a single run is on, as it reports them.
+  const [runStep, setRunStep] = useState<RunProgress | null>(null);
   const run = useMutation({
     mutationFn: async (yaml: string) => {
-      const res = await commands.runTestFile(yaml, envVars, path);
-      if (res.status === "error") throw new Error(res.error);
-      return res.data;
+      setRunStep(null);
+      const unlisten = await events.runProgress.listen((e) => setRunStep(e.payload));
+      try {
+        const res = await commands.runTestFile(yaml, envVars, path);
+        if (res.status === "error") throw new Error(res.error);
+        return res.data;
+      } finally {
+        unlisten();
+      }
     },
     // Kept past edits, so hovering a variable a step extracts shows its last value.
     onSuccess: (data) => setLastRun(data),
@@ -372,6 +382,24 @@ function TestFileView({
     },
   });
   const busy = run.isPending || load.isPending;
+  // What a file, import or restore is doing now, for the activity strip.
+  const [activity, setActivity] = useState<Activity | null>(null);
+  /** Shows `what` in the activity strip while `work` runs. */
+  const showing = async <T,>(what: Activity, work: () => Promise<T>): Promise<T> => {
+    setActivity(what);
+    try {
+      return await work();
+    } finally {
+      setActivity(null);
+    }
+  };
+  // A moment of "Saved" beside the file name after saving.
+  const [justSaved, setJustSaved] = useState(false);
+  useEffect(() => {
+    if (!justSaved) return;
+    const t = setTimeout(() => setJustSaved(false), 2000);
+    return () => clearTimeout(t);
+  }, [justSaved]);
   const [setupOpen, setSetupOpen] = useState(false);
   // Steps left out of the last load test, by name, offered again next time.
   const [excluded, setExcluded] = useState<string[]>(ws.excluded);
@@ -447,6 +475,7 @@ function TestFileView({
     if (!ws.path) return;
     const at = ws.path;
     let live = true;
+    setActivity({ label: "Reopening", detail: at });
     (async () => {
       const res = await commands.readTextFile(at);
       if (!live) return;
@@ -457,12 +486,16 @@ function TestFileView({
         setRestoreNote(
           `${at} could not be read; it may have been moved or deleted. The copy kept with this workspace is open instead: save it to keep it.`,
         );
+        setActivity(null);
         return;
       }
       setSavedText(res.data);
       if (!ws.dirty) setText(res.data);
+      setActivity({ label: "Reading the environments next to it", detail: at });
       const beside = await commands.environmentsBeside(at);
-      if (!live || beside.status === "error") return;
+      if (!live) return;
+      setActivity(null);
+      if (beside.status === "error") return;
       setEnvs((current) => ({
         ...current,
         ...Object.fromEntries(
@@ -499,13 +532,15 @@ function TestFileView({
           filters: [{ name: "Stormix test file", extensions: ["yaml", "yml"] }],
         });
         if (typeof picked !== "string") return;
-        const res = await commands.readTextFile(picked);
+        const res = await showing({ label: "Opening", detail: picked }, () => commands.readTextFile(picked));
         if (res.status === "error") throw new Error(res.error);
         setImported(null);
         edit(res.data);
         setPath(picked);
         setSavedText(res.data);
-        const beside = await commands.environmentsBeside(picked);
+        const beside = await showing({ label: "Reading the environments next to it", detail: picked }, () =>
+          commands.environmentsBeside(picked),
+        );
         if (beside.status === "error") {
           setEnvError(`The environments next to this file could not be read: ${beside.error}`);
         } else if (beside.data.length > 0) {
@@ -529,10 +564,12 @@ function TestFileView({
         });
         if (!target) return;
       }
-      const res = await commands.writeTextFile(target, source);
+      const at = target;
+      const res = await showing({ label: "Saving", detail: at }, () => commands.writeTextFile(at, source));
       if (res.status === "error") throw new Error(res.error);
       setPath(target);
       setSavedText(source);
+      setJustSaved(true);
     },
   });
 
@@ -544,9 +581,21 @@ function TestFileView({
           : { title: "Import a Bruno collection folder", directory: true },
       );
       if (typeof path !== "string") return null;
-      const res = await commands.importCollection(path);
-      if (res.status === "error") throw new Error(res.error);
-      return res.data;
+      const what: Activity = {
+        label: kind === "postman" ? "Importing the Postman collection" : "Importing the Bruno collection",
+        detail: path,
+      };
+      // A Bruno folder reports each request file it reads.
+      const unlisten = await events.importProgress.listen(({ payload: p }) =>
+        setActivity({ ...what, detail: p.file, done: p.done, total: p.total, unit: "files" }),
+      );
+      try {
+        const res = await showing(what, () => commands.importCollection(path));
+        if (res.status === "error") throw new Error(res.error);
+        return res.data;
+      } finally {
+        unlisten();
+      }
     },
     onSuccess: (collection) => {
       if (!collection) return;
@@ -566,6 +615,37 @@ function TestFileView({
     },
     onError: () => panel.setOpen(true),
   });
+
+  const importEnv = useMutation({
+    mutationFn: async () => {
+      const picked = await open({
+        title: "Import an environment",
+        filters: [
+          { name: "Environment", extensions: ["yaml", "yml", "json", "bru"] },
+          { name: "All files", extensions: ["*"] },
+        ],
+      });
+      if (typeof picked !== "string") return null;
+      const res = await showing({ label: "Importing the environment", detail: picked }, () =>
+        commands.readEnvironment(picked),
+      );
+      if (res.status === "error") throw new Error(res.error);
+      return res.data;
+    },
+    onSuccess: (loaded) => {
+      if (!loaded) return;
+      addEnvs(
+        { [loaded.name]: { variables: loaded.variables, secrets: loaded.secrets, path: loaded.path } },
+        loaded.name,
+      );
+    },
+    onError: (e) => {
+      setEnvError(`The environment could not be imported: ${e.message}`);
+      panel.setOpen(true);
+    },
+  });
+  // Opening, saving and importing touch the file shown; one at a time.
+  const fileBusy = file.isPending || importFrom.isPending || importEnv.isPending;
 
   const editorPane = (
     <>
@@ -591,10 +671,28 @@ function TestFileView({
                 ? "Unsaved example"
                 : "Not saved to a file"}
           {dirty && <span className="text-warn"> ●</span>}
+          {justSaved && !dirty && (
+            <span className="ml-1.5 inline-flex items-center gap-1 font-sans text-ok">
+              <CircleCheck size="0.75rem" />
+              Saved
+            </span>
+          )}
         </span>
-        <FileButton label="Open" icon={<FolderOpen size="0.8125rem" />} onClick={() => file.mutate("open")} />
-        <FileButton label="Save" icon={<Save size="0.8125rem" />} onClick={() => file.mutate("save")} />
-        <FileButton label="Save as" onClick={() => file.mutate("saveAs")} />
+        <FileButton
+          label="Open"
+          icon={<FolderOpen size="0.8125rem" />}
+          busy={file.isPending && file.variables === "open"}
+          disabled={fileBusy}
+          onClick={() => file.mutate("open")}
+        />
+        <FileButton
+          label="Save"
+          icon={<Save size="0.8125rem" />}
+          busy={file.isPending && file.variables !== "open"}
+          disabled={fileBusy}
+          onClick={() => file.mutate("save")}
+        />
+        <FileButton label="Save as" disabled={fileBusy} onClick={() => file.mutate("saveAs")} />
         <PanelToggle
           open={panel.open}
           onClick={() => panel.setOpen(!panel.open)}
@@ -608,7 +706,7 @@ function TestFileView({
           onChange={edit}
           validation={result}
           variables={variables}
-          onSave={() => file.mutate("save")}
+          onSave={() => !fileBusy && file.mutate("save")}
         />
       ) : shown && tab === "flow" ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -638,7 +736,11 @@ function TestFileView({
         </div>
       ) : (
         <div className="p-4 text-muted">
-          {result?.parseError ? "Fix the YAML first; the steps show once it parses." : "Loading…"}
+          {result?.parseError ? (
+            "Fix the YAML first; the steps show once it parses."
+          ) : (
+            <Loading>Reading the test file…</Loading>
+          )}
         </div>
       )}
     </>
@@ -695,6 +797,7 @@ function TestFileView({
               </Banner>
             </div>
           )}
+          {run.isPending && <RunLive name={result.test.flow.name} progress={runStep} />}
           {run.data && <RunResult result={run.data} />}
           {load.isPending && <LoadLive points={points} />}
           {load.data && <LoadResult report={load.data} />}
@@ -704,32 +807,6 @@ function TestFileView({
     </>
   );
 
-  const importEnv = useMutation({
-    mutationFn: async () => {
-      const picked = await open({
-        title: "Import an environment",
-        filters: [
-          { name: "Environment", extensions: ["yaml", "yml", "json", "bru"] },
-          { name: "All files", extensions: ["*"] },
-        ],
-      });
-      if (typeof picked !== "string") return null;
-      const res = await commands.readEnvironment(picked);
-      if (res.status === "error") throw new Error(res.error);
-      return res.data;
-    },
-    onSuccess: (loaded) => {
-      if (!loaded) return;
-      addEnvs(
-        { [loaded.name]: { variables: loaded.variables, secrets: loaded.secrets, path: loaded.path } },
-        loaded.name,
-      );
-    },
-    onError: (e) => {
-      setEnvError(`The environment could not be imported: ${e.message}`);
-      panel.setOpen(true);
-    },
-  });
   const removeEnv = (name: string) => {
     setEnvs(({ [name]: _, ...rest }) => rest);
     setOverrides(({ [name]: _, ...rest }) => rest);
@@ -783,6 +860,23 @@ function TestFileView({
     enabled: !!path && !!env && !env.path,
   });
   const envNames = Object.keys(envs);
+  // Runs show in the strip too, for when the results panel is hidden.
+  const lastPoint = points[points.length - 1];
+  const strip: Activity | null =
+    activity ??
+    (run.isPending
+      ? {
+          label: `Running ${result?.test?.flow.name ?? "the flow"}`,
+          detail: runStep?.name,
+          done: runStep?.index,
+          total: runStep?.total,
+          unit: "steps done",
+        }
+      : load.isPending
+        ? lastPoint
+          ? { label: "Load test running", done: lastPoint.elapsedS, total: lastPoint.totalS, unit: "seconds" }
+          : { label: "Starting the load test" }
+        : null);
 
   return (
     <div className="flex h-full flex-col">
@@ -805,20 +899,22 @@ function TestFileView({
           <span className="text-xs text-muted">Import</span>
           <button
             type="button"
-            disabled={importFrom.isPending}
+            disabled={fileBusy}
+            aria-busy={importFrom.isPending && importFrom.variables === "postman"}
             onClick={() => importFrom.mutate("postman")}
-            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
+            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100 disabled:hover:bg-transparent"
           >
-            <FileJson size="0.8125rem" />
+            <BusyIcon busy={importFrom.isPending && importFrom.variables === "postman"} icon={<FileJson size="0.8125rem" />} />
             Postman
           </button>
           <button
             type="button"
-            disabled={importFrom.isPending}
+            disabled={fileBusy}
+            aria-busy={importFrom.isPending && importFrom.variables === "bruno"}
             onClick={() => importFrom.mutate("bruno")}
-            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
+            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100 disabled:hover:bg-transparent"
           >
-            <FolderOpen size="0.8125rem" />
+            <BusyIcon busy={importFrom.isPending && importFrom.variables === "bruno"} icon={<FolderOpen size="0.8125rem" />} />
             Bruno
           </button>
           <div className="flex items-center rounded-md border border-line">
@@ -883,52 +979,57 @@ function TestFileView({
             )}
             <button
               type="button"
-              disabled={importEnv.isPending}
+              disabled={fileBusy}
+              aria-busy={importEnv.isPending}
               onClick={() => importEnv.mutate()}
               title="Import an environment file: YAML or JSON variables, a Postman environment export or a Bruno .bru environment"
-              className="flex items-center gap-1.5 rounded-r-md px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
+              className="flex items-center gap-1.5 rounded-r-md px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100"
             >
-              <FileUp size="0.8125rem" />
+              <BusyIcon busy={importEnv.isPending} icon={<FileUp size="0.8125rem" />} />
               {envNames.length > 0 ? "Env" : "Import env"}
             </button>
           </div>
           <button
             type="button"
+            disabled={fileBusy}
             onClick={() => {
               setImported(null);
               setPath(null);
               edit(null);
             }}
-            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
+            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100"
           >
             <FilePlus size="0.8125rem" />
             New from example
           </button>
           <button
             type="button"
-            disabled={!canRun || busy}
+            disabled={!canRun || busy || fileBusy}
             onClick={() => {
               load.reset();
               panel.setOpen(true);
               run.mutate(source);
             }}
-            className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+            aria-busy={run.isPending}
+            className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 aria-busy:opacity-100"
           >
             {run.isPending ? <LoaderCircle size="0.8125rem" className="animate-spin" /> : <Play size="0.8125rem" />}
             Run once
           </button>
           <button
             type="button"
-            disabled={!canRun || busy}
+            disabled={!canRun || busy || fileBusy}
             title={result?.test?.load ? describeLoad(result.test.load) : "Choose the endpoints and load profile, then run"}
             onClick={() => setSetupOpen(true)}
-            className="flex items-center gap-1.5 rounded-md border border-accent px-3 py-1 text-xs font-semibold text-accent hover:bg-accent-soft disabled:opacity-50"
+            aria-busy={load.isPending}
+            className="flex items-center gap-1.5 rounded-md border border-accent px-3 py-1 text-xs font-semibold text-accent hover:bg-accent-soft disabled:opacity-50 aria-busy:opacity-100"
           >
             {load.isPending ? <LoaderCircle size="0.8125rem" className="animate-spin" /> : <Gauge size="0.8125rem" />}
             Load test
           </button>
         </div>
       </header>
+      <ActivityStrip activity={strip} />
       {envEditorOpen && env && (
         <EnvEditor
           name={envName}
@@ -980,14 +1081,28 @@ function PanelToggle({ open, onClick, alert }: { open: boolean; onClick: () => v
   );
 }
 
-function FileButton({ label, icon, onClick }: { label: string; icon?: ReactNode; onClick: () => void }) {
+function FileButton({
+  label,
+  icon,
+  busy,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  icon?: ReactNode;
+  busy?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-ink"
+      disabled={disabled}
+      aria-busy={busy}
+      className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-ink disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100 disabled:hover:bg-transparent disabled:hover:text-muted"
     >
-      {icon}
+      <BusyIcon busy={busy} icon={icon} />
       {label}
     </button>
   );

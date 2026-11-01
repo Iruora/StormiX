@@ -12,11 +12,15 @@ export const commands = {
 	validateTestFile: (text: string) => __TAURI_INVOKE<Validation_Serialize>("validate_test_file", { text }),
 	/**
 	 *  Runs the file's flow once, as a functional test, with `variables` (an
-	 *  environment) over the flow's own. Refuses a file that does not parse or
-	 *  has errors; the editor already shows why.
+	 *  environment) over the flow's own, sending [`RunProgress`] events. Refuses
+	 *  a file that does not parse or has errors; the editor already shows why.
 	 */
 	runTestFile: (text: string, variables: { [key in string]: string }, source: string | null) => typedError<FlowResult_Serialize, string>(__TAURI_INVOKE("run_test_file", { text, variables, source })),
-	/**  Imports a Postman `.json` export or a Bruno collection folder. */
+	/**
+	 *  Imports a Postman `.json` export or a Bruno collection folder, sending
+	 *  [`ImportProgress`] events as a folder's files are read. It runs off the
+	 *  main thread, so the window stays responsive while a large one loads.
+	 */
 	importCollection: (path: string) => typedError<ImportedCollection, string>(__TAURI_INVOKE("import_collection", { path })),
 	/**
 	 *  Reads an environment file: flat YAML or JSON, a Postman environment
@@ -79,7 +83,9 @@ export const commands = {
 
 /** Events */
 export const events = {
+	importProgress: makeEvent<ImportProgress, ImportProgress>("import-progress"),
 	loadProgress: makeEvent<LoadProgress, LoadProgress>("load-progress"),
+	runProgress: makeEvent<RunProgress, RunProgress>("run-progress"),
 };
 
 /* Types */
@@ -283,6 +289,17 @@ export type HeaderAssertion_Serialize = {
 export type HeaderPair = {
 	name: string,
 	value: string,
+};
+
+/**
+ *  Sent while a Bruno folder is imported, at most every 50 ms and for the
+ *  last file.
+ */
+export type ImportProgress = {
+	done: number,
+	total: number,
+	/**  The file just read, relative to the collection folder. */
+	file: string,
 };
 
 /**  A collection converted to a test file, ready for the editor. */
@@ -551,6 +568,14 @@ steps: StepDiff_Serialize[]; broke: number; fixed: number } | {
 } & LoadDiff_Serialize | 
 /**  A functional run against a load test: nothing to line up. */
 ({ kind: "mismatch" }) & { broke?: never; fixed?: never; steps?: never };
+
+/**  Sent as each step of a single run starts. */
+export type RunProgress = {
+	/**  From 0, among the steps that run. */
+	index: number,
+	total: number,
+	name: string,
+};
 
 /**  One line of the history list. */
 export type RunSummary = RunSummary_Serialize | RunSummary_Deserialize;

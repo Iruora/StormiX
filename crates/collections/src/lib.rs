@@ -73,10 +73,21 @@ pub fn detect(path: &Path) -> Option<Format> {
 /// Imports the collection at `path`, a Postman `.json` export or a Bruno
 /// collection folder. A `.bru` file stands for the folder it is in.
 pub fn import(path: &Path) -> Result<Imported, ImportError> {
+    import_with_progress(path, &mut |_| {})
+}
+
+/// Like [`import`], reporting each request file a Bruno folder import
+/// reads. A Postman export is one file, read at once, so it reports none.
+pub fn import_with_progress(
+    path: &Path,
+    on_progress: &mut dyn FnMut(bruno::Progress),
+) -> Result<Imported, ImportError> {
     match detect(path) {
         Some(Format::Postman) => postman::from_json(&read(path)?),
-        Some(Format::Bruno) if path.is_dir() => bruno::from_dir(path),
-        Some(Format::Bruno) => bruno::from_dir(path.parent().unwrap_or(Path::new("."))),
+        Some(Format::Bruno) if path.is_dir() => bruno::from_dir_with_progress(path, on_progress),
+        Some(Format::Bruno) => {
+            bruno::from_dir_with_progress(path.parent().unwrap_or(Path::new(".")), on_progress)
+        }
         None => Err(ImportError::Postman(format!(
             "{} is neither a .json export nor a Bruno folder",
             path.display()

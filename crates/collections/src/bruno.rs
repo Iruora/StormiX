@@ -50,6 +50,24 @@ const BINARY: [&str; 15] = [
 
 /// Imports the collection in `dir`.
 pub fn from_dir(dir: &Path) -> Result<Imported, ImportError> {
+    from_dir_with_progress(dir, &mut |_| {})
+}
+
+/// How far an import has got: `done` of `total` request files read, the
+/// last being `file`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Progress {
+    pub done: usize,
+    pub total: usize,
+    pub file: PathBuf,
+}
+
+/// Like [`from_dir`], calling `on_progress` after each request file is read.
+/// The files are counted first, so `total` is known from the first call.
+pub fn from_dir_with_progress(
+    dir: &Path,
+    on_progress: &mut dyn FnMut(Progress),
+) -> Result<Imported, ImportError> {
     let config = dir.join("bruno.json");
     let name = if config.is_file() {
         let text = read(&config)?;
@@ -72,7 +90,13 @@ pub fn from_dir(dir: &Path) -> Result<Imported, ImportError> {
             .unwrap_or_else(|| "Bruno collection".into())
     });
 
-    let mut importer = Importer::default();
+    let mut importer = Importer {
+        total: count_requests(dir, true)?,
+        on_progress,
+        steps: Vec::new(),
+        warnings: Vec::new(),
+        done: 0,
+    };
     let mut scope = Scope::default();
     let mut variables = BTreeMap::new();
     let collection = dir.join("collection.bru");
@@ -194,22 +218,52 @@ impl Scope {
     }
 }
 
-#[derive(Default)]
-struct Importer {
+struct Importer<'a> {
     steps: Vec<Step>,
     warnings: Vec<String>,
+    done: usize,
+    total: usize,
+    on_progress: &'a mut dyn FnMut(Progress),
 }
 
-impl Importer {
+/// Whether `walk` leaves out this folder; `top` is the collection's own.
+fn skipped_folder(name: &str, top: bool) -> bool {
+    name.starts_with('.') || name == "node_modules" || (name == "environments" && top)
+}
+
+fn is_request(file: &Path) -> bool {
+    let name = file.file_name().unwrap_or_default();
+    name != "collection.bru" && name != "folder.bru"
+}
+
+/// The request files `walk` reads under `dir`.
+fn count_requests(dir: &Path, top: bool) -> Result<usize, ImportError> {
+    let mut n = bru_files(dir)?.iter().filter(|f| is_request(f)).count();
+    for entry in entries(dir)? {
+        let name = entry.file_name().unwrap_or_default().to_string_lossy();
+        if entry.is_dir() && !skipped_folder(&name, top) {
+            n += count_requests(&entry, false)?;
+        }
+    }
+    Ok(n)
+}
+
+impl Importer<'_> {
     /// Requests in `dir` in `seq` order, then each sub-folder the same way.
     fn walk(&mut self, dir: &Path, scope: &Scope) -> Result<(), ImportError> {
         let mut requests = Vec::new();
         for file in bru_files(dir)? {
-            let file_name = file.file_name().unwrap_or_default();
-            if file_name == "collection.bru" || file_name == "folder.bru" {
+            if !is_request(&file) {
                 continue;
             }
             let blocks = parse_file(&file)?;
+            self.done += 1;
+            (self.on_progress)(Progress {
+                done: self.done,
+                // Never less than done, should a file appear meanwhile.
+                total: self.total.max(self.done),
+                file: file.clone(),
+            });
             let seq = seq(&blocks);
             requests.push((seq, file, blocks));
         }
@@ -225,11 +279,7 @@ impl Importer {
                 .unwrap_or_default()
                 .to_string_lossy()
                 .into_owned();
-            if !entry.is_dir()
-                || name.starts_with('.')
-                || name == "node_modules"
-                || (name == "environments" && scope.path.is_empty())
-            {
+            if !entry.is_dir() || skipped_folder(&name, scope.path.is_empty()) {
                 continue;
             }
             let folder_file = entry.join("folder.bru");

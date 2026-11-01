@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 
 import type { Workspace_Serialize as Workspace } from "../bindings";
 import { savedAgo } from "../lib/workspace";
+import { Spinner } from "./Busy";
 
 /**
  * Every saved workspace: what was open, with which environment. The open
@@ -45,7 +46,14 @@ export function WorkspacesView({
         <div className="grid flex-1 place-items-center text-center text-muted">
           <div>
             <Layers size="1.75rem" className="mx-auto mb-2 text-subtle" />
-            {loading ? "Loading workspaces…" : "No workspaces yet."}
+            {loading ? (
+              <span className="inline-flex items-center gap-2">
+                <Spinner size="0.875rem" className="text-accent" />
+                Loading workspaces…
+              </span>
+            ) : (
+              "No workspaces yet."
+            )}
           </div>
         </div>
       ) : (

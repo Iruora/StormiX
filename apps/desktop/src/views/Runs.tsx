@@ -25,6 +25,7 @@ import {
   type StepChange,
   type StepDiff,
 } from "../bindings";
+import { BusyIcon, Loading, Spinner } from "./Busy";
 import { LoadResult } from "./LoadResult";
 import { RunResult } from "./RunResult";
 
@@ -86,7 +87,14 @@ export function RunsView() {
         <div className="grid flex-1 place-items-center text-center text-muted">
           <div>
             <History size="1.75rem" className="mx-auto mb-2 text-subtle" />
-            {runs.isPending ? "Loading runs…" : "No runs yet. Run a test file and it shows up here."}
+            {runs.isPending ? (
+              <span className="inline-flex items-center gap-2">
+                <Spinner size="0.875rem" className="text-accent" />
+                Loading runs…
+              </span>
+            ) : (
+              "No runs yet. Run a test file and it shows up here."
+            )}
           </div>
         </div>
       ) : (
@@ -121,6 +129,7 @@ export function RunsView() {
                 })()}
                 onCompare={(before) => setCompare([before, current])}
                 onDelete={() => remove.mutate(current)}
+                deleting={remove.isPending && remove.variables === current}
               />
             ) : null}
           </section>
@@ -189,11 +198,13 @@ function RunDetail({
   previous,
   onCompare,
   onDelete,
+  deleting,
 }: {
   id: number;
   previous?: RunSummary;
   onCompare: (before: number) => void;
   onDelete: () => void;
+  deleting?: boolean;
 }) {
   const run = useQuery({ queryKey: ["run", id], queryFn: () => unwrap(commands.getRun(id)) });
   const exportTo = useMutation({
@@ -210,7 +221,10 @@ function RunDetail({
       return path;
     },
   });
-  if (!run.data) return <div className="text-muted">{run.error ? run.error.message : "Loading…"}</div>;
+  if (!run.data) {
+    return run.error ? <div className="text-bad">{run.error.message}</div> : <Loading>Loading the run…</Loading>;
+  }
+  const exporting = (format: ReportFormat) => exportTo.isPending && exportTo.variables === format;
   const { summary, data } = run.data;
 
   return (
@@ -229,20 +243,33 @@ function RunDetail({
               Compare with previous
             </ToolButton>
           )}
-          <ToolButton onClick={() => exportTo.mutate("html")} icon={<Download size="0.8125rem" />}>
-            HTML report
-          </ToolButton>
-          <ToolButton onClick={() => exportTo.mutate("json")} icon={<Download size="0.8125rem" />}>
-            JSON
-          </ToolButton>
-          <ToolButton onClick={() => exportTo.mutate("junit")} icon={<Download size="0.8125rem" />}>
-            JUnit
-          </ToolButton>
-          <ToolButton onClick={onDelete} icon={<Trash2 size="0.8125rem" />}>
+          {(["html", "json", "junit"] as const).map((format) => (
+            <ToolButton
+              key={format}
+              onClick={() => exportTo.mutate(format)}
+              disabled={exportTo.isPending || deleting}
+              busy={exporting(format)}
+              icon={<Download size="0.8125rem" />}
+            >
+              {format === "html" ? "HTML report" : format === "json" ? "JSON" : "JUnit"}
+            </ToolButton>
+          ))}
+          <ToolButton
+            onClick={onDelete}
+            disabled={exportTo.isPending || deleting}
+            busy={deleting}
+            icon={<Trash2 size="0.8125rem" />}
+          >
             Delete
           </ToolButton>
         </div>
       </div>
+      {exportTo.isPending && exportTo.variables && (
+        <div role="status" className="mt-2 flex items-center gap-1.5 text-xs text-muted">
+          <Spinner className="text-accent" />
+          Writing the {EXPORTS[exportTo.variables].name}…
+        </div>
+      )}
       {exportTo.data && <div className="mt-2 text-xs text-ok">Saved to {exportTo.data}</div>}
       {exportTo.error && <div className="mt-2 text-xs text-bad">{exportTo.error.message}</div>}
       {data.kind === "functional" ? <RunResult result={data.result} /> : <LoadResult report={data.result} />}
@@ -262,6 +289,11 @@ function Compare({ before, after }: { before: RunSummary; after: RunSummary }) {
         <ArrowRight size="1rem" className="text-subtle" />
         <RunCard run={after} label="After" />
       </div>
+      {diff.isPending && (
+        <div className="mt-4">
+          <Loading>Comparing the two runs…</Loading>
+        </div>
+      )}
       {diff.error && <div className="mt-4 text-bad">{diff.error.message}</div>}
       {diff.data && <DiffBody diff={diff.data} />}
     </div>
@@ -437,14 +469,28 @@ function MetricRow({ metric: m }: { metric: Metric }) {
   );
 }
 
-function ToolButton({ onClick, icon, children }: { onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
+function ToolButton({
+  onClick,
+  icon,
+  children,
+  busy,
+  disabled,
+}: {
+  onClick: () => void;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  busy?: boolean;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
+      disabled={disabled}
+      aria-busy={busy}
+      className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100 disabled:hover:bg-transparent"
     >
-      {icon}
+      <BusyIcon busy={busy} icon={icon} />
       {children}
     </button>
   );

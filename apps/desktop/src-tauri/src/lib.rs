@@ -36,7 +36,11 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::select_workspace,
             commands::delete_workspace,
         ])
-        .events(collect_events![commands::LoadProgress])
+        .events(collect_events![
+            commands::LoadProgress,
+            commands::ImportProgress,
+            commands::RunProgress,
+        ])
 }
 
 #[cfg(any(debug_assertions, test))]
