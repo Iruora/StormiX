@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Downloads
+
+- Each release has a `Stormix_<version>_x64_installer.zip` for Windows: the setup `.exe` and the `.msi` in one zip, with a short README, for places that only take or let through `.zip` downloads.
+
 ## 1.3.0 (2026-11-01)
 
 ### Desktop app
