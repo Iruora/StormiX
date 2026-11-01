@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Desktop app
+
+- **Variables** next to the environment picker opens the chosen environment's variables to see and change. A change applies to runs at once, for this session only, and is marked **this session** (the toolbar button shows how many). Save one variable, or **Save all to file**, to make the change permanent; reset one, or **Reset all**, to go back to the file. Variables can also be added and removed, for the session or for good. Saving writes the environment's own file in its own format (`.bru`, Postman export, JSON or YAML), keeping a `.bru` file's disabled lines and a Postman export's other fields; an environment that came with a collection is saved to `environments/NAME.yaml` next to the test file, or asks where. Secrets stay masked, and their values are never written to a file.
+
 ## 1.4.0 (2026-11-01)
 
 ### Desktop app
