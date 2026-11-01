@@ -13,7 +13,6 @@ path = "src/main.rs"
 [dependencies]
 clap.workspace = true
 serde_json.workspace = true
-serde_yaml_ng.workspace = true
 stormix-collections.workspace = true
 stormix-engine.workspace = true
 stormix-flow.workspace = true

@@ -20,8 +20,9 @@ pub struct Target {
     #[arg(long = "var", value_name = "NAME=VALUE", value_parser = parse_var)]
     vars: Vec<(String, String)>,
     /// Variables from a YAML or JSON file, a Postman environment export or
-    /// a Bruno environment (.bru). For a Bruno collection, the name of one
-    /// of its environments works too.
+    /// a Bruno environment (.bru). A name works too: one of a Bruno
+    /// collection's environments, or a file in the `environments/` folder
+    /// next to a test file.
     #[arg(long, value_name = "FILE|NAME")]
     env: Option<PathBuf>,
     /// Time allowed for each request.
@@ -98,20 +99,32 @@ impl Target {
             Some(path) if path.exists() => read_env(path)?,
             Some(name) => {
                 let name = name.to_string_lossy();
-                match source.environments.get(name.as_ref()) {
+                let mut found = source.environments.clone();
+                if found.is_empty() {
+                    let dir = stormix_collections::environment::dir_for(&self.file);
+                    for env in stormix_collections::environment::read_dir(&dir)
+                        .map_err(|e| e.to_string())?
+                    {
+                        found.insert(env.name, env.variables);
+                    }
+                }
+                match found.get(name.as_ref()) {
                     Some(env) => {
                         let mut vars = Variables::new();
                         vars.extend(env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
                         vars
                     }
-                    None if source.environments.is_empty() => {
-                        return Err(format!("cannot read {name}: no such file"));
+                    None if found.is_empty() => {
+                        return Err(format!(
+                            "cannot read {name}: no such file, and {} has no environments",
+                            self.file.display()
+                        ));
                     }
                     None => {
-                        let names: Vec<_> =
-                            source.environments.keys().map(String::as_str).collect();
+                        let names: Vec<_> = found.keys().map(String::as_str).collect();
                         return Err(format!(
-                            "{name} is neither a file nor one of the collection's environments ({})",
+                            "{name} is neither a file nor one of the environments of {} ({})",
+                            self.file.display(),
                             names.join(", ")
                         ));
                     }

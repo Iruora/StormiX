@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Environments
+
+- Desktop app: **Import env** adds an environment from a file of its own: a YAML or JSON map, a Postman environment export or a Bruno `.bru` environment. Before, environments came only from a Bruno collection.
+- Desktop app: a **Secrets** button asks for the values of an environment's secrets (Bruno's `vars:secret`), the app's `--var`. The values stay in memory only.
+- Desktop app: environments are no longer cleared when you open a file or start from the example. Opening a test file also loads the environments in the `environments/` folder next to it. Any environment can be removed from the list.
+- `stormix import -o FILE` writes the collection's environments to `environments/NAME.yaml` next to the test file, and `--env NAME` finds them there. Secret names are kept under `$secrets`.
+
 ## 1.1.1 (2026-11-01)
 
 ### Scripts

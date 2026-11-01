@@ -5,8 +5,20 @@
 ```sh
 stormix run my-api.postman_collection.json --env staging.postman_environment.json
 stormix run ./my-bruno-collection --env local          # a Bruno environment, by name
-stormix import ./my-bruno-collection -o my-api.stormix.yaml
+stormix import ./my-bruno-collection -o my-api.stormix.yaml   # also writes environments/local.yaml
+stormix run my-api.stormix.yaml --env local --var token=...
 ```
+
+## Environments
+
+An environment file is a flat YAML or JSON map of names to values, a Postman environment export or a Bruno `.bru` environment. `--env` takes a path, or a name: one of a Bruno collection's `environments/`, or a file in the `environments/` folder next to a test file. That is where `stormix import -o` writes a collection's environments. Secrets (Bruno's `vars:secret`) have no value in the file; in YAML their names are listed under `$secrets`:
+
+```yaml
+base_url: https://staging.example.com
+$secrets: [token]
+```
+
+In the desktop app, **Import env** adds an environment from any of these files, opening a test file also loads the environments next to it, and **Secrets** asks for the values of the chosen environment's secrets. Those values stay in memory and are never written to a file. Environments stay in the list when you open another file, until you remove them.
 
 Folders are flattened in run order, and each step is named after its folder path, such as `Users / Create user`. Anything that does not carry over is printed as a warning; nothing is dropped silently.
 

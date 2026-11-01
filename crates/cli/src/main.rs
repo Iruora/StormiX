@@ -172,15 +172,48 @@ fn import(collection: &Path, output: Option<&Path>, force: bool) -> Result<ExitC
         output.display(),
         source.test.flow.steps.len()
     );
-    if !source.environments.is_empty() {
-        let names: Vec<_> = source.environments.keys().map(String::as_str).collect();
+    write_environments(&source, output, force)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Writes the collection's environments to `environments/` next to the
+/// test file, where `run --env NAME` finds them.
+fn write_environments(source: &source::Source, output: &Path, force: bool) -> Result<(), String> {
+    use stormix_collections::environment::{dir_for, to_yaml, Environment};
+    if source.environments.is_empty() {
+        return Ok(());
+    }
+    let dir = dir_for(output);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    let mut written = Vec::new();
+    for (name, variables) in &source.environments {
+        let file = dir.join(format!("{name}.yaml"));
+        if file.exists() && !force {
+            eprintln!("Kept {} (pass --force to replace it).", file.display());
+            continue;
+        }
+        let env = Environment {
+            name: name.clone(),
+            variables: variables.clone(),
+            secrets: source.secrets.get(name).cloned().unwrap_or_default(),
+        };
+        std::fs::write(&file, to_yaml(&env))
+            .map_err(|e| format!("cannot write {}: {e}", file.display()))?;
+        written.push(name.as_str());
+    }
+    if let Some(first) = written.first() {
+        let what = if written.len() == 1 {
+            "environment"
+        } else {
+            "environments"
+        };
         eprintln!(
-            "The collection has environments ({}); pass one with --env {}/environments/<name>.bru.",
-            names.join(", "),
-            collection.display()
+            "Wrote {} {what} to {}; run with --env {first}.",
+            written.len(),
+            dir.display()
         );
     }
-    Ok(ExitCode::SUCCESS)
+    Ok(())
 }
 
 fn init(file: &Path, force: bool) -> Result<ExitCode, String> {

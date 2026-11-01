@@ -6,6 +6,7 @@ import {
   FileCode,
   FileJson,
   FilePlus,
+  FileUp,
   FolderOpen,
   Gauge,
   History,
@@ -15,6 +16,7 @@ import {
   Play,
   Save,
   TriangleAlert,
+  X,
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -37,6 +39,7 @@ import { LoadLive, LoadResult } from "./views/LoadResult";
 import { RunResult, stepPassed } from "./views/RunResult";
 import { RUNS_KEY, RunsView } from "./views/Runs";
 import { SplitView, usePanel } from "./views/SidePanel";
+import { EnvSecrets } from "./views/EnvSecrets";
 import { StepsEditor } from "./views/StepsEditor";
 import { UpdateBanner } from "./views/UpdateBanner";
 
@@ -102,12 +105,22 @@ function NavItem({
   );
 }
 
+/** Variables to run with, and the names of secrets to fill in by hand. */
+type Env = { variables: Record<string, string>; secrets: string[] };
+
 /** Edit a test file and see it parsed and checked as you type. */
 function TestFileView() {
   const example = useQuery({ queryKey: ["example"], queryFn: commands.exampleTestFile });
   const [text, setText] = useState<string | null>(null);
   const [imported, setImported] = useState<ImportedCollection | null>(null);
+  // Every environment met so far: a collection's, ones found next to an
+  // opened file and ones imported from a file. They stay when another
+  // file is opened, until removed.
+  const [envs, setEnvs] = useState<Record<string, Env>>({});
   const [envName, setEnvName] = useState("");
+  // Secret values typed in, by variable name. Never written to disk.
+  const [secretValues, setSecretValues] = useState<Record<string, string>>({});
+  const [envError, setEnvError] = useState<string | null>(null);
   const panel = usePanel();
   const [path, setPath] = useState<string | null>(null);
   const [savedText, setSavedText] = useState<string | null>(null);
@@ -127,8 +140,14 @@ function TestFileView() {
     enabled: debounced.length > 0,
     placeholderData: (previous) => previous,
   });
-  const environments = useMemo(() => imported?.environments ?? {}, [imported]);
-  const envVars = useMemo(() => environments[envName] ?? {}, [environments, envName]);
+  const env = envs[envName] as Env | undefined;
+  const envVars = useMemo(() => {
+    const vars = { ...env?.variables };
+    for (const name of env?.secrets ?? []) {
+      if (secretValues[name]) vars[name] = secretValues[name];
+    }
+    return vars;
+  }, [env, secretValues]);
   // The validator does not know the chosen environment; drop its warnings
   // about variables that environment provides.
   const result = useMemo(
@@ -170,6 +189,13 @@ function TestFileView() {
     onSettled: () => client.invalidateQueries({ queryKey: RUNS_KEY }),
   });
   const busy = run.isPending || load.isPending;
+  /** Adds environments, replacing ones with the same name, and picks `select`. */
+  const addEnvs = (added: Record<string, Env>, select: string | null) => {
+    setEnvs((current) => ({ ...current, ...added }));
+    if (select !== null) setEnvName(select);
+    setEnvError(null);
+    run.reset();
+  };
   // What the hidden panel would show: errors or failures first.
   const panelAlert =
     result?.parseError ||
@@ -213,10 +239,19 @@ function TestFileView() {
         const res = await commands.readTextFile(picked);
         if (res.status === "error") throw new Error(res.error);
         setImported(null);
-        setEnvName("");
         edit(res.data);
         setPath(picked);
         setSavedText(res.data);
+        const beside = await commands.environmentsBeside(picked);
+        if (beside.status === "error") {
+          setEnvError(`The environments next to this file could not be read: ${beside.error}`);
+        } else if (beside.data.length > 0) {
+          const names = beside.data.map((e) => e.name);
+          addEnvs(
+            Object.fromEntries(beside.data.map((e) => [e.name, { variables: e.variables, secrets: e.secrets }])),
+            names.includes(envName) ? envName : names[0],
+          );
+        }
         return;
       }
       let target = action === "save" ? path : null;
@@ -251,7 +286,16 @@ function TestFileView() {
     onSuccess: (collection) => {
       if (!collection) return;
       setImported(collection);
-      setEnvName(Object.keys(collection.environments)[0] ?? "");
+      const names = Object.keys(collection.environments);
+      addEnvs(
+        Object.fromEntries(
+          names.map((name) => [
+            name,
+            { variables: collection.environments[name], secrets: collection.secrets[name] ?? [] },
+          ]),
+        ),
+        names.length > 0 ? names[0] : null,
+      );
       setPath(null);
       edit(collection.yaml);
     },
@@ -320,6 +364,13 @@ function TestFileView() {
         </Banner>
       ) : result?.test ? (
         <>
+          {envError && (
+            <div className="mb-4">
+              <Banner tone="bad" icon={<CircleAlert size={16} />} title="Environment">
+                {envError}
+              </Banner>
+            </div>
+          )}
           {importFrom.error && (
             <div className="mb-4">
               <Banner tone="bad" icon={<CircleAlert size={16} />} title="The collection could not be imported">
@@ -359,11 +410,41 @@ function TestFileView() {
     </>
   );
 
+  const importEnv = useMutation({
+    mutationFn: async () => {
+      const picked = await open({
+        title: "Import an environment",
+        filters: [
+          { name: "Environment", extensions: ["yaml", "yml", "json", "bru"] },
+          { name: "All files", extensions: ["*"] },
+        ],
+      });
+      if (typeof picked !== "string") return null;
+      const res = await commands.readEnvironment(picked);
+      if (res.status === "error") throw new Error(res.error);
+      return res.data;
+    },
+    onSuccess: (loaded) => {
+      if (!loaded) return;
+      addEnvs({ [loaded.name]: { variables: loaded.variables, secrets: loaded.secrets } }, loaded.name);
+    },
+    onError: (e) => {
+      setEnvError(`The environment could not be imported: ${e.message}`);
+      panel.setOpen(true);
+    },
+  });
+  const removeEnv = (name: string) => {
+    setEnvs(({ [name]: _, ...rest }) => rest);
+    setEnvName("");
+    run.reset();
+  };
+  const envNames = Object.keys(envs);
+
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-3 border-b border-line bg-surface px-5 py-3">
+      <header className="flex items-center gap-3 whitespace-nowrap border-b border-line bg-surface px-5 py-3">
         <h1 className="text-[15px] font-semibold">Test file</h1>
-        <span className="text-xs text-muted">
+        <span className="min-w-0 truncate text-xs text-muted">
           A flow, an optional load profile and thresholds.
         </span>
         <span className="ml-auto text-xs text-muted">Import</span>
@@ -385,29 +466,61 @@ function TestFileView() {
           <FolderOpen size={13} />
           Bruno
         </button>
-        {Object.keys(environments).length > 0 && (
-          <select
-            aria-label="Environment"
-            value={envName}
-            onChange={(e) => {
-              setEnvName(e.target.value);
-              run.reset();
-            }}
-            className="rounded-md border border-line bg-surface px-2 py-1 text-xs"
+        <div className="flex items-center rounded-md border border-line">
+          {envNames.length > 0 && (
+            <select
+              aria-label="Environment"
+              value={envName}
+              onChange={(e) => {
+                setEnvName(e.target.value);
+                run.reset();
+              }}
+              className="max-w-40 rounded-l-md border-r border-line bg-surface px-2 py-1 text-xs"
+            >
+              <option value="">No environment</option>
+              {envNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          )}
+          {env && env.secrets.length > 0 && (
+            <EnvSecrets
+              names={env.secrets}
+              values={secretValues}
+              onChange={(name, value) => {
+                setSecretValues((v) => ({ ...v, [name]: value }));
+                run.reset();
+              }}
+            />
+          )}
+          {env && (
+            <button
+              type="button"
+              aria-label={`Remove the ${envName} environment`}
+              title="Remove this environment from the list"
+              onClick={() => removeEnv(envName)}
+              className="border-r border-line px-1.5 py-1 text-muted hover:bg-surface-2 hover:text-ink"
+            >
+              <X size={13} />
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={importEnv.isPending}
+            onClick={() => importEnv.mutate()}
+            title="Import an environment file: YAML or JSON variables, a Postman environment export or a Bruno .bru environment"
+            className="flex items-center gap-1.5 rounded-r-md px-2.5 py-1 text-xs text-muted hover:bg-surface-2"
           >
-            <option value="">No environment</option>
-            {Object.keys(environments).map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        )}
+            <FileUp size={13} />
+            {envNames.length > 0 ? "Env" : "Import env"}
+          </button>
+        </div>
         <button
           type="button"
           onClick={() => {
             setImported(null);
-            setEnvName("");
             setPath(null);
             edit(null);
           }}

@@ -15,6 +15,7 @@ use stormix_flow::TestFile;
 mod bru;
 pub mod bruno;
 mod common;
+pub mod environment;
 pub mod postman;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -23,6 +24,9 @@ pub struct Imported {
     /// Environments shipped inside the collection, by name. Bruno keeps
     /// them in `environments/`; Postman exports them as separate files.
     pub environments: BTreeMap<String, BTreeMap<String, String>>,
+    /// The names of each environment's secrets, which have no value in
+    /// the collection and must be supplied at run time.
+    pub secrets: BTreeMap<String, Vec<String>>,
     pub warnings: Vec<String>,
 }
 
@@ -47,6 +51,8 @@ pub enum ImportError {
         line: usize,
         message: String,
     },
+    #[error("{}: {message}", file.display())]
+    Environment { file: PathBuf, message: String },
     #[error("{} is not a Bruno collection: it has no bruno.json and no .bru files", .0.display())]
     NotBruno(PathBuf),
 }

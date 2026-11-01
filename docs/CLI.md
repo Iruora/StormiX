@@ -25,7 +25,7 @@ stormix import COLLECTION -o FILE   # turn a Postman or Bruno collection into a 
 | Option | |
 |---|---|
 | `--var NAME=VALUE` | Set a variable, overriding the file and the environment. Repeatable |
-| `--env FILE\|NAME` | Variables from a YAML or JSON map, a Postman environment export or a Bruno `.bru` environment. For a Bruno collection, an environment name works too |
+| `--env FILE\|NAME` | Variables from a YAML or JSON map, a Postman environment export or a Bruno `.bru` environment. A name works too: one of a Bruno collection's environments, or a file in the `environments/` folder next to a test file |
 | `--timeout 30s` | Time allowed for each request |
 | `--insecure` | Accept invalid or self-signed TLS certificates |
 | `--no-follow-redirects` | Report redirects instead of following them |
@@ -103,7 +103,9 @@ A request counts as failed when no response came back or a check on it failed. W
 | Option | |
 |---|---|
 | `-o`, `--output FILE` | Write the test file here instead of printing it |
-| `--force` | Replace the output file if it exists |
+| `--force` | Replace the output file, and environment files, if they exist |
+
+With `-o`, a collection's environments are written to `environments/NAME.yaml` next to the test file, so `stormix run FILE --env NAME` still finds them. Secrets have no value there; their names are listed under `$secrets`, and you pass them with `--var`.
 
 What does not carry over is printed as a warning. See [Compatibility](COMPATIBILITY.md).
 
