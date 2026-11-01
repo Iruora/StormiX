@@ -10,6 +10,8 @@ import {
   Gauge,
   History,
   LoaderCircle,
+  PanelRightClose,
+  PanelRightOpen,
   Play,
   Save,
   TriangleAlert,
@@ -32,8 +34,9 @@ import { describeLoad } from "./lib/describe";
 import { methodText } from "./lib/methods";
 import { VariablesContext, variableTable } from "./lib/variables";
 import { LoadLive, LoadResult } from "./views/LoadResult";
-import { RunResult } from "./views/RunResult";
+import { RunResult, stepPassed } from "./views/RunResult";
 import { RUNS_KEY, RunsView } from "./views/Runs";
+import { SplitView, usePanel } from "./views/SidePanel";
 import { StepsEditor } from "./views/StepsEditor";
 import { UpdateBanner } from "./views/UpdateBanner";
 
@@ -43,18 +46,16 @@ export function App() {
 
   return (
     <div className="flex h-full">
-      <nav className="flex w-56 shrink-0 flex-col border-r border-line bg-surface">
-        <div className="flex items-center gap-2 px-4 py-4">
-          <span className="grid size-7 place-items-center rounded-lg bg-accent text-bolt">
-            <Zap size={16} fill="currentColor" />
-          </span>
-          <span className="text-base font-extrabold tracking-tight">Stormix</span>
-        </div>
-        <NavItem icon={<FileCode size={16} />} label="Test file" active={view === "file"} onClick={() => setView("file")} />
-        <NavItem icon={<History size={16} />} label="Runs" active={view === "runs"} onClick={() => setView("runs")} />
-        <div className="mt-auto px-4 py-3 text-xs text-subtle">
-          {info.data ? `v${info.data.version}` : ""}
-        </div>
+      <nav className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-line bg-surface py-3">
+        <span
+          className="mb-3 grid size-8 place-items-center rounded-lg bg-accent text-bolt"
+          title={info.data ? `Stormix v${info.data.version}` : "Stormix"}
+        >
+          <Zap size={17} fill="currentColor" />
+        </span>
+        <NavItem icon={<FileCode size={18} />} label="Test file" active={view === "file"} onClick={() => setView("file")} />
+        <NavItem icon={<History size={18} />} label="Runs" active={view === "runs"} onClick={() => setView("runs")} />
+        <div className="mt-auto text-[10px] text-subtle">{info.data ? `v${info.data.version}` : ""}</div>
       </nav>
       <main className="flex min-w-0 flex-1 flex-col">
         <UpdateBanner />
@@ -87,12 +88,16 @@ function NavItem({
     <button
       type="button"
       onClick={onClick}
-      className={`mx-2 flex items-center gap-2 rounded-md px-2 py-1.5 text-left ${
-        active ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-surface-2"
+      aria-label={label}
+      aria-current={active ? "page" : undefined}
+      className={`group relative grid size-10 place-items-center rounded-lg ${
+        active ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface-2 hover:text-ink"
       }`}
     >
       {icon}
-      <span>{label}</span>
+      <span className="nav-tip" role="tooltip">
+        {label}
+      </span>
     </button>
   );
 }
@@ -103,6 +108,7 @@ function TestFileView() {
   const [text, setText] = useState<string | null>(null);
   const [imported, setImported] = useState<ImportedCollection | null>(null);
   const [envName, setEnvName] = useState("");
+  const panel = usePanel();
   const [path, setPath] = useState<string | null>(null);
   const [savedText, setSavedText] = useState<string | null>(null);
   const [tab, setTab] = useState<"steps" | "yaml">("steps");
@@ -164,6 +170,16 @@ function TestFileView() {
     onSettled: () => client.invalidateQueries({ queryKey: RUNS_KEY }),
   });
   const busy = run.isPending || load.isPending;
+  // What the hidden panel would show: errors or failures first.
+  const panelAlert =
+    result?.parseError ||
+    result?.issues.some((i) => i.severity === "error") ||
+    run.data?.steps.some((st) => !st.skipped && !stepPassed(st)) ||
+    load.data?.thresholds.some((t) => !t.passed)
+      ? "bad"
+      : result?.issues.length
+        ? "warn"
+        : null;
   const shown = draft ?? result?.test ?? null;
   const variables = useMemo(
     () => variableTable(shown, envVars, envName, lastRun),
@@ -239,7 +255,109 @@ function TestFileView() {
       setPath(null);
       edit(collection.yaml);
     },
+    onError: () => panel.setOpen(true),
   });
+
+  const editorPane = (
+    <>
+      <div className="flex items-center gap-1 border-b border-line bg-surface px-3 py-1.5">
+        {(["steps", "yaml"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={`rounded px-2 py-0.5 text-xs font-medium ${
+              tab === t ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface-2"
+            }`}
+          >
+            {t === "steps" ? "Steps" : "YAML"}
+          </button>
+        ))}
+        <span className="mono ml-3 min-w-0 truncate text-xs text-muted" title={path ?? undefined}>
+          {path ? path.split(/[\\/]/).pop() : imported ? "Imported, not saved" : "Unsaved example"}
+          {dirty && <span className="text-warn"> ●</span>}
+        </span>
+        <span className="ml-auto" />
+        <FileButton label="Open" icon={<FolderOpen size={13} />} onClick={() => file.mutate("open")} />
+        <FileButton label="Save" icon={<Save size={13} />} onClick={() => file.mutate("save")} />
+        <FileButton label="Save as" onClick={() => file.mutate("saveAs")} />
+        <PanelToggle
+          open={panel.open}
+          onClick={() => panel.setOpen(!panel.open)}
+          alert={panelAlert}
+        />
+      </div>
+      {file.error && <div className="border-b border-line bg-bad-soft px-3 py-1 text-xs text-bad">{file.error.message}</div>}
+      {tab === "yaml" ? (
+        <YamlEditor
+          value={source}
+          onChange={edit}
+          validation={result}
+          variables={variables}
+          onSave={() => file.mutate("save")}
+        />
+      ) : shown ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <VariablesContext.Provider value={variables}>
+            <StepsEditor test={shown} onChange={editSteps} />
+          </VariablesContext.Provider>
+          <p className="px-4 pb-4 text-xs text-subtle">
+            Editing here rewrites the YAML, so comments in it are dropped.
+          </p>
+        </div>
+      ) : (
+        <div className="p-4 text-muted">
+          {result?.parseError ? "Fix the YAML first; the steps show once it parses." : "Loading…"}
+        </div>
+      )}
+    </>
+  );
+  const resultsPane = (
+    <>
+      {result?.parseError ? (
+        <Banner tone="bad" icon={<CircleAlert size={16} />} title="The file does not parse">
+          <pre className="mono whitespace-pre-wrap text-xs">{result.parseError}</pre>
+        </Banner>
+      ) : result?.test ? (
+        <>
+          {importFrom.error && (
+            <div className="mb-4">
+              <Banner tone="bad" icon={<CircleAlert size={16} />} title="The collection could not be imported">
+                {importFrom.error.message}
+              </Banner>
+            </div>
+          )}
+          {imported && imported.warnings.length > 0 && (
+            <div className="mb-4">
+              <Banner
+                tone="warn"
+                icon={<TriangleAlert size={16} />}
+                title={`${count(imported.warnings.length, "thing")} did not carry over`}
+              >
+                <ul className="space-y-1">
+                  {imported.warnings.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              </Banner>
+            </div>
+          )}
+          <Issues issues={result.issues} />
+          {(run.error ?? load.error) && (
+            <div className="mt-4">
+              <Banner tone="bad" icon={<CircleAlert size={16} />} title="The run could not start">
+                {(run.error ?? load.error)?.message}
+              </Banner>
+            </div>
+          )}
+          {run.data && <RunResult result={run.data} />}
+          {load.isPending && <LoadLive points={points} />}
+          {load.data && <LoadResult report={load.data} />}
+          <Summary test={result.test} />
+        </>
+      ) : null}
+    </>
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -303,6 +421,7 @@ function TestFileView() {
           disabled={!canRun || busy}
           onClick={() => {
             load.reset();
+            panel.setOpen(true);
             run.mutate(source);
           }}
           className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
@@ -316,6 +435,7 @@ function TestFileView() {
           title={result?.test?.load ? describeLoad(result.test.load) : "Add a load section to run a load test"}
           onClick={() => {
             run.reset();
+            panel.setOpen(true);
             load.mutate(source);
           }}
           className="flex items-center gap-1.5 rounded-md border border-accent px-3 py-1 text-xs font-semibold text-accent hover:bg-accent-soft disabled:opacity-50"
@@ -324,100 +444,28 @@ function TestFileView() {
           Load test
         </button>
       </header>
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
-        <div className="flex min-h-0 flex-col border-r border-line">
-          <div className="flex items-center gap-1 border-b border-line bg-surface px-3 py-1.5">
-            {(["steps", "yaml"] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTab(t)}
-                className={`rounded px-2 py-0.5 text-xs font-medium ${
-                  tab === t ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface-2"
-                }`}
-              >
-                {t === "steps" ? "Steps" : "YAML"}
-              </button>
-            ))}
-            <span className="mono ml-3 min-w-0 truncate text-xs text-muted" title={path ?? undefined}>
-              {path ? path.split(/[\\/]/).pop() : imported ? "Imported, not saved" : "Unsaved example"}
-              {dirty && <span className="text-warn"> ●</span>}
-            </span>
-            <span className="ml-auto" />
-            <FileButton label="Open" icon={<FolderOpen size={13} />} onClick={() => file.mutate("open")} />
-            <FileButton label="Save" icon={<Save size={13} />} onClick={() => file.mutate("save")} />
-            <FileButton label="Save as" onClick={() => file.mutate("saveAs")} />
-          </div>
-          {file.error && <div className="border-b border-line bg-bad-soft px-3 py-1 text-xs text-bad">{file.error.message}</div>}
-          {tab === "yaml" ? (
-            <YamlEditor
-              value={source}
-              onChange={edit}
-              validation={result}
-              variables={variables}
-              onSave={() => file.mutate("save")}
-            />
-          ) : shown ? (
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <VariablesContext.Provider value={variables}>
-                <StepsEditor test={shown} onChange={editSteps} />
-              </VariablesContext.Provider>
-              <p className="px-4 pb-4 text-xs text-subtle">
-                Editing here rewrites the YAML, so comments in it are dropped.
-              </p>
-            </div>
-          ) : (
-            <div className="p-4 text-muted">
-              {result?.parseError ? "Fix the YAML first; the steps show once it parses." : "Loading…"}
-            </div>
-          )}
-        </div>
-        <aside className="min-h-0 overflow-y-auto p-4">
-          {result?.parseError ? (
-            <Banner tone="bad" icon={<CircleAlert size={16} />} title="The file does not parse">
-              <pre className="mono whitespace-pre-wrap text-xs">{result.parseError}</pre>
-            </Banner>
-          ) : result?.test ? (
-            <>
-              {importFrom.error && (
-                <div className="mb-4">
-                  <Banner tone="bad" icon={<CircleAlert size={16} />} title="The collection could not be imported">
-                    {importFrom.error.message}
-                  </Banner>
-                </div>
-              )}
-              {imported && imported.warnings.length > 0 && (
-                <div className="mb-4">
-                  <Banner
-                    tone="warn"
-                    icon={<TriangleAlert size={16} />}
-                    title={`${count(imported.warnings.length, "thing")} did not carry over`}
-                  >
-                    <ul className="space-y-1">
-                      {imported.warnings.map((w, i) => (
-                        <li key={i}>{w}</li>
-                      ))}
-                    </ul>
-                  </Banner>
-                </div>
-              )}
-              <Issues issues={result.issues} />
-              {(run.error ?? load.error) && (
-                <div className="mt-4">
-                  <Banner tone="bad" icon={<CircleAlert size={16} />} title="The run could not start">
-                    {(run.error ?? load.error)?.message}
-                  </Banner>
-                </div>
-              )}
-              {run.data && <RunResult result={run.data} />}
-              {load.isPending && <LoadLive points={points} />}
-              {load.data && <LoadResult report={load.data} />}
-              <Summary test={result.test} />
-            </>
-          ) : null}
-        </aside>
-      </div>
+      <SplitView open={panel.open} width={panel.width} onWidth={panel.setWidth} main={editorPane} panel={resultsPane} />
     </div>
+  );
+}
+
+function PanelToggle({ open, onClick, alert }: { open: boolean; onClick: () => void; alert: "bad" | "warn" | null }) {
+  const label = open ? "Hide the results panel" : "Show the results panel";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-pressed={open}
+      title={label}
+      className="relative ml-1 grid size-6 place-items-center rounded text-muted hover:bg-surface-2 hover:text-ink"
+    >
+      {open ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+      {/* While the panel is hidden, a dot says it has something to show. */}
+      {!open && alert && (
+        <span className={`absolute right-0.5 top-0.5 size-1.5 rounded-full ${alert === "bad" ? "bg-bad" : "bg-warn"}`} />
+      )}
+    </button>
   );
 }
 

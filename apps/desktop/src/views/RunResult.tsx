@@ -127,7 +127,7 @@ function StatusPill({ status }: { status: number }) {
   return <span className={`mono rounded px-1.5 py-px font-semibold ${tone}`}>{status}</span>;
 }
 
-function stepPassed(step: StepResult): boolean {
+export function stepPassed(step: StepResult): boolean {
   return !step.skipped && step.error == null && step.checks.every((c) => c.passed);
 }
 
