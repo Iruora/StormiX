@@ -498,6 +498,11 @@ globalThis.bru = {
   getRequestVar: __store.get,
   getProcessEnv: () => undefined,
   interpolate: __store.replaceIn,
+  // Waits for real, up to the script's time limit, then resolves.
+  sleep: (ms) => {
+    __sleep(Math.max(0, Number(ms) || 0));
+    return Promise.resolve();
+  },
 };
 globalThis.req = {
   getUrl: () => __request.url,

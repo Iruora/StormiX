@@ -384,3 +384,20 @@ pm.environment.set('url', Buffer.from('é?', 'utf8').toString('base64url'))
     assert_eq!(get("hex"), "6869");
     assert_eq!(get("url"), "w6k_");
 }
+
+#[test]
+fn bru_sleep_waits_and_resolves() {
+    let started = std::time::Instant::now();
+    let out = pre("await bru.sleep(50)\nbru.setVar('done', 'yes')");
+    assert_eq!(out.error, None);
+    assert!(started.elapsed() >= Duration::from_millis(50));
+    assert_eq!(out.variables.get("done"), Some(&Some("yes".into())));
+}
+
+#[test]
+fn bru_sleep_stops_at_the_time_limit() {
+    let started = std::time::Instant::now();
+    let out = pre("await bru.sleep(60000)\nbru.setVar('done', 'yes')");
+    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(out.error.unwrap().contains("did not finish within"));
+}

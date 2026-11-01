@@ -108,6 +108,13 @@ fn run_inner(
     let input_json = serde_json::to_string(input).expect("script input always serializes");
     let started = context.with(|ctx| -> rquickjs::Result<()> {
         ctx.globals().set("__INPUT", input_json)?;
+        // `bru.sleep` blocks this thread; scripts already run off the async
+        // runtime. It never sleeps past the deadline.
+        let sleep = rquickjs::Function::new(ctx.clone(), move |ms: f64| {
+            let left = deadline.saturating_duration_since(Instant::now());
+            std::thread::sleep(Duration::from_secs_f64(ms / 1000.0).min(left));
+        })?;
+        ctx.globals().set("__sleep", sleep)?;
         ctx.eval::<(), _>(PRELUDE)?;
         let run: rquickjs::Function = ctx.globals().get("__run")?;
         run.call((source,))

@@ -58,7 +58,8 @@ What Stormix 1.0 runs from Postman and Bruno collections, feature by feature. An
 | Chai `expect` | ✓ | ✓ | Common chains: `equal`, `eql`, `include`, `property`, `lengthOf`, `match`, `keys`, `oneOf`, `a`, `above`, `below`, `not`, `deep` |
 | `Buffer`, `btoa`, `atob` | ✓ | ✓ | `Buffer.from` / `toString` with utf8, base64, base64url, hex, latin1 |
 | `console.log` | ✓ | ✓ | Shown for failed steps, or all steps with `-v` |
-| `pm.sendRequest` | ✗ | n/a | The script fails with a clear error. Make it a step of its own |
+| `bru.sleep` | n/a | ✓ | Capped by the script time limit |
+| `pm.sendRequest`, `bru.sendRequest` | ✗ | ✗ | The script fails with a clear error. Make it a step of its own |
 | `require` (lodash, moment, …) | ✗ | ✗ | The script fails with a clear error |
 | `pm.iterationData`, data files | ✗ | ✗ | Always empty until data-driven runs arrive |
 | `pm.visualizer` | ✗ | n/a | A call to it fails the script |
