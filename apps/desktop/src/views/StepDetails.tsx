@@ -1,4 +1,4 @@
-import { Check, CircleCheck, CircleX, Copy, X } from "lucide-react";
+import { Check, CircleCheck, CircleX, Copy, Waypoints, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { HeaderPair, Payload, StepResult } from "../bindings";
@@ -45,6 +45,7 @@ export function StepDetails({ step, onClose }: { step: StepResult; onClose: () =
             <div className="mono truncate text-xs text-muted" title={step.url}>
               <span className={`font-semibold ${methodText(step.method)}`}>{step.method}</span> {step.url}
             </div>
+            {step.traceId && <TraceId traceId={step.traceId} spanId={step.spanId ?? null} />}
           </div>
           <div className="flex shrink-0 items-center gap-2 text-xs text-muted">
             {step.status != null && (
@@ -263,7 +264,25 @@ function NotKept() {
   );
 }
 
-function CopyButton({ label, text }: { label: string; text: () => string }) {
+/** The W3C trace the request went out in, to look up in an APM tool like Dynatrace. */
+export function TraceId({ traceId, spanId }: { traceId: string; spanId: string | null }) {
+  return (
+    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+      <span
+        className="flex items-center gap-1 text-subtle"
+        title="The W3C trace ID sent in this request's traceparent header. Search for it in Dynatrace (Distributed traces) or another APM tool to see the request in every service it reached."
+      >
+        <Waypoints size="0.75rem" /> Trace
+      </span>
+      <span className="mono min-w-0 truncate select-all text-ink" title={spanId ? `Parent span ${spanId}` : undefined}>
+        {traceId}
+      </span>
+      <CopyButton label="Copy trace ID" text={() => traceId} />
+    </div>
+  );
+}
+
+export function CopyButton({ label, text, iconOnly = false }: { label: string; text: () => string; iconOnly?: boolean }) {
   const [done, setDone] = useState(false);
   return (
     <button
@@ -273,10 +292,12 @@ function CopyButton({ label, text }: { label: string; text: () => string }) {
         setDone(true);
         setTimeout(() => setDone(false), 1200);
       }}
-      className="flex items-center gap-1 rounded border border-line bg-surface px-1.5 py-0.5 text-xs text-muted hover:text-ink"
+      aria-label={label}
+      title={iconOnly ? (done ? "Copied" : label) : undefined}
+      className="flex shrink-0 items-center gap-1 rounded border border-line bg-surface px-1.5 py-0.5 text-xs text-muted hover:text-ink"
     >
       {done ? <Check size="0.75rem" className="text-ok" /> : <Copy size="0.75rem" />}
-      {done ? "Copied" : label}
+      {iconOnly ? null : done ? "Copied" : label}
     </button>
   );
 }

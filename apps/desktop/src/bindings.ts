@@ -264,6 +264,13 @@ export type Flow_Deserialize = {
 	 *  ready to be put back. Like code commented out, without losing it.
 	 */
 	set_aside?: Step_Deserialize[],
+	/**
+	 *  Send a W3C `traceparent` header with every request, so APM tools
+	 *  such as Dynatrace, Datadog or Jaeger join what each request did in
+	 *  the services it reached into one trace, found by the trace ID
+	 *  Stormix records. A step that sets its own `traceparent` keeps it.
+	 */
+	trace?: TraceMode | null,
 };
 
 /**
@@ -283,6 +290,13 @@ export type Flow_Serialize = {
 	 *  ready to be put back. Like code commented out, without losing it.
 	 */
 	set_aside?: Step_Serialize[],
+	/**
+	 *  Send a W3C `traceparent` header with every request, so APM tools
+	 *  such as Dynatrace, Datadog or Jaeger join what each request did in
+	 *  the services it reached into one trace, found by the trace ID
+	 *  Stormix records. A step that sets its own `traceparent` keeps it.
+	 */
+	trace?: TraceMode,
 };
 
 /**
@@ -517,6 +531,12 @@ export type LoadReport_Deserialize = {
 	 *  no step is cached.
 	 */
 	setup?: StepResult_Deserialize[],
+	/**
+	 *  The slowest requests of each step that went out with a trace ID,
+	 *  slowest first, to look up in Dynatrace or another APM tool. Empty
+	 *  when the flow has no `trace`.
+	 */
+	slowest?: SlowRequest_Deserialize[],
 };
 
 export type LoadReport_Serialize = {
@@ -536,6 +556,12 @@ export type LoadReport_Serialize = {
 	 *  no step is cached.
 	 */
 	setup?: StepResult_Serialize[],
+	/**
+	 *  The slowest requests of each step that went out with a trace ID,
+	 *  slowest first, to look up in Dynatrace or another APM tool. Empty
+	 *  when the flow has no `trace`.
+	 */
+	slowest?: SlowRequest_Serialize[],
 };
 
 /**  An environment read from a file of its own. */
@@ -723,6 +749,29 @@ export type Severity =
 /**  The file cannot run. */
 "error";
 
+/**  One traced request from a load test. */
+export type SlowRequest = SlowRequest_Serialize | SlowRequest_Deserialize;
+
+/**  One traced request from a load test. */
+export type SlowRequest_Deserialize = {
+	step: string,
+	traceId: string,
+	spanId: string,
+	durationMs: number | null,
+	status?: number | null,
+	passed: boolean,
+};
+
+/**  One traced request from a load test. */
+export type SlowRequest_Serialize = {
+	step: string,
+	traceId: string,
+	spanId: string,
+	durationMs: number | null,
+	status: number | null,
+	passed: boolean,
+};
+
 /**  Moves the rate linearly to `target` over `duration`. */
 export type Stage = {
 	duration: string,
@@ -810,6 +859,19 @@ export type StepResult_Deserialize = {
 	 */
 	cached?: boolean,
 	/**
+	 *  The W3C trace this request was sent in, from the `traceparent`
+	 *  header: Stormix's own when the flow has `trace` on, or one the step
+	 *  set itself. Look it up in Dynatrace or another APM tool to see what
+	 *  the request did in each service. Missing when no valid
+	 *  `traceparent` went out, and on runs saved before 1.6.
+	 */
+	traceId?: string | null,
+	/**
+	 *  The span the request was sent from, the parent of the first span
+	 *  the server records.
+	 */
+	spanId?: string | null,
+	/**
 	 *  What was sent and what came back. Kept for every step of a single
 	 *  run; under load, only for failed steps. Missing from runs saved
 	 *  before 1.1.
@@ -845,6 +907,19 @@ export type StepResult_Serialize = {
 	 *  lookup's. Missing from runs saved before 1.4.
 	 */
 	cached?: boolean,
+	/**
+	 *  The W3C trace this request was sent in, from the `traceparent`
+	 *  header: Stormix's own when the flow has `trace` on, or one the step
+	 *  set itself. Look it up in Dynatrace or another APM tool to see what
+	 *  the request did in each service. Missing when no valid
+	 *  `traceparent` went out, and on runs saved before 1.6.
+	 */
+	traceId?: string,
+	/**
+	 *  The span the request was sent from, the parent of the first span
+	 *  the server records.
+	 */
+	spanId?: string,
 	/**
 	 *  What was sent and what came back. Kept for every step of a single
 	 *  run; under load, only for failed steps. Missing from runs saved
@@ -1036,6 +1111,16 @@ export type ThresholdResult = {
 	actual: number | null,
 	passed: boolean,
 };
+
+/**  How requests are grouped into traces. */
+export type TraceMode = 
+/**  Every request starts a trace of its own. */
+"request" | 
+/**
+ *  Every run of the flow (each load test iteration) is one trace, and
+ *  each of its requests a span in it.
+ */
+"flow";
 
 /**  The parsed file (when it parses) and everything wrong with it. */
 export type Validation = Validation_Serialize | Validation_Deserialize;

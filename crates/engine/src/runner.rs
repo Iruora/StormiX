@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use reqwest::header::{HeaderMap, CONTENT_TYPE};
 use reqwest::redirect::Policy;
-use stormix_flow::{Body, Flow, GraphqlBody, KeyValue, Request, Step};
+use stormix_flow::{Body, Flow, GraphqlBody, KeyValue, Request, Step, TraceMode};
 use stormix_script::{
     self as script, Phase, ScriptInput, ScriptRequest, ScriptResponse, TestOutcome,
 };
@@ -15,6 +15,7 @@ use stormix_script::{
 use crate::cache::{Key, ResponseCache};
 use crate::checks::{self, Response};
 use crate::result::{Exchange, HeaderPair, Payload, ResponseRecord};
+use crate::trace::{self, TraceParent};
 use crate::{Check, FlowResult, StepResult, Variables};
 
 #[derive(Debug, Clone)]
@@ -153,6 +154,8 @@ impl Runner {
         let mut steps = Vec::with_capacity(flow.steps.len());
         let mut stopped = false;
         let total = flow.enabled_steps().count();
+        // One trace for the whole run, when the flow asks for that.
+        let run_trace = (flow.trace == Some(TraceMode::Flow)).then(trace::new_trace_id);
         for (index, step) in flow.enabled_steps().enumerate() {
             if stopped {
                 steps.push(skipped(step));
@@ -163,7 +166,14 @@ impl Runner {
                 total,
                 name: &step.name,
             });
-            let result = self.run_step(&flow.name, step, &mut vars).await;
+            let tracing = match (flow.trace, &run_trace) {
+                (Some(_), Some(trace_id)) => Some(TraceParent::child_of(trace_id)),
+                (Some(_), None) => Some(TraceParent::new()),
+                (None, _) => None,
+            };
+            let result = self
+                .run_step(&flow.name, step, &mut vars, tracing.as_ref())
+                .await;
             stopped = self.options.bail && !result.passed();
             steps.push(result);
         }
@@ -178,7 +188,15 @@ impl Runner {
     /// extracts, or its scripts set, are kept in `vars` for the steps after it.
     /// A step marked `cache: true` takes a kept response for the same request
     /// instead of sending it; `flow` names the flow it is kept under.
-    pub async fn run_step(&self, flow: &str, step: &Step, vars: &mut Variables) -> StepResult {
+    /// With `tracing`, the request carries it as a `traceparent` header,
+    /// unless the step sets that header itself.
+    pub(crate) async fn run_step(
+        &self,
+        flow: &str,
+        step: &Step,
+        vars: &mut Variables,
+        tracing: Option<&TraceParent>,
+    ) -> StepResult {
         let mut checks = Vec::new();
         let mut logs = Vec::new();
         let mut outgoing = Outgoing::from(&step.request);
@@ -227,6 +245,8 @@ impl Runner {
             error: None,
             skipped: false,
             cached: false,
+            trace_id: None,
+            span_id: None,
             exchange: None,
         };
         let method = match reqwest::Method::from_bytes(outgoing.method.as_bytes()) {
@@ -294,7 +314,7 @@ impl Runner {
             ));
         }
 
-        let request = match builder.build() {
+        let mut request = match builder.build() {
             Ok(request) => request,
             Err(err) => {
                 result.error = Some(describe(&err, self.options.timeout));
@@ -304,10 +324,38 @@ impl Runner {
         let cache_key = step
             .cache
             .then(|| Key::new(flow, &step.name, &request, multipart_text.as_deref()));
+        // Added after the cache key, which a new trace each time would
+        // otherwise never match.
+        let sent_trace = match request.headers().get(trace::HEADER) {
+            Some(own) => {
+                let parsed = own.to_str().ok().and_then(TraceParent::parse);
+                if parsed.is_none() && tracing.is_some() {
+                    result.warnings.push(
+                        "the step's own `traceparent` header is not valid W3C trace context, \
+                         so it was sent as written and no trace ID was recorded"
+                            .into(),
+                    );
+                }
+                parsed
+            }
+            None => tracing.map(|parent| {
+                let value = reqwest::header::HeaderValue::from_str(&parent.header_value())
+                    .expect("a traceparent is plain ASCII");
+                request.headers_mut().insert(trace::HEADER, value);
+                parent.clone()
+            }),
+        };
         let sent = Sent::of(&request, multipart_text);
 
         let started = Instant::now();
         let kept = cache_key.as_ref().and_then(|key| self.cache.get(key));
+        // A reused response was never sent, so it belongs to no trace.
+        if kept.is_none() {
+            if let Some(parent) = sent_trace {
+                result.trace_id = Some(parent.trace_id);
+                result.span_id = Some(parent.span_id);
+            }
+        }
         let (status, headers, body) = if let Some(kept) = kept {
             result.cached = true;
             result.time_to_headers_ms = Some(millis(started.elapsed()));
@@ -637,6 +685,8 @@ fn skipped(step: &Step) -> StepResult {
         error: None,
         skipped: true,
         cached: false,
+        trace_id: None,
+        span_id: None,
         exchange: None,
     }
 }

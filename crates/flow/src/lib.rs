@@ -20,7 +20,7 @@ pub use duration::{Duration, DurationError};
 pub use load::{LoadProfile, Stage};
 pub use model::{
     Assertion, Body, ExtractSource, Flow, GraphqlBody, Header, HeaderAssertion, JsonAssertion,
-    KeyValue, Method, Request, Scripts, Step,
+    KeyValue, Method, Request, Scripts, Step, TraceMode,
 };
 pub use template::{render, variable_refs, Rendered};
 pub use test_file::{ParseError, TestFile, CURRENT_VERSION};

@@ -54,6 +54,15 @@ async fn graphql(headers: HeaderMap, Json(body): Json<Value>) -> (StatusCode, Js
     }
 }
 
+/// Answers with the `traceparent` it got, or `none`.
+async fn traced(headers: HeaderMap) -> String {
+    headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("none")
+        .to_owned()
+}
+
 async fn slow() -> &'static str {
     tokio::time::sleep(Duration::from_millis(400)).await;
     "late"
@@ -66,7 +75,8 @@ async fn serve() -> String {
         .route("/me", get(me))
         .route("/echo", post(echo))
         .route("/graphql", post(graphql))
-        .route("/slow", get(slow));
+        .route("/slow", get(slow))
+        .route("/traced", get(traced));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -624,4 +634,126 @@ async fn graphql_steps_send_typed_variables_and_fail_on_errors() {
         invalid.error.as_deref().unwrap().contains("not valid JSON"),
         "{invalid:#?}"
     );
+}
+
+const TRACED: &str = r#"
+  name: traced
+  trace: TRACE_MODE
+  steps:
+    - name: First
+      request: { method: GET, url: "{{base}}/traced" }
+      extract: { got: { regex: ".+" } }
+    - name: Second
+      request: { method: GET, url: "{{base}}/traced" }
+      extract: { got: { regex: ".+" } }
+    - name: Own
+      request:
+        method: GET
+        url: "{{base}}/traced"
+        headers: [{ name: TraceParent, value: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" }]
+      extract: { got: { regex: ".+" } }
+"#;
+
+/// What the server got, and what the step recorded.
+fn trace_of(step: &stormix_engine::StepResult) -> (String, String, String) {
+    (
+        step.extracted["got"].clone(),
+        step.trace_id.clone().unwrap_or_default(),
+        step.span_id.clone().unwrap_or_default(),
+    )
+}
+
+#[tokio::test]
+async fn traced_flows_send_a_traceparent_per_request() {
+    let url = serve().await;
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let result = runner
+        .run(&flow(&TRACED.replace("TRACE_MODE", "request")), &base(&url))
+        .await;
+    assert!(result.passed(), "{result:#?}");
+    let (got1, trace1, span1) = trace_of(&result.steps[0]);
+    let (got2, trace2, _) = trace_of(&result.steps[1]);
+    assert_eq!(got1, format!("00-{trace1}-{span1}-01"));
+    assert_eq!(trace1.len(), 32);
+    assert_eq!(span1.len(), 16);
+    assert!(got2.ends_with("-01") && got2.contains(&trace2));
+    assert_ne!(trace1, trace2, "each request is its own trace");
+    // The header shows in the request kept for Details.
+    let sent = &result.steps[0].exchange.as_ref().unwrap().request_headers;
+    assert!(sent
+        .iter()
+        .any(|h| h.name == "traceparent" && h.value == got1));
+
+    // A step's own header is sent untouched, and its IDs recorded.
+    let (own, own_trace, own_span) = trace_of(&result.steps[2]);
+    assert_eq!(
+        own,
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    );
+    assert_eq!(own_trace, "4bf92f3577b34da6a3ce929d0e0e4736");
+    assert_eq!(own_span, "00f067aa0ba902b7");
+}
+
+#[tokio::test]
+async fn one_trace_per_run_in_flow_mode() {
+    let url = serve().await;
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let f = flow(&TRACED.replace("TRACE_MODE", "flow"));
+    let first = runner.run(&f, &base(&url)).await;
+    let (_, trace1, span1) = trace_of(&first.steps[0]);
+    let (got2, trace2, span2) = trace_of(&first.steps[1]);
+    assert_eq!(trace1, trace2, "one trace for the run");
+    assert_ne!(span1, span2, "a span per request");
+    assert_eq!(got2, format!("00-{trace2}-{span2}-01"));
+    let again = runner.run(&f, &base(&url)).await;
+    assert_ne!(trace_of(&again.steps[0]).1, trace1, "a new trace per run");
+}
+
+#[tokio::test]
+async fn untraced_flows_send_no_traceparent() {
+    let url = serve().await;
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let yaml = TRACED.replace("  trace: TRACE_MODE\n", "");
+    let result = runner.run(&flow(&yaml), &base(&url)).await;
+    assert_eq!(
+        trace_of(&result.steps[0]),
+        ("none".into(), String::new(), String::new())
+    );
+    // A header the step sets itself is still recorded.
+    assert_eq!(
+        result.steps[2].trace_id.as_deref(),
+        Some("4bf92f3577b34da6a3ce929d0e0e4736")
+    );
+}
+
+#[tokio::test]
+async fn an_invalid_own_traceparent_is_kept_with_a_warning() {
+    let url = serve().await;
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let yaml = TRACED.replace("TRACE_MODE", "request").replace(
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "not-a-trace",
+    );
+    let result = runner.run(&flow(&yaml), &base(&url)).await;
+    let own = &result.steps[2];
+    assert_eq!(own.extracted["got"], "not-a-trace");
+    assert_eq!(own.trace_id, None);
+    assert!(own.warnings[0].contains("traceparent"), "{own:#?}");
+}
+
+#[tokio::test]
+async fn tracing_does_not_stop_a_cached_step_from_matching() {
+    use std::sync::atomic::Ordering;
+    let (url, calls) = serve_counter().await;
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let mut vars = base(&url);
+    vars.set("user", "a");
+    let f = flow(&CACHED.replace("  name: cached\n", "  name: cached\n  trace: request\n"));
+    let first = runner.run(&f, &vars).await;
+    assert!(first.steps[0].trace_id.is_some());
+    let second = runner.run(&f, &vars).await;
+    assert!(second.steps[0].cached, "{second:#?}");
+    assert_eq!(second.steps[0].trace_id, None, "nothing was sent");
+    assert!(second.steps[1].trace_id.is_some());
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
 }

@@ -43,6 +43,17 @@ pub struct StepResult {
     /// lookup's. Missing from runs saved before 1.4.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cached: bool,
+    /// The W3C trace this request was sent in, from the `traceparent`
+    /// header: Stormix's own when the flow has `trace` on, or one the step
+    /// set itself. Look it up in Dynatrace or another APM tool to see what
+    /// the request did in each service. Missing when no valid
+    /// `traceparent` went out, and on runs saved before 1.6.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    /// The span the request was sent from, the parent of the first span
+    /// the server records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span_id: Option<String>,
     /// What was sent and what came back. Kept for every step of a single
     /// run; under load, only for failed steps. Missing from runs saved
     /// before 1.1.

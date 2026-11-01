@@ -23,6 +23,24 @@ pub struct Flow {
     /// ready to be put back. Like code commented out, without losing it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub set_aside: Vec<Step>,
+    /// Send a W3C `traceparent` header with every request, so APM tools
+    /// such as Dynatrace, Datadog or Jaeger join what each request did in
+    /// the services it reached into one trace, found by the trace ID
+    /// Stormix records. A step that sets its own `traceparent` keeps it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace: Option<TraceMode>,
+}
+
+/// How requests are grouped into traces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
+pub enum TraceMode {
+    /// Every request starts a trace of its own.
+    Request,
+    /// Every run of the flow (each load test iteration) is one trace, and
+    /// each of its requests a span in it.
+    Flow,
 }
 
 impl Flow {

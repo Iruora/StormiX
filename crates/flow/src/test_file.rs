@@ -158,6 +158,31 @@ thresholds:
     }
 
     #[test]
+    fn tracing_is_off_unless_the_flow_asks_for_it() {
+        use crate::TraceMode;
+        assert_eq!(TestFile::from_yaml(LOGIN).unwrap().flow.trace, None);
+        assert!(!TestFile::from_yaml(LOGIN)
+            .unwrap()
+            .to_yaml()
+            .contains("trace"));
+        for (text, mode) in [("request", TraceMode::Request), ("flow", TraceMode::Flow)] {
+            let yaml = LOGIN.replace(
+                "  name: Login then fetch the profile\n",
+                &format!("  name: Login then fetch the profile\n  trace: {text}\n"),
+            );
+            let file = TestFile::from_yaml(&yaml).unwrap();
+            assert_eq!(file.flow.trace, Some(mode));
+            assert_eq!(TestFile::from_yaml(&file.to_yaml()).unwrap(), file);
+        }
+        let bad = LOGIN.replace(
+            "  name: Login then fetch the profile\n",
+            "  name: Login then fetch the profile\n  trace: always\n",
+        );
+        let err = TestFile::from_yaml(&bad).unwrap_err().to_string();
+        assert!(err.starts_with("flow.trace:"), "{err}");
+    }
+
+    #[test]
     fn set_aside_steps_round_trip() {
         let mut file = TestFile::from_yaml(LOGIN).unwrap();
         let parked = file.flow.steps.pop().unwrap();

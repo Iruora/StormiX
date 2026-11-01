@@ -58,6 +58,7 @@ Always `1` for now. A file with an unknown version is rejected rather than misre
 | `variables` | no | A map of names to string values, used as `{{name}}` |
 | `steps` | yes | One or more steps, run in order |
 | `set_aside` | no | Steps kept with the file but out of the flow. They are never run or checked; the desktop app's Flow view puts them back |
+| `trace` | no | `request` or `flow`: send a W3C `traceparent` header with every request, for Dynatrace and other APM tools. See [Tracing requests](#tracing-requests) |
 
 One virtual user runs the steps in order. In a load test, each iteration is one pass through all the enabled steps, with its own copy of the variables.
 
@@ -80,6 +81,26 @@ flow:
     - name: Old payment endpoint
       request: { method: POST, url: "{{baseUrl}}/v1/pay" }
 ```
+
+### Tracing requests
+
+APM tools like Dynatrace, Datadog, New Relic, Elastic, Jaeger and Grafana Tempo follow a request through every service it reaches by a trace ID that travels in a header. With `trace` set, Stormix starts the trace: every request carries a [W3C `traceparent`](https://www.w3.org/TR/trace-context/#traceparent-header) header with a new span ID, marked as sampled, and every result records the trace ID it was sent with. A slow or failed request in Stormix can then be looked up in the APM tool to see where its time went.
+
+```yaml
+flow:
+  name: checkout
+  trace: request
+  steps: ...
+```
+
+- `trace: request` gives every request a trace of its own, so one trace ID means one request.
+- `trace: flow` makes each run of the flow (each load test iteration) one trace, with a span per request, so a whole journey (log in, add to cart, pay) shows as one trace.
+- A step that sets its own `traceparent` header keeps it, and its trace ID is recorded too. One that is not valid W3C trace context is sent as written, with a warning.
+- A response reused from the cache was not sent, so it has no trace ID. The header does not stop a cached step from matching.
+- Run results carry `traceId` and `spanId` per step, in JSON, Details, the HTML report and JUnit failures. Load tests keep the 5 slowest traced requests of each step (`slowest` in the JSON report, also in the HTML report and the desktop app), and failure samples keep theirs.
+- `stormix run` and `stormix load` take `--trace [request|flow|off]` to override the file.
+
+In Dynatrace, OneAgent reads `traceparent` when W3C Trace Context is turned on (it is by default in recent versions), and the trace ID can be searched for under **Distributed traces**. The services behind the API must be monitored for their part to show; the request itself starts at Stormix, which reports nothing to the APM tool.
 
 ### Caching a step
 

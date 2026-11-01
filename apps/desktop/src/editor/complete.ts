@@ -34,6 +34,11 @@ const KEYS: Record<string, Key[]> = {
     { label: "variables", info: "Names to string values, used as {{name}}" },
     { label: "steps", info: "One or more steps, run in order" },
     { label: "set_aside", info: "Steps kept out of the flow: never run, ready to put back" },
+    {
+      label: "trace",
+      info: "Send a W3C traceparent header for Dynatrace and other APM tools: request (a trace per request) or flow (a trace per run)",
+      value: "request",
+    },
   ],
   "flow/steps/[]": STEP_KEYS,
   "flow/steps/[]/request": [
@@ -122,6 +127,7 @@ const VALUES: Record<string, string[]> = {
   "flow/steps/[]/assert/[]/json/exists": ["true", "false"],
   "flow/steps/[]/enabled": ["true", "false"],
   "flow/steps/[]/cache": ["true", "false"],
+  "flow/trace": ["request", "flow"],
   "flow/steps/[]/request/body/graphql/allow_errors": ["true", "false"],
   version: ["1"],
 };

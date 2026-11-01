@@ -296,3 +296,62 @@ load:
         .iter()
         .all(|st| st.name != "login" || st.requests == 0));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn traced_load_tests_keep_the_slowest_requests_of_each_step() {
+    let url = serve().await;
+    let test = test_file(
+        r#"
+flow:
+  name: traced
+  trace: request
+  steps:
+    - name: fast
+      request: { method: GET, url: "{{base}}/fast" }
+    - name: missing
+      request: { method: GET, url: "{{base}}/missing" }
+load:
+  constant_rate: { rate: 20, duration: 1s }
+"#,
+    );
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(&url),
+        test.load.as_ref().unwrap(),
+        &[],
+        &LoadOptions::default(),
+        |_| {},
+    )
+    .await;
+    assert_eq!(report.slowest.len(), 10, "{:#?}", report.slowest);
+    for step in ["fast", "missing"] {
+        assert_eq!(report.slowest.iter().filter(|r| r.step == step).count(), 5);
+    }
+    assert!(report
+        .slowest
+        .windows(2)
+        .all(|w| w[0].duration_ms >= w[1].duration_ms));
+    let missing = report.slowest.iter().find(|r| r.step == "missing").unwrap();
+    assert!(!missing.passed);
+    assert_eq!(missing.status, Some(404));
+    assert_eq!(missing.trace_id.len(), 32);
+    // The failure sample carries its trace ID too.
+    assert!(report.samples[0].trace_id.is_some());
+
+    let untraced = test_file(&format!(
+        "flow:\n  name: plain\n  steps:\n    - name: fast\n      request: {{ method: GET, url: \"{url}/fast\" }}\nload:\n  constant_rate: {{ rate: 5, duration: 1s }}\n"
+    ));
+    let report = run_load(
+        &runner,
+        &untraced.flow,
+        &Variables::new(),
+        untraced.load.as_ref().unwrap(),
+        &[],
+        &LoadOptions::default(),
+        |_| {},
+    )
+    .await;
+    assert!(report.slowest.is_empty());
+}

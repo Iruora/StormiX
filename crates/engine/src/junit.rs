@@ -37,15 +37,22 @@ pub fn junit_report(result: &FlowResult) -> String {
             continue;
         }
         xml.push_str(">\n");
+        // CI shows the failure text; the trace ID there leads to the APM tool.
+        let trace = step
+            .trace_id
+            .as_ref()
+            .map(|id| format!("\ntrace {id}"))
+            .unwrap_or_default();
         if step.skipped {
             xml.push_str("      <skipped message=\"an earlier step failed\"/>\n");
         } else if let Some(error) = &step.error {
             let _ = writeln!(
                 xml,
-                r#"      <failure message="{}" type="request">{} {}</failure>"#,
+                r#"      <failure message="{}" type="request">{} {}{}</failure>"#,
                 escape(error),
                 escape(&step.method),
                 escape(&step.url),
+                escape(&trace),
             );
         } else {
             let failed: Vec<_> = step.checks.iter().filter(|c| !c.passed).collect();
@@ -58,10 +65,11 @@ pub fn junit_report(result: &FlowResult) -> String {
                 .collect();
             let _ = writeln!(
                 xml,
-                r#"      <failure message="{} of {} checks failed" type="assertion">{}</failure>"#,
+                r#"      <failure message="{} of {} checks failed" type="assertion">{}{}</failure>"#,
                 failed.len(),
                 step.checks.len(),
                 escape(&details.join("\n")),
+                escape(&trace),
             );
         }
         xml.push_str("    </testcase>\n");
@@ -154,6 +162,8 @@ mod tests {
             error: error.map(Into::into),
             skipped,
             cached: false,
+            trace_id: None,
+            span_id: None,
             exchange: None,
         }
     }

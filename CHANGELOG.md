@@ -4,6 +4,8 @@
 
 ### Flows
 
+- **Trace requests in Dynatrace and other APM tools.** With `trace: request` (or `trace: flow`) on a flow, every request carries a W3C `traceparent` header, and every result records its trace ID, so a slow or failed request can be found in Dynatrace, Datadog, Jaeger or any tool that reads W3C trace context and followed through each service it reached. `request` gives each request its own trace; `flow` makes each run of the flow, or each load test iteration, one trace with a span per request. A step's own `traceparent` header is kept. Load test reports list the slowest traced requests of each step. `stormix run` and `stormix load` take `--trace`. See [Tracing requests](docs/TEST_FILE.md#tracing-requests).
+
 - **GraphQL bodies.** A step can send `body: { graphql: { query, variables, operation_name } }`, sent as JSON with `Content-Type: application/json`. A templated variable takes the type the query declares, so `id: "{{user_id}}"` goes out as the number `7` for `$id: Int!` instead of the text `"7"` that GraphQL servers reject. Variables can also be JSON text with bare `{{variables}}` in it, filled in before it is parsed. See [GraphQL](docs/TEST_FILE.md#graphql).
 - A GraphQL step fails when the response has GraphQL `errors`, even with status 200, as well as on a 4xx or 5xx or a body that is not JSON, through a **no GraphQL errors** check that shows the first error's message. Load tests count these as errors. `allow_errors: true` turns the check off for a step that expects errors.
 - `stormix validate` and the editor report an empty GraphQL query and variables that are not a JSON object, and warn about undefined variables used in the query and variables.
@@ -14,6 +16,7 @@
 
 ### Desktop app
 
+- **Trace requests** in the Steps tab and the load test setup turns tracing on for each request or each flow run. Details shows the request's trace ID with **Copy trace ID**, and load test results list the slowest traced requests with a copy button for each. The YAML editor completes `trace`.
 - The Steps tab has a **graphql** body with fields for the query and variables, the operation name and **pass even with GraphQL errors**. Switching a JSON or raw body holding `{ "query": ... }` to **graphql** converts it, which also upgrades GraphQL requests imported by earlier versions. The YAML editor completes the `graphql` keys.
 
 ## 1.5.1 (2026-11-01)

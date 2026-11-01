@@ -1,10 +1,10 @@
-import { ArrowDown, ArrowUp, ChevronsUpDown, CircleCheck, CircleX, LoaderCircle, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronsUpDown, CircleCheck, CircleX, LoaderCircle, Search, Waypoints } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import type { LoadProgress, LoadReport, Second, StepResult, StepSummary, ThresholdResult } from "../bindings";
+import type { LoadProgress, LoadReport, Second, SlowRequest, StepResult, StepSummary, ThresholdResult } from "../bindings";
 import { ProgressBar } from "./Busy";
 import { DetailsButton, stepPassed } from "./RunResult";
-import { StepDetails } from "./StepDetails";
+import { CopyButton, StepDetails } from "./StepDetails";
 
 /** Live figures while a load test runs: progress, the current second and a throughput chart. */
 export function LoadLive({ points }: { points: LoadProgress[] }) {
@@ -116,6 +116,7 @@ export function LoadResult({ report }: { report: LoadReport }) {
           </ul>
         </div>
       )}
+      {(report.slowest ?? []).length > 0 && <SlowestTraced requests={report.slowest ?? []} />}
       {!!s.cachedResponses && (
         <div className="border-t border-line px-4 py-2 text-xs text-muted">
           {s.cachedResponses} responses came from the cache, for steps marked cached. They were not sent, so they are
@@ -280,6 +281,45 @@ function StepTable({ steps }: { steps: StepSummary[] }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The slowest requests of each step, with the trace ID each went out with,
+ * so the time can be followed into the services in an APM tool.
+ */
+function SlowestTraced({ requests }: { requests: SlowRequest[] }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? requests : requests.slice(0, 8);
+  return (
+    <div className="border-t border-line px-4 py-3">
+      <div className="mb-1 flex flex-wrap items-baseline gap-x-2 text-xs">
+        <span className="flex items-center gap-1 font-medium text-subtle">
+          <Waypoints size="0.75rem" /> Slowest traced requests
+        </span>
+        <span className="text-subtle">Search for a trace ID in Dynatrace or another APM tool to see where the time went.</span>
+      </div>
+      <ul className="text-[0.8125rem]">
+        {shown.map((r, i) => (
+          <li key={`${r.traceId}-${r.spanId}-${i}`} className="flex items-center gap-2 border-t border-line py-1 first:border-t-0">
+            <span className="mono w-16 shrink-0 text-right text-xs">{formatMs(r.durationMs ?? 0)}</span>
+            <span className={`mono w-9 shrink-0 text-xs ${r.passed ? "text-muted" : "text-bad"}`}>{r.status ?? "—"}</span>
+            <span className="w-32 min-w-0 shrink truncate" title={r.step}>
+              {r.step}
+            </span>
+            <span className="mono min-w-0 flex-1 truncate text-xs text-muted select-all" title={`Parent span ${r.spanId}`}>
+              {r.traceId}
+            </span>
+            <CopyButton iconOnly label={`Copy trace ID ${r.traceId}`} text={() => r.traceId} />
+          </li>
+        ))}
+      </ul>
+      {requests.length > 8 && (
+        <button type="button" onClick={() => setAll(!all)} className="mt-1 text-xs text-accent hover:underline">
+          {all ? "Show fewer" : `Show all ${requests.length}`}
+        </button>
+      )}
     </div>
   );
 }
