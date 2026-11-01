@@ -125,6 +125,36 @@ thresholds:
     }
 
     #[test]
+    fn steps_are_enabled_unless_they_say_otherwise() {
+        let yaml = LOGIN.replace(
+            "    - name: Profile\n",
+            "    - name: Profile\n      enabled: false\n",
+        );
+        let file = TestFile::from_yaml(&yaml).unwrap();
+        assert!(file.flow.steps[0].enabled);
+        assert!(!file.flow.steps[1].enabled);
+        assert_eq!(file.flow.enabled_steps().count(), 1);
+        // `enabled: true` is the default, so only disabled steps write it.
+        let written = file.to_yaml();
+        assert_eq!(written.matches("enabled:").count(), 1, "{written}");
+        assert_eq!(TestFile::from_yaml(&written).unwrap(), file);
+    }
+
+    #[test]
+    fn set_aside_steps_round_trip() {
+        let mut file = TestFile::from_yaml(LOGIN).unwrap();
+        let parked = file.flow.steps.pop().unwrap();
+        file.flow.set_aside.push(parked);
+        let written = file.to_yaml();
+        assert!(written.contains("set_aside:"), "{written}");
+        assert_eq!(TestFile::from_yaml(&written).unwrap(), file);
+        assert!(!TestFile::from_yaml(LOGIN)
+            .unwrap()
+            .to_yaml()
+            .contains("set_aside"));
+    }
+
+    #[test]
     fn refuses_other_versions_and_unknown_keys() {
         let newer = LOGIN.replace("version: 1", "version: 2");
         assert!(matches!(

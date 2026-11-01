@@ -36,6 +36,11 @@ impl TestFile {
 
         if flow.steps.is_empty() {
             issues.error("flow.steps", "the flow has no steps");
+        } else if flow.enabled_steps().next().is_none() {
+            issues.error(
+                "flow.steps",
+                "every step is disabled, so a run would send nothing",
+            );
         }
 
         // Variables a step may use: the flow's own, plus whatever earlier steps
@@ -45,7 +50,9 @@ impl TestFile {
         // Scripts that have run by the time a step is sent; a variable they
         // name may well be one they set.
         let mut scripts: Vec<&str> = Vec::new();
-        for (i, step) in flow.steps.iter().enumerate() {
+        // Disabled steps are not sent, so they are not checked either, and
+        // what they would extract is not available to the steps after them.
+        for (i, step) in flow.steps.iter().enumerate().filter(|(_, s)| s.enabled) {
             let at = format!("flow.steps[{i}]");
             if step.name.trim().is_empty() {
                 issues.error(&format!("{at}.name"), "the step has no name");
@@ -298,6 +305,45 @@ flow:
             issues(yaml),
             [(Severity::Warning, "flow.steps[2].request.url".into())]
         );
+    }
+
+    #[test]
+    fn disabled_and_set_aside_steps_are_not_checked() {
+        let yaml = r#"
+version: 1
+flow:
+  name: partial
+  steps:
+    - name: sets token, but is off
+      enabled: false
+      request: { method: GET, url: "" }
+      extract: { token: { header: X-Token } }
+    - name: me
+      request: { method: GET, url: "https://example.com/{{token}}" }
+  set_aside:
+    - name: parked
+      request: { method: GET, url: "" }
+"#;
+        // The disabled step's empty URL is not reported, and its extract
+        // does not define `token` for the step after it.
+        assert_eq!(
+            issues(yaml),
+            [(Severity::Warning, "flow.steps[1].request.url".into())]
+        );
+    }
+
+    #[test]
+    fn a_flow_with_every_step_disabled_cannot_run() {
+        let yaml = r#"
+version: 1
+flow:
+  name: off
+  steps:
+    - name: ping
+      enabled: false
+      request: { method: GET, url: "https://example.com" }
+"#;
+        assert_eq!(issues(yaml), [(Severity::Error, "flow.steps".into())]);
     }
 
     #[test]

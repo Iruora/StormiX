@@ -109,7 +109,8 @@ impl Runner {
         runner
     }
 
-    /// Runs every step once. `overrides` win over the flow's own variables.
+    /// Runs every enabled step once. `overrides` win over the flow's own
+    /// variables. Disabled steps are left out of the result entirely.
     pub async fn run(&self, flow: &Flow, overrides: &Variables) -> FlowResult {
         let mut vars = Variables::new();
         vars.extend(flow.variables.iter().map(|(k, v)| (k.as_str(), v.as_str())));
@@ -118,7 +119,7 @@ impl Runner {
         let started = Instant::now();
         let mut steps = Vec::with_capacity(flow.steps.len());
         let mut stopped = false;
-        for step in &flow.steps {
+        for step in flow.enabled_steps() {
             if stopped {
                 steps.push(skipped(step));
                 continue;

@@ -59,6 +59,7 @@ pub fn from_json(text: &str) -> Result<Imported, ImportError> {
                 description: description(info.get("description")),
                 variables,
                 steps: importer.steps,
+                set_aside: Vec::new(),
             },
             load: None,
             thresholds: Vec::new(),
@@ -132,6 +133,7 @@ impl Importer {
             );
             self.steps.push(Step {
                 name: step_name,
+                enabled: true,
                 request: built,
                 extract: BTreeMap::new(),
                 assertions: Vec::new(),

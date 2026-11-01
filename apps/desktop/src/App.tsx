@@ -40,6 +40,7 @@ import { RunResult, stepPassed } from "./views/RunResult";
 import { RUNS_KEY, RunsView } from "./views/Runs";
 import { SplitView, usePanel } from "./views/SidePanel";
 import { EnvSecrets } from "./views/EnvSecrets";
+import { FlowView } from "./views/FlowView";
 import { StepsEditor } from "./views/StepsEditor";
 import { UpdateBanner } from "./views/UpdateBanner";
 
@@ -124,7 +125,7 @@ function TestFileView() {
   const panel = usePanel();
   const [path, setPath] = useState<string | null>(null);
   const [savedText, setSavedText] = useState<string | null>(null);
-  const [tab, setTab] = useState<"steps" | "yaml">("steps");
+  const [tab, setTab] = useState<"steps" | "flow" | "yaml">("steps");
   const [lastRun, setLastRun] = useState<FlowResult | null>(null);
   // What the steps editor shows while its YAML is being written.
   const [draft, setDraft] = useState<TestFile | null>(null);
@@ -305,7 +306,7 @@ function TestFileView() {
   const editorPane = (
     <>
       <div className="flex items-center gap-1 border-b border-line bg-surface px-3 py-1.5">
-        {(["steps", "yaml"] as const).map((t) => (
+        {(["steps", "flow", "yaml"] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -314,7 +315,7 @@ function TestFileView() {
               tab === t ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface-2"
             }`}
           >
-            {t === "steps" ? "Steps" : "YAML"}
+            {t === "steps" ? "Steps" : t === "flow" ? "Flow" : "YAML"}
           </button>
         ))}
         <span className="mono ml-3 min-w-0 truncate text-xs text-muted" title={path ?? undefined}>
@@ -340,6 +341,23 @@ function TestFileView() {
           variables={variables}
           onSave={() => file.mutate("save")}
         />
+      ) : shown && tab === "flow" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <VariablesContext.Provider value={variables}>
+            <FlowView
+              test={shown}
+              onChange={editSteps}
+              lastRun={run.data ?? null}
+              onOpenStep={(i) => {
+                setTab("steps");
+                // Once the Steps tab has rendered, bring that step into view.
+                requestAnimationFrame(() =>
+                  document.getElementById(`step-${i}`)?.scrollIntoView({ block: "start", behavior: "smooth" }),
+                );
+              }}
+            />
+          </VariablesContext.Provider>
+        </div>
       ) : shown ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <VariablesContext.Provider value={variables}>
@@ -624,6 +642,9 @@ function Issues({ issues }: { issues: Issue[] }) {
 
 function Summary({ test }: { test: TestFile }) {
   const { flow } = test;
+  // What a run sends: turned off and set-aside steps are left out.
+  const running = flow.steps.filter((s) => s.enabled !== false);
+  const skipped = flow.steps.length - running.length;
   return (
     <section className="mt-4 rounded-lg border border-line bg-surface">
       <div className="border-b border-line px-4 py-3">
@@ -631,7 +652,7 @@ function Summary({ test }: { test: TestFile }) {
         <div className="text-xs text-muted">{describeLoad(test.load)}</div>
       </div>
       <ol className="divide-y divide-line">
-        {flow.steps.map((step, i) => (
+        {running.map((step, i) => (
           <li key={i} className="flex items-baseline gap-3 px-4 py-2">
             <span className="w-4 text-right text-xs text-subtle">{i + 1}</span>
             <span className={`mono w-14 shrink-0 text-xs font-semibold ${methodText(step.request.method)}`}>
@@ -644,6 +665,11 @@ function Summary({ test }: { test: TestFile }) {
           </li>
         ))}
       </ol>
+      {skipped > 0 && (
+        <div className="border-t border-line px-4 py-2 text-xs text-subtle">
+          {skipped} step{skipped === 1 ? " is" : "s are"} turned off and will not run.
+        </div>
+      )}
       {test.thresholds && test.thresholds.length > 0 && (
         <div className="flex flex-wrap gap-1.5 border-t border-line px-4 py-3">
           {test.thresholds.map((t) => (

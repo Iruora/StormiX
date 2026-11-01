@@ -122,11 +122,20 @@ fn validate(file: &Path, format: Format, strict: bool) -> Result<ExitCode, Strin
                 println!("{label}: {}: {}", issue.path, issue.message);
             }
             if issues.is_empty() {
+                let flow = &test.flow;
+                let mut counts = vec![format!("{} steps", flow.steps.len())];
+                let disabled = flow.steps.len() - flow.enabled_steps().count();
+                if disabled > 0 {
+                    counts.push(format!("{disabled} disabled"));
+                }
+                if !flow.set_aside.is_empty() {
+                    counts.push(format!("{} set aside", flow.set_aside.len()));
+                }
                 println!(
-                    "{}: `{}` is valid ({} steps)",
+                    "{}: `{}` is valid ({})",
                     file.display(),
-                    test.flow.name,
-                    test.flow.steps.len()
+                    flow.name,
+                    counts.join(", ")
                 );
             }
         }
