@@ -1,7 +1,8 @@
-Stormix 1.5.0 brings back what you had open when the app restarts, and lets you see and change the loaded environment.
+Stormix 1.5.1 shows what the app is doing while slow actions run.
 
-- **Workspaces:** what you have open is saved as you work: the test file (and unsaved edits), the environments and the chosen one, the editor tab and the steps left out of the last load test. The app opens the last workspace on launch instead of the example. The new **Workspaces** page lists them to open, rename or delete, and **New workspace** starts another. Secret values are never saved.
-- **Variables:** next to the environment picker, see the chosen environment's variables and change them for this session only, or save them to the environment's file (`.bru`, Postman, JSON or YAML, in its own format). Secrets stay masked and are never written with a value.
+- **Progress while you wait:** a strip under the toolbar names what is under way, with a progress bar. A Bruno collection import counts its files as it reads them ("37 of 120 files"), and opening, saving, reopening a workspace, importing an environment and starting a load test show there too. **Run once** shows which step it is on.
+- **Busy buttons:** the button you pressed shows a spinner, and buttons that would clash with it wait until it finishes. Saving shows **Saved**. Exporting reports, deleting runs and downloading updates show progress as well.
+- **No more freezes:** importing a large collection, and reading or saving files, no longer freezes the window.
 
 If you are on 1.1 or later, the app offers this update by itself. On 1.0, download it once from the table below.
 
