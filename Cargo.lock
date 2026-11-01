@@ -3974,6 +3974,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-updater",
  "tauri-specta",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
 ]

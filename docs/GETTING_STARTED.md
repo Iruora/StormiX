@@ -23,6 +23,8 @@ The builds are not signed yet. On macOS, right-click the app and choose **Open**
 4. Click **Run once**. Each step shows its status, timing and every check. Failed checks show what came back, such as `status is 200: got 401`.
 5. Switch between **Steps** and **YAML** to edit the flow. Steps is a form with the method, URL, headers, body and expected status of each step, and the load profile and thresholds. YAML gives you the whole file. Click **Save** to keep it as a `.stormix.yaml` file next to your code.
 
+What you have open is kept in a **workspace**, saved as you work: the test file (and any changes not saved to it yet), the environments in the list and the one chosen, the editor tab and the steps left out of the last load test. Close the app and it opens where you left off. The **Workspaces** page (the stack icon in the sidebar, or the workspace name next to *Test file*) lists them to switch between, rename or delete; **New workspace** starts another from the example. Secret values are never saved: type them in again after a restart.
+
 ## 2. A load test
 
 Pick a profile in **Load profile** on the Steps tab (or write a `load:` section in YAML), add thresholds such as `p95 < 300ms` and `errors < 1%`, and click **Load test**. The chart shows requests per second, failures and p95 latency each second. At the end you get percentiles, each threshold with its measured value, a per-step table and the most common failures.

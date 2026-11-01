@@ -54,6 +54,16 @@ export const commands = {
 	writeTextFile: (path: string, text: string) => typedError<null, string>(__TAURI_INVOKE("write_text_file", { path, text })),
 	/**  The visual editor works on the parsed file and writes YAML back. */
 	testFileToYaml: (test: TestFile_Deserialize) => __TAURI_INVOKE<string>("test_file_to_yaml", { test }),
+	/**  The saved workspaces and which one to reopen on launch. */
+	listWorkspaces: () => __TAURI_INVOKE<Workspaces_Serialize>("list_workspaces"),
+	/**
+	 *  Adds or updates a workspace and makes it the one to reopen. Returns it
+	 *  with its new save time.
+	 */
+	saveWorkspace: (workspace: Workspace_Deserialize) => typedError<Workspace_Serialize, string>(__TAURI_INVOKE("save_workspace", { workspace })),
+	/**  Makes a workspace the one to reopen on launch. */
+	selectWorkspace: (id: string) => typedError<null, string>(__TAURI_INVOKE("select_workspace", { id })),
+	deleteWorkspace: (id: string) => typedError<null, string>(__TAURI_INVOKE("delete_workspace", { id })),
 };
 
 /** Events */
@@ -930,6 +940,106 @@ export type Validation_Serialize = {
 	/**  Set when the YAML does not parse; `issues` is then empty. */
 	parseError: string | null,
 	issues: Issue[],
+};
+
+/**  Everything needed to pick the work back up. */
+export type Workspace = Workspace_Serialize | Workspace_Deserialize;
+
+/**
+ *  An environment as the app keeps it: its variables and the names of its
+ *  secrets, which have no value here.
+ */
+export type WorkspaceEnv = WorkspaceEnv_Serialize | WorkspaceEnv_Deserialize;
+
+/**
+ *  An environment as the app keeps it: its variables and the names of its
+ *  secrets, which have no value here.
+ */
+export type WorkspaceEnv_Deserialize = {
+	variables?: { [key in string]: string },
+	secrets?: string[],
+};
+
+/**
+ *  An environment as the app keeps it: its variables and the names of its
+ *  secrets, which have no value here.
+ */
+export type WorkspaceEnv_Serialize = {
+	variables: { [key in string]: string },
+	secrets: string[],
+};
+
+/**  Everything needed to pick the work back up. */
+export type Workspace_Deserialize = {
+	id?: string,
+	/**  Shown in the list. Follows the open file until the user renames it. */
+	name?: string,
+	/**  The user gave the name, so it no longer follows the file. */
+	renamed?: boolean,
+	/**  Milliseconds since 1970, set when saved. */
+	updatedMs?: number | null,
+	/**  The test file it is saved to, if any. */
+	path?: string | null,
+	/**  The editor's text. `None` is the untouched example. */
+	text?: string | null,
+	/**  The text has changes not saved to `path`. */
+	dirty?: boolean,
+	/**  The text came from an imported collection and has no file yet. */
+	imported?: boolean,
+	/**  Every environment in the list, by name. */
+	environments?: { [key in string]: WorkspaceEnv_Deserialize },
+	/**  The chosen environment, or empty for none. */
+	environment?: string,
+	/**  The editor tab: steps, flow or yaml. */
+	tab?: string,
+	/**  Steps left out of the last load test, by name. */
+	excluded?: string[],
+	/**  The page: file or runs. */
+	view?: string,
+};
+
+/**  Everything needed to pick the work back up. */
+export type Workspace_Serialize = {
+	id: string,
+	/**  Shown in the list. Follows the open file until the user renames it. */
+	name: string,
+	/**  The user gave the name, so it no longer follows the file. */
+	renamed: boolean,
+	/**  Milliseconds since 1970, set when saved. */
+	updatedMs: number | null,
+	/**  The test file it is saved to, if any. */
+	path: string | null,
+	/**  The editor's text. `None` is the untouched example. */
+	text: string | null,
+	/**  The text has changes not saved to `path`. */
+	dirty: boolean,
+	/**  The text came from an imported collection and has no file yet. */
+	imported: boolean,
+	/**  Every environment in the list, by name. */
+	environments: { [key in string]: WorkspaceEnv_Serialize },
+	/**  The chosen environment, or empty for none. */
+	environment: string,
+	/**  The editor tab: steps, flow or yaml. */
+	tab: string,
+	/**  Steps left out of the last load test, by name. */
+	excluded: string[],
+	/**  The page: file or runs. */
+	view: string,
+};
+
+/**  The saved workspaces, most recently used first, and which one to reopen. */
+export type Workspaces = Workspaces_Serialize | Workspaces_Deserialize;
+
+/**  The saved workspaces, most recently used first, and which one to reopen. */
+export type Workspaces_Deserialize = {
+	last?: string | null,
+	items?: Workspace_Deserialize[],
+};
+
+/**  The saved workspaces, most recently used first, and which one to reopen. */
+export type Workspaces_Serialize = {
+	last: string | null,
+	items: Workspace_Serialize[],
 };
 
 /* Tauri Specta runtime */

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Desktop app
+
+- **Workspaces.** The app keeps what you have open in a workspace, saved as you work, and opens the last one used when it starts instead of the example. A workspace holds the test file, or the editor text when it is not saved to a file (an imported collection, say), with changes not yet saved to the file; every environment in the list and the one chosen; the editor tab and page; and the steps left out of the last load test. On reopening, the file is read again from disk, along with the environments beside it; if it is gone, the copy kept with the workspace opens instead. The new **Workspaces** page lists them with their file, environment and when they were last saved, to open, rename or delete; **New workspace** starts one from the example. Workspaces are kept in `workspaces.json` in the app's data folder. Secret values are never saved.
+
 ## 1.4.0 (2026-11-01)
 
 ### Desktop app

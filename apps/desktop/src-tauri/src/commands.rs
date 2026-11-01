@@ -14,6 +14,8 @@ use stormix_store::{RunData, RunDiff, RunSummary, Store, StoredRun};
 use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
+use crate::workspaces::{Workspace, WorkspaceFile, Workspaces};
+
 const EXAMPLE: &str = include_str!("../../../../examples/login.stormix.yaml");
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -333,6 +335,41 @@ pub fn read_text_file(path: String) -> Result<String, String> {
 #[specta::specta]
 pub fn write_text_file(path: String, text: String) -> Result<(), String> {
     std::fs::write(&path, text).map_err(|e| format!("cannot write {path}: {e}"))
+}
+
+/// The saved workspaces and which one to reopen on launch.
+#[tauri::command]
+#[specta::specta]
+pub fn list_workspaces(file: State<'_, Mutex<WorkspaceFile>>) -> Workspaces {
+    lock_ws(&file).list()
+}
+
+/// Adds or updates a workspace and makes it the one to reopen. Returns it
+/// with its new save time.
+#[tauri::command]
+#[specta::specta]
+pub fn save_workspace(
+    workspace: Workspace,
+    file: State<'_, Mutex<WorkspaceFile>>,
+) -> Result<Workspace, String> {
+    lock_ws(&file).save(workspace)
+}
+
+/// Makes a workspace the one to reopen on launch.
+#[tauri::command]
+#[specta::specta]
+pub fn select_workspace(id: String, file: State<'_, Mutex<WorkspaceFile>>) -> Result<(), String> {
+    lock_ws(&file).select(&id)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn delete_workspace(id: String, file: State<'_, Mutex<WorkspaceFile>>) -> Result<(), String> {
+    lock_ws(&file).delete(&id)
+}
+
+fn lock_ws(file: &Mutex<WorkspaceFile>) -> std::sync::MutexGuard<'_, WorkspaceFile> {
+    file.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// The visual editor works on the parsed file and writes YAML back.
