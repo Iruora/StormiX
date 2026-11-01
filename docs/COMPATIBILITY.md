@@ -58,13 +58,13 @@ What Stormix 1.0 runs from Postman and Bruno collections, feature by feature. An
 | Chai `expect` | ✓ | ✓ | Common chains: `equal`, `eql`, `include`, `property`, `lengthOf`, `match`, `keys`, `oneOf`, `a`, `above`, `below`, `not`, `deep` |
 | `Buffer`, `btoa`, `atob` | ✓ | ✓ | `Buffer.from` / `toString` with utf8, base64, base64url, hex, latin1 |
 | `console.log` | ✓ | ✓ | Shown for failed steps, or all steps with `-v` |
-| `bru.sleep` | n/a | ✓ | Capped by the script time limit |
-| `pm.sendRequest`, `bru.sendRequest` | ✓ | ✓ | Real requests with the run's client settings, within the script time limit. Callback and `await` forms. `bru.sendRequest` rejects outside 2xx, like axios. Not counted in load-test metrics. Postman `formdata` bodies are not supported |
+| `bru.sleep` | n/a | ✓ | Does not count toward the script time limit |
+| `pm.sendRequest`, `bru.sendRequest` | ✓ | ✓ | Real requests with the run's client settings. Waiting on them does not count toward the script time limit. Callback and `await` forms. `bru.sendRequest` rejects outside 2xx, like axios. Not counted in load-test metrics. Postman `formdata` bodies are not supported |
 | `require` (lodash, moment, …) | ✗ | ✗ | The script fails with a clear error |
 | `pm.iterationData`, data files | ✗ | ✗ | Always empty until data-driven runs arrive |
 | `pm.visualizer` | ✗ | n/a | A call to it fails the script |
 
-Scripts run in an embedded QuickJS engine with no file access and no network access apart from `sendRequest`, a memory cap and a time limit (`--script-timeout`, 5 s by default).
+Scripts run in an embedded QuickJS engine with no file access and no network access apart from `sendRequest`, a memory cap and a time limit (`--script-timeout`, 5 s by default). Time spent waiting on `bru.sleep` and `sendRequest` does not count toward it; waiting has its own cap of 5 minutes per script.
 
 ## Request types
 

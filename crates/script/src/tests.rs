@@ -395,11 +395,51 @@ fn bru_sleep_waits_and_resolves() {
 }
 
 #[test]
-fn bru_sleep_stops_at_the_time_limit() {
-    let started = std::time::Instant::now();
-    let out = pre("await bru.sleep(60000)\nbru.setVar('done', 'yes')");
-    assert!(started.elapsed() < Duration::from_secs(3));
+fn waiting_does_not_count_toward_the_time_limit() {
+    // Three 500 ms sleeps outlast the 1 s limit, but sleeping is waiting.
+    let out = pre("for (let i = 0; i < 3; i++) await bru.sleep(500)\nbru.setVar('done', 'yes')");
+    assert_eq!(out.error, None);
+    assert_eq!(out.variables.get("done"), Some(&Some("yes".into())));
+
+    // Waiting on requests is not counted either.
+    let (out, seen) = with_server(
+        "for (let i = 0; i < 3; i++) await bru.sendRequest({ url: 'https://x.test' })\nbru.setVar('done', 'yes')",
+        |_| {
+            std::thread::sleep(Duration::from_millis(800));
+            ScriptResponse {
+                status: 200,
+                status_text: "OK".into(),
+                headers: vec![],
+                body: String::new(),
+                time_ms: 800.0,
+            }
+        },
+    );
+    assert_eq!(out.error, None);
+    assert_eq!(seen.len(), 3);
+}
+
+#[test]
+fn running_still_counts_between_sleeps() {
+    let out = pre("while (true) { await bru.sleep(1); for (let i = 0; i < 1e5; i++) {} }");
     assert!(out.error.unwrap().contains("did not finish within"));
+}
+
+#[test]
+fn waiting_has_its_own_cap() {
+    let budget = Budget {
+        started: std::time::Instant::now(),
+        timeout: Duration::from_secs(5),
+        waited_us: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
+            MAX_WAIT.as_micros() as u64 - 1_000,
+        )),
+    };
+    assert!(!budget.spent());
+    assert!(budget.wait_left() <= Duration::from_millis(1));
+    let started = std::time::Instant::now();
+    budget.waiting(|left| std::thread::sleep(Duration::from_secs(60).min(left)));
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert!(budget.spent());
 }
 
 /// Runs a test script whose requests `send` answers, recording each request.

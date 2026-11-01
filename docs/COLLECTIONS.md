@@ -23,13 +23,13 @@ Folders are flattened in run order, and each step is named after its folder path
 | Scripts | collection, folder and request pre-request and test scripts, in that order | collection, folder and request `script:pre-request`, `script:post-response` and `tests` |
 | Assertions | `pm.test` and legacy `tests["..."]` | `assert` blocks, with every Bruno operator; `vars:post-response` |
 
-Scripts run in an embedded JavaScript engine (QuickJS) as async functions, so top-level `await` works. They have no file access and can only reach the network through `sendRequest`. They have a memory cap and a time limit (`--script-timeout`, 5 s by default). They see:
+Scripts run in an embedded JavaScript engine (QuickJS) as async functions, so top-level `await` works. They have no file access and can only reach the network through `sendRequest`. They have a memory cap and a time limit (`--script-timeout`, 5 s by default). Time spent waiting on `bru.sleep` and `sendRequest` does not count toward it; waiting has its own cap of 5 minutes per script. They see:
 
 - **Postman:** `pm.environment`, `pm.variables`, `pm.collectionVariables`, `pm.globals`, `pm.test`, `pm.expect`, `pm.request` (headers, URL, body), `pm.response` (`code`, `status`, `responseTime`, `text()`, `json()`, `headers`, `to.have.status`, `to.have.header`, `to.have.jsonBody`, `to.be.ok`…), and the legacy `postman.*`, `tests`, `responseBody`, `responseCode`, `responseTime` and `responseHeaders`.
 - **Bruno:** `bru.getVar`/`setVar`/`getEnvVar`/`setEnvVar`/`interpolate`…, `req.getUrl`/`setUrl`/`setHeader`/`setBody`/`setMethod`…, `res.status`, `res.body`, `res.headers`, `res.getStatus()`, `res.getBody()`, `res.getHeader()`, `res.getResponseTime()`, `bru.sleep`, `bru.sendRequest` (axios-style), `test` and `expect`.
 - **Both:** a Chai-style `expect` (`equal`, `eql`, `above`, `below`, `include`, `property`, `lengthOf`, `match`, `keys`, `oneOf`, `a`/`an`, `ok`, `empty`, `exist`, `not`, `deep`…), `console.log`, `btoa`/`atob`, `Buffer` (utf8, base64, base64url, hex) and `pm.sendRequest`.
 
-Requests sent from a script use the run's client settings and the time the script has left. They are not counted in load-test metrics. If a script retries with `bru.sleep`, raise `--script-timeout` to cover the whole loop.
+Requests sent from a script use the run's client settings. They are not counted in load-test metrics. A retry loop that pauses with `bru.sleep` works under the default limit, since only running time counts.
 
 Every `pm.test`, `test`, `tests[...]` and `assert` line is reported as a check of the same name, in the terminal, the JSON output and the JUnit report. A script that throws fails its step with the error. `console.log` output shows for failed steps, and for all steps with `-v`.
 
