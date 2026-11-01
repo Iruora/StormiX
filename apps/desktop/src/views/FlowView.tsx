@@ -192,14 +192,16 @@ export function FlowView({
             {disabled > 0 && <> · {disabled} turned off</>}
             {aside.length > 0 && <> · {aside.length} set aside</>}
           </span>
-          {disabled > 0 && (
-            <button
-              type="button"
-              onClick={() => write(steps.map((s) => ({ ...s, enabled: true })), aside)}
-              className="rounded border border-line px-1.5 py-0.5 hover:border-accent hover:text-accent"
-            >
-              Turn all on
-            </button>
+          {steps.length > 0 && (
+            <label className="flex cursor-pointer items-center gap-1.5 rounded border border-line px-1.5 py-0.5 hover:border-accent">
+              {/* On only when every step is; turns them all off then, and all on otherwise. */}
+              <Toggle
+                on={disabled === 0}
+                label={disabled === 0 ? "Turn every step off" : "Turn every step on"}
+                onClick={() => write(steps.map((s) => ({ ...s, enabled: disabled > 0 })), aside)}
+              />
+              All steps
+            </label>
           )}
           {cachedCount > 0 && (
             <button

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Desktop app
+
+- The Flow tab has an **All steps** switch that turns every step on, or, when they are all on, turns them all off. It replaces the **Turn all on** button.
+
 ### Flows
 
 - Steps can cache their response with `cache: true`. A cached step is sent once; later runs and load test iterations reuse the response (checks, extraction and test scripts still run on it) until the cache is cleared. Only passing responses are kept, one per distinct request. In load test results, reused responses are counted apart from requests and kept out of the latency figures. Files without `cache` run as before.
