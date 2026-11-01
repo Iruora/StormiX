@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 (2026-11-01)
+
+### Desktop app
+
+- The sidebar is a narrow column of icons; each one's label shows on hover.
+- The results panel on the right of the Test file screen can be hidden with the toggle at the end of the editor toolbar, and resized by dragging its edge (arrow keys work too; double-click resets it). Its width and state are remembered. It opens by itself when a run starts, and while hidden the toggle shows a dot when there are errors or failures.
 
 ### Environments
 
@@ -8,6 +13,10 @@
 - Desktop app: a **Secrets** button asks for the values of an environment's secrets (Bruno's `vars:secret`), the app's `--var`. The values stay in memory only.
 - Desktop app: environments are no longer cleared when you open a file or start from the example. Opening a test file also loads the environments in the `environments/` folder next to it. Any environment can be removed from the list.
 - `stormix import -o FILE` writes the collection's environments to `environments/NAME.yaml` next to the test file, and `--env NAME` finds them there. Secret names are kept under `$secrets`.
+
+### Scripts
+
+- The script time limit (`--script-timeout`, 5 s by default) counts running time only. Waiting on `bru.sleep` and on requests sent with `sendRequest` no longer counts, so retry loops work in the desktop app too. Those waits are capped at 5 minutes per script.
 
 ## 1.1.1 (2026-11-01)
 
