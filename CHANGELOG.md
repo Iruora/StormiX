@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Desktop app
+
+- The Flow tab has an **All steps** switch that turns every step on, or, when they are all on, turns them all off. It replaces the **Turn all on** button.
+
 ## 1.3.1 (2026-11-01)
 
 ### Downloads
