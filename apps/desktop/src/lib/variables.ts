@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-import type { FlowResult, TestFile } from "../bindings";
+import type { FlowResult, Step, TestFile } from "../bindings";
 
 /** What a `{{name}}` stands for, as far as the app can tell before sending. */
 export type VariableInfo = {
@@ -42,7 +42,8 @@ export function variableTable(
   for (const [name, value] of Object.entries(environment)) {
     table.set(name, { value, source: `environment "${envName}"`, kind: "defined" });
   }
-  for (const step of test?.flow.steps ?? []) {
+  // Disabled steps are not sent, so they set nothing.
+  for (const step of (test?.flow.steps ?? []).filter((s) => s.enabled !== false)) {
     const scripts = `${step.scripts?.pre_request ?? ""}\n${step.scripts?.test ?? ""}`;
     for (const m of scripts.matchAll(SCRIPT_SET)) {
       const ran = lastRun?.steps.find((s) => s.name === step.name)?.extracted[m[1]];
@@ -63,6 +64,22 @@ export function variableTable(
     }
   }
   return table;
+}
+
+/** Names a step sets for the steps after it: its extracts and what its scripts set. */
+export function variablesSetBy(step: Step): string[] {
+  const scripts = `${step.scripts?.pre_request ?? ""}\n${step.scripts?.test ?? ""}`;
+  return [...Object.keys(step.extract ?? {}), ...[...scripts.matchAll(SCRIPT_SET)].map((m) => m[1])];
+}
+
+/** Names a step's request uses as `{{name}}`: URL, headers and body. */
+export function variablesUsedBy(step: Step): string[] {
+  const { url, headers, body } = step.request;
+  const texts = [url, ...(headers ?? []).map((h) => h.value)];
+  if (body) texts.push(JSON.stringify(body));
+  const names = new Set<string>();
+  for (const text of texts) for (const m of text.matchAll(VARIABLE)) names.add(m[1]);
+  return [...names];
 }
 
 export const VariablesContext = createContext<VariableTable>(new Map());

@@ -19,6 +19,17 @@ pub struct Flow {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub variables: BTreeMap<String, String>,
     pub steps: Vec<Step>,
+    /// Steps kept with the flow but out of it: never run, never validated,
+    /// ready to be put back. Like code commented out, without losing it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub set_aside: Vec<Step>,
+}
+
+impl Flow {
+    /// The steps a run sends, in order: the flow's steps minus disabled ones.
+    pub fn enabled_steps(&self) -> impl Iterator<Item = &Step> {
+        self.steps.iter().filter(|s| s.enabled)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -26,6 +37,10 @@ pub struct Flow {
 #[serde(deny_unknown_fields)]
 pub struct Step {
     pub name: String,
+    /// A disabled step keeps its place in the flow but is not sent; runs and
+    /// load tests go straight from the step before it to the step after it.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub enabled: bool,
     pub request: Request,
     /// Variables to set from the response, by variable name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -176,4 +191,12 @@ impl Scripts {
     pub fn is_empty(&self) -> bool {
         self.pre_request.is_none() && self.test.is_none()
     }
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_yes(value: &bool) -> bool {
+    *value
 }

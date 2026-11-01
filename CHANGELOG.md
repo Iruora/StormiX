@@ -7,6 +7,11 @@
 - **Load test** opens a setup dialog first. It lists the flow's endpoints, all selected, with a checkbox each and one to select or clear them all; it warns when a selected step uses a variable only a left-out step extracts. The load profile and thresholds are edited there too and saved into the test file. **Run** closes the dialog and starts the test with the selected steps; **Cancel** closes it. A file without a `load` section can now be load tested: the dialog starts from 10 iterations/s for 30 s.
 - The per-step table of a load test result sorts by any column (click a header; again to flip, a third time for flow order) and filters by step name, failing steps only, and a minimum p95.
 
+### Flows
+
+- Steps can be turned off with `enabled: false`. A turned off step keeps its place but is not sent by runs or load tests, and does not appear in results. Steps can also be moved under `flow.set_aside`, out of the flow altogether, without deleting them.
+- Desktop app: a **Flow** tab shows the steps as a diagram. Turn steps on and off, drag them to reorder or to a **Set aside** tray (and back), duplicate, delete (with undo) or add a step between two others. The load test setup dialog leaves out steps that are turned off. Steps show their last run result, and a step warns when a variable it uses comes from a step that is turned off, set aside or now runs after it.
+
 ## 1.2.0 (2026-11-01)
 
 ### Desktop app

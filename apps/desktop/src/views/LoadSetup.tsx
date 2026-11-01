@@ -32,11 +32,15 @@ export function LoadSetup({
   onCancel: () => void;
 }) {
   const steps = test.flow.steps;
-  const [checked, setChecked] = useState<boolean[]>(() => steps.map((s) => !excluded.includes(s.name)));
+  // Turned off steps are not offered: they stay unchecked and unlisted, but
+  // keep their place so indexes still match `flow.steps`.
+  const on = steps.map((s) => s.enabled !== false);
+  const offered = on.filter(Boolean).length;
+  const [checked, setChecked] = useState<boolean[]>(() => steps.map((s, i) => on[i] && !excluded.includes(s.name)));
   const [load, setLoad] = useState<LoadProfile>(test.load ?? DEFAULT_LOAD);
   const [thresholds, setThresholds] = useState<string[]>(test.thresholds ?? []);
   const selected = checked.filter(Boolean).length;
-  const all = selected === steps.length;
+  const all = selected === offered;
   const toggleAll = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (toggleAll.current) toggleAll.current.indeterminate = selected > 0 && !all;
@@ -86,16 +90,17 @@ export function LoadSetup({
                 type="checkbox"
                 aria-label="Select all endpoints"
                 checked={all}
-                onChange={() => setChecked(steps.map(() => !all))}
+                onChange={() => setChecked(on.map((o) => o && !all))}
                 className="size-3.5 accent-accent"
               />
               <span className="font-medium">Endpoints</span>
               <span className="ml-auto text-xs text-muted">
-                {selected} of {steps.length} selected
+                {selected} of {offered} selected
+                {offered < steps.length && ` · ${steps.length - offered} turned off, not listed`}
               </span>
             </label>
             <ul className="max-h-72 divide-y divide-line overflow-y-auto">
-              {steps.map((step, i) => (
+              {steps.map((step, i) => on[i] && (
                 <li key={i}>
                   <label className="flex cursor-pointer items-baseline gap-2.5 px-3 py-1.5 hover:bg-surface-2">
                     <input

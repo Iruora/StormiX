@@ -120,6 +120,7 @@ pub fn from_dir(dir: &Path) -> Result<Imported, ImportError> {
                 description: None,
                 variables,
                 steps: importer.steps,
+                set_aside: Vec::new(),
             },
             load: None,
             thresholds: Vec::new(),
@@ -347,6 +348,7 @@ impl Importer {
 
         self.steps.push(Step {
             name: step,
+            enabled: true,
             request,
             extract: BTreeMap::new(),
             assertions: Vec::new(),

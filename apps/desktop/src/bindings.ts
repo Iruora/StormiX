@@ -193,6 +193,11 @@ export type Flow_Deserialize = {
 	/**  Flow-level variables. Environment and CLI values override them. */
 	variables?: { [key in string]: string },
 	steps: Step_Deserialize[],
+	/**
+	 *  Steps kept with the flow but out of it: never run, never validated,
+	 *  ready to be put back. Like code commented out, without losing it.
+	 */
+	set_aside?: Step_Deserialize[],
 };
 
 /**
@@ -207,6 +212,11 @@ export type Flow_Serialize = {
 	/**  Flow-level variables. Environment and CLI values override them. */
 	variables?: { [key in string]: string },
 	steps: Step_Serialize[],
+	/**
+	 *  Steps kept with the flow but out of it: never run, never validated,
+	 *  ready to be put back. Like code commented out, without losing it.
+	 */
+	set_aside?: Step_Serialize[],
 };
 
 /**  Headers are a list, not a map: HTTP allows repeats and order can matter. */
@@ -676,6 +686,11 @@ export type StepSummary = {
 
 export type Step_Deserialize = {
 	name: string,
+	/**
+	 *  A disabled step keeps its place in the flow but is not sent; runs and
+	 *  load tests go straight from the step before it to the step after it.
+	 */
+	enabled?: boolean,
 	request: Request_Deserialize,
 	/**  Variables to set from the response, by variable name. */
 	extract?: { [key in string]: ExtractSource },
@@ -686,6 +701,11 @@ export type Step_Deserialize = {
 
 export type Step_Serialize = {
 	name: string,
+	/**
+	 *  A disabled step keeps its place in the flow but is not sent; runs and
+	 *  load tests go straight from the step before it to the step after it.
+	 */
+	enabled?: boolean,
 	request: Request_Serialize,
 	/**  Variables to set from the response, by variable name. */
 	extract?: { [key in string]: ExtractSource },

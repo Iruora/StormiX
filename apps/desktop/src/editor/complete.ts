@@ -13,6 +13,7 @@ type Key = { label: string; info: string; value?: string };
 
 const STEP_KEYS: Key[] = [
   { label: "name", info: "Shown in reports; unique names make comparisons clearer" },
+  { label: "enabled", info: "false keeps the step in place but skips it in runs", value: "false" },
   { label: "request", info: "method, url, headers and body" },
   { label: "extract", info: "Variables to set from the response" },
   { label: "assert", info: "Checks on the response" },
@@ -31,6 +32,7 @@ const KEYS: Record<string, Key[]> = {
     { label: "description", info: "Free text" },
     { label: "variables", info: "Names to string values, used as {{name}}" },
     { label: "steps", info: "One or more steps, run in order" },
+    { label: "set_aside", info: "Steps kept out of the flow: never run, ready to put back" },
   ],
   "flow/steps/[]": STEP_KEYS,
   "flow/steps/[]/request": [
@@ -110,6 +112,7 @@ const KEYS: Record<string, Key[]> = {
 const VALUES: Record<string, string[]> = {
   "flow/steps/[]/request/method": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
   "flow/steps/[]/assert/[]/json/exists": ["true", "false"],
+  "flow/steps/[]/enabled": ["true", "false"],
   version: ["1"],
 };
 
@@ -155,6 +158,8 @@ export function pathAt(state: EditorState, pos: number): { path: string[]; line:
 }
 
 function keysFor(path: string[]): Key[] | undefined {
+  // Set-aside steps are steps like any other.
+  if (path[0] === "flow" && path[1] === "set_aside") path = ["flow", "steps", ...path.slice(2)];
   const exact = KEYS[path.join("/")];
   if (exact) return exact;
   // Extract entries are named by the user: `extract/<name>`.
@@ -188,7 +193,7 @@ export function testFileCompletions(extraVariables: () => string[]) {
     const { path } = pathAt(state, pos);
     const value = /^(\s*)(-\s+)?([\w$]+):\s+([\w$]*)$/.exec(before);
     if (value) {
-      const key = [...path, value[3]].join("/");
+      const key = [...path, value[3]].join("/").replace(/^flow\/set_aside\//, "flow/steps/");
       const values = VALUES[key];
       if (!values) return null;
       return {

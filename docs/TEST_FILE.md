@@ -57,14 +57,36 @@ Always `1` for now. A file with an unknown version is rejected rather than misre
 | `description` | no | Free text |
 | `variables` | no | A map of names to string values, used as `{{name}}` |
 | `steps` | yes | One or more steps, run in order |
+| `set_aside` | no | Steps kept with the file but out of the flow. They are never run or checked; the desktop app's Flow view puts them back |
 
-One virtual user runs the steps in order. In a load test, each iteration is one pass through all the steps, with its own copy of the variables.
+One virtual user runs the steps in order. In a load test, each iteration is one pass through all the enabled steps, with its own copy of the variables.
+
+### Turning steps off
+
+A step with `enabled: false` keeps its place but is not sent: runs and load tests go straight from the step before it to the step after it, and it does not appear in results. Variables it would extract are not set, so later steps that use them warn. To take a step out of the order altogether without deleting it, move it under `set_aside`:
+
+```yaml
+flow:
+  name: checkout
+  steps:
+    - name: Log in
+      request: { method: POST, url: "{{baseUrl}}/login" }
+    - name: Apply coupon
+      enabled: false
+      request: { method: POST, url: "{{baseUrl}}/coupon" }
+    - name: Pay
+      request: { method: POST, url: "{{baseUrl}}/pay" }
+  set_aside:
+    - name: Old payment endpoint
+      request: { method: POST, url: "{{baseUrl}}/v1/pay" }
+```
 
 ## Steps
 
 | Field | Required | |
 |---|---|---|
 | `name` | yes | Unique names make reports and comparisons clearer |
+| `enabled` | no | `false` skips the step in runs and load tests; defaults to `true` |
 | `request` | yes | See below |
 | `extract` | no | Variables to set from the response |
 | `assert` | no | Checks on the response |

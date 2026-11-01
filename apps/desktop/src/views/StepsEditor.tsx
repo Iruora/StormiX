@@ -36,6 +36,12 @@ export function StepsEditor({ test, onChange }: { test: TestFile; onChange: (nex
         />
       </label>
 
+      {(test.flow.set_aside?.length ?? 0) > 0 && (
+        <p className="text-xs text-subtle">
+          {test.flow.set_aside!.length} more step{test.flow.set_aside!.length === 1 ? " is" : "s are"} set aside, out of
+          the flow; see the Flow tab.
+        </p>
+      )}
       <ol className="space-y-3">
         {steps.map((step, i) => (
           <StepCard
@@ -90,6 +96,7 @@ function StepCard({
   onDelete: () => void;
 }) {
   const request = step.request;
+  const on = step.enabled !== false;
   const setRequest = (patch: Partial<Step["request"]>) =>
     onChange({ ...step, request: { ...request, ...patch } as Step["request"] });
   const headers = request.headers ?? [];
@@ -103,7 +110,10 @@ function StepCard({
   ].filter(Boolean);
 
   return (
-    <li className="rounded-lg border border-line bg-surface">
+    <li
+      id={`step-${index}`}
+      className={`scroll-mt-4 rounded-lg border bg-surface ${on ? "border-line" : "border-dashed border-line opacity-70"}`}
+    >
       <div className="flex items-center gap-2 border-b border-line px-3 py-2">
         <span className="w-5 text-right text-xs text-subtle">{index + 1}</span>
         <input
@@ -112,6 +122,17 @@ function StepCard({
           onChange={(e) => onChange({ ...step, name: e.target.value })}
           className="min-w-0 flex-1 bg-transparent font-medium outline-none"
         />
+        {!on && <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-subtle">turned off, skipped in runs</span>}
+        <label className="flex items-center gap-1 text-xs text-subtle" title="Off steps keep their place but are not sent">
+          <input
+            type="checkbox"
+            aria-label="Run this step"
+            checked={on}
+            onChange={() => onChange({ ...step, enabled: !on })}
+            className="accent-[var(--accent)]"
+          />
+          run
+        </label>
         <IconButton label="Move up" disabled={index === 0} onClick={() => onMove(index - 1)}>
           <ArrowUp size={14} />
         </IconButton>

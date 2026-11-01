@@ -99,6 +99,32 @@ async fn chains_a_token_through_two_steps() {
 }
 
 #[tokio::test]
+async fn disabled_and_set_aside_steps_are_not_sent() {
+    let url = serve().await;
+    let yaml = r#"
+  name: partial
+  steps:
+    - name: Off
+      enabled: false
+      request: { method: GET, url: "{{base}}/nowhere" }
+    - name: Echo
+      request: { method: POST, url: "{{base}}/echo", body: { raw: hi } }
+      assert: [{ status: 200 }, { body_contains: hi }]
+  set_aside:
+    - name: Parked
+      request: { method: GET, url: "{{base}}/nowhere" }
+"#;
+    let result = Runner::new(RunOptions::default())
+        .unwrap()
+        .run(&flow(yaml), &base(&url))
+        .await;
+
+    let names: Vec<_> = result.steps.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["Echo"]);
+    assert!(result.passed(), "{result:#?}");
+}
+
+#[tokio::test]
 async fn overrides_beat_flow_variables_and_bail_skips_the_rest() {
     let url = serve().await;
     let mut vars = base(&url);
