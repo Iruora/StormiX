@@ -87,6 +87,7 @@ fn bruno_collection() {
     let imported = import(&path).unwrap();
     assert_eq!(imported.warnings, Vec::<String>::new());
     assert_eq!(imported.environments["local"]["user"], "demo");
+    assert!(!imported.secrets.contains_key("local"));
     let flow = &imported.test.flow;
     assert_eq!(flow.name, "Demo API (Bruno)");
 

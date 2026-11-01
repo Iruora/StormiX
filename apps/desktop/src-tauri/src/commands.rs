@@ -37,6 +37,8 @@ pub struct ImportedCollection {
     pub yaml: String,
     /// Environments that came with it (Bruno), by name.
     pub environments: BTreeMap<String, BTreeMap<String, String>>,
+    /// Secret names of each environment, which have no value in it.
+    pub secrets: BTreeMap<String, Vec<String>>,
     /// What did not carry over.
     pub warnings: Vec<String>,
 }
@@ -82,8 +84,51 @@ pub fn import_collection(path: String) -> Result<ImportedCollection, String> {
     Ok(ImportedCollection {
         yaml: format!("# Imported from {name}.\n{}", imported.test.to_yaml()),
         environments: imported.environments,
+        secrets: imported.secrets,
         warnings: imported.warnings,
     })
+}
+
+/// An environment read from a file of its own.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadedEnvironment {
+    /// The Postman export's name, otherwise the file name.
+    pub name: String,
+    pub variables: BTreeMap<String, String>,
+    /// Secrets the file names without a value.
+    pub secrets: Vec<String>,
+}
+
+impl From<stormix_collections::environment::Environment> for LoadedEnvironment {
+    fn from(env: stormix_collections::environment::Environment) -> Self {
+        Self {
+            name: env.name,
+            variables: env.variables,
+            secrets: env.secrets,
+        }
+    }
+}
+
+/// Reads an environment file: flat YAML or JSON, a Postman environment
+/// export or a Bruno `.bru` environment.
+#[tauri::command]
+#[specta::specta]
+pub fn read_environment(path: String) -> Result<LoadedEnvironment, String> {
+    stormix_collections::environment::read_file(Path::new(&path))
+        .map(Into::into)
+        .map_err(|e| e.to_string())
+}
+
+/// The environments in the `environments/` folder next to a test file,
+/// where `stormix import` writes a collection's.
+#[tauri::command]
+#[specta::specta]
+pub fn environments_beside(path: String) -> Result<Vec<LoadedEnvironment>, String> {
+    let dir = stormix_collections::environment::dir_for(Path::new(&path));
+    stormix_collections::environment::read_dir(&dir)
+        .map(|envs| envs.into_iter().map(Into::into).collect())
+        .map_err(|e| e.to_string())
 }
 
 /// Sent once a second while a load test runs.

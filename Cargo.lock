@@ -3933,7 +3933,6 @@ version = "1.1.1"
 dependencies = [
  "clap",
  "serde_json",
- "serde_yaml_ng",
  "stormix-collections",
  "stormix-engine",
  "stormix-flow",
@@ -3949,6 +3948,7 @@ version = "1.1.1"
 dependencies = [
  "base64 0.22.1",
  "serde_json",
+ "serde_yaml_ng",
  "stormix-flow",
  "tempfile",
  "thiserror 2.0.21",

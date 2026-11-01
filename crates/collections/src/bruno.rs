@@ -94,15 +94,19 @@ pub fn from_dir(dir: &Path) -> Result<Imported, ImportError> {
     }
 
     let mut environments = BTreeMap::new();
+    let mut env_secrets = BTreeMap::new();
     let env_dir = dir.join("environments");
     if env_dir.is_dir() {
         for file in bru_files(&env_dir)? {
             let env_name = stem(&file);
             let (vars, secrets) = parse_environment(&read(&file)?, &file)?;
-            for secret in secrets {
+            for secret in &secrets {
                 importer.warnings.push(format!(
                     "environment `{env_name}`: the secret `{secret}` has no value in the file; pass it with --var {secret}=..."
                 ));
+            }
+            if !secrets.is_empty() {
+                env_secrets.insert(env_name.clone(), secrets);
             }
             environments.insert(env_name, vars);
         }
@@ -121,13 +125,16 @@ pub fn from_dir(dir: &Path) -> Result<Imported, ImportError> {
             thresholds: Vec::new(),
         },
         environments,
+        secrets: env_secrets,
         warnings: importer.warnings,
     })
 }
 
-/// Reads one environment file, such as `environments/local.bru`.
-pub fn environment(path: &Path) -> Result<BTreeMap<String, String>, ImportError> {
-    Ok(parse_environment(&read(path)?, path)?.0)
+/// Reads one environment file, such as `environments/local.bru`: its
+/// variables and the names of its secrets, which have no value in it.
+#[allow(clippy::type_complexity)]
+pub fn environment(path: &Path) -> Result<(BTreeMap<String, String>, Vec<String>), ImportError> {
+    parse_environment(&read(path)?, path)
 }
 
 /// The variables and the names of secrets, which are kept out of the file.

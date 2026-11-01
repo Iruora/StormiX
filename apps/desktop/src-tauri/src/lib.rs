@@ -15,6 +15,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::validate_test_file,
             commands::run_test_file,
             commands::import_collection,
+            commands::read_environment,
+            commands::environments_beside,
             commands::run_load_test,
             commands::list_runs,
             commands::get_run,

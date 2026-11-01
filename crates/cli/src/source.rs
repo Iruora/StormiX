@@ -11,6 +11,8 @@ pub struct Source {
     pub test: TestFile,
     /// Environments that came with a collection, by name.
     pub environments: BTreeMap<String, BTreeMap<String, String>>,
+    /// Secret names of each environment, which have no value in it.
+    pub secrets: BTreeMap<String, Vec<String>>,
     /// What an import could not carry over.
     pub warnings: Vec<String>,
 }
@@ -24,6 +26,7 @@ pub fn load(path: &Path) -> Result<Source, String> {
         return Ok(Source {
             test,
             environments: BTreeMap::new(),
+            secrets: BTreeMap::new(),
             warnings: Vec::new(),
         });
     }
@@ -31,6 +34,7 @@ pub fn load(path: &Path) -> Result<Source, String> {
     Ok(Source {
         test: imported.test,
         environments: imported.environments,
+        secrets: imported.secrets,
         warnings: imported.warnings,
     })
 }

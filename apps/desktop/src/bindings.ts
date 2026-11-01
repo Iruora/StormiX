@@ -19,6 +19,16 @@ export const commands = {
 	/**  Imports a Postman `.json` export or a Bruno collection folder. */
 	importCollection: (path: string) => typedError<ImportedCollection, string>(__TAURI_INVOKE("import_collection", { path })),
 	/**
+	 *  Reads an environment file: flat YAML or JSON, a Postman environment
+	 *  export or a Bruno `.bru` environment.
+	 */
+	readEnvironment: (path: string) => typedError<LoadedEnvironment, string>(__TAURI_INVOKE("read_environment", { path })),
+	/**
+	 *  The environments in the `environments/` folder next to a test file,
+	 *  where `stormix import` writes a collection's.
+	 */
+	environmentsBeside: (path: string) => typedError<LoadedEnvironment[], string>(__TAURI_INVOKE("environments_beside", { path })),
+	/**
 	 *  Runs the file's flow under its load profile and checks its thresholds,
 	 *  sending [`LoadProgress`] events as it goes.
 	 */
@@ -232,6 +242,8 @@ export type ImportedCollection = {
 	yaml: string,
 	/**  Environments that came with it (Bruno), by name. */
 	environments: { [key in string]: { [key in string]: string } },
+	/**  Secret names of each environment, which have no value in it. */
+	secrets: { [key in string]: string[] },
 	/**  What did not carry over. */
 	warnings: string[],
 };
@@ -369,6 +381,15 @@ export type LoadReport_Serialize = {
 	 *  saved before 1.1.
 	 */
 	samples: StepResult_Serialize[],
+};
+
+/**  An environment read from a file of its own. */
+export type LoadedEnvironment = {
+	/**  The Postman export's name, otherwise the file name. */
+	name: string,
+	variables: { [key in string]: string },
+	/**  Secrets the file names without a value. */
+	secrets: string[],
 };
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
