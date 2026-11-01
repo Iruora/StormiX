@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.1 (2026-11-01)
+
+### Scripts
+
+- Scripts run as async functions, as in Bruno and Postman, so `await` at the top level works. Collections that used it failed before with "SyntaxError: expecting ';'". A rejected `await` becomes the script's error, and a script that waits on something that never settles says so.
+- `bru.sendRequest` and `pm.sendRequest` send requests from a script, with the run's client settings and within the script's time limit. `bru.sendRequest` resolves like axios (`status`, `statusText`, `headers`, `data`); `pm.sendRequest` takes a URL or a Postman request, with a callback or as a promise.
+- `bru.sleep(ms)` waits, never past the script's time limit.
+- A `Buffer` for encoding helpers: `Buffer.from(value, enc).toString(enc)` with utf8, base64, base64url, hex, latin1/binary and ascii, plus `isBuffer`, `byteLength` and `concat`.
+- `req.getBody({ raw: true })` returns the body's raw text.
+
 ## 1.1.0 (2026-10-31)
 
 ### Desktop app
