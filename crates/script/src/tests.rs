@@ -362,3 +362,25 @@ fn awaiting_in_a_loop_still_times_out() {
     let out = pre("while (true) { await null }");
     assert!(out.error.unwrap().contains("did not finish within"));
 }
+
+#[test]
+fn buffer_covers_jwt_style_encoding() {
+    let out = pre(r#"
+const toB64Url = (v) => Buffer.from(v, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+const fromB64Url = (v) => {
+  const n = v.replace(/-/g, '+').replace(/_/g, '/')
+  return Buffer.from(n + '='.repeat((4 - (n.length % 4)) % 4), 'base64').toString('utf8')
+}
+const header = toB64Url(JSON.stringify({ alg: 'none', typ: 'JWT' }))
+pm.environment.set('header', header)
+pm.environment.set('round', fromB64Url(toB64Url('héllo €')))
+pm.environment.set('hex', Buffer.from('hi').toString('hex'))
+pm.environment.set('url', Buffer.from('é?', 'utf8').toString('base64url'))
+"#);
+    assert_eq!(out.error, None);
+    let get = |k: &str| out.variables.get(k).cloned().flatten().unwrap();
+    assert_eq!(get("header"), "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0");
+    assert_eq!(get("round"), "héllo €");
+    assert_eq!(get("hex"), "6869");
+    assert_eq!(get("url"), "w6k_");
+}

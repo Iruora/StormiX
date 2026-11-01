@@ -59,6 +59,57 @@ globalThis.atob = (input) => {
   return out;
 };
 
+// Node's Buffer, enough for the encoding helpers Bruno scripts carry
+// (base64url JWT parts, Basic auth): `Buffer.from(value, encoding)` and
+// `.toString(encoding)` for utf8, base64, base64url, hex, latin1/binary and
+// ascii. Bytes are held as a Latin-1 string.
+class Buffer {
+  constructor(bytes) {
+    this._bytes = bytes;
+    this.length = bytes.length;
+  }
+  static from(value, encoding = "utf8") {
+    if (value instanceof Buffer) return new Buffer(value._bytes);
+    if (Array.isArray(value) || value instanceof Uint8Array) {
+      return new Buffer(Array.from(value, (b) => String.fromCharCode(b & 255)).join(""));
+    }
+    const s = String(value);
+    switch (String(encoding).toLowerCase()) {
+      case "utf8": case "utf-8": return new Buffer(unescape(encodeURIComponent(s)));
+      case "base64": return new Buffer(atob(s));
+      case "base64url": return new Buffer(atob(s.replace(/-/g, "+").replace(/_/g, "/")));
+      case "hex": return new Buffer((s.match(/../g) || []).map((h) => String.fromCharCode(parseInt(h, 16))).join(""));
+      case "latin1": case "binary": case "ascii": return new Buffer(s.replace(/[^\x00-\xff]/g, (c) => String.fromCharCode(c.charCodeAt(0) & 255)));
+      default: throw new Error("Buffer: unsupported encoding " + encoding);
+    }
+  }
+  static isBuffer(value) {
+    return value instanceof Buffer;
+  }
+  static byteLength(value, encoding) {
+    return Buffer.from(value, encoding).length;
+  }
+  static concat(list) {
+    return new Buffer(list.map((b) => b._bytes).join(""));
+  }
+  toString(encoding = "utf8") {
+    const b = this._bytes;
+    switch (String(encoding).toLowerCase()) {
+      case "utf8": case "utf-8": return decodeURIComponent(escape(b));
+      case "base64": return btoa(b);
+      case "base64url": return btoa(b).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      case "hex": return Array.from(b, (c) => c.charCodeAt(0).toString(16).padStart(2, "0")).join("");
+      case "latin1": case "binary": return b;
+      case "ascii": return Array.from(b, (c) => String.fromCharCode(c.charCodeAt(0) & 127)).join("");
+      default: throw new Error("Buffer: unsupported encoding " + encoding);
+    }
+  }
+  toJSON() {
+    return { type: "Buffer", data: Array.from(this._bytes, (c) => c.charCodeAt(0)) };
+  }
+}
+globalThis.Buffer = Buffer;
+
 // ---------------------------------------------------------------- console
 
 globalThis.console = {};

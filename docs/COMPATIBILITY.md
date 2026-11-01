@@ -56,6 +56,7 @@ What Stormix 1.0 runs from Postman and Bruno collections, feature by feature. An
 | Request API | ✓ `pm.request` headers, URL, body | ✓ `req.getUrl`, `setUrl`, `setHeader`, `setBody`, `setMethod` | |
 | Response API | ✓ `pm.response` `code`, `json()`, `text()`, `headers`, `to.have.*`, `to.be.ok` | ✓ `res.status`, `res.body`, `getStatus()`, `getBody()`, `getHeader()`, `getResponseTime()` | |
 | Chai `expect` | ✓ | ✓ | Common chains: `equal`, `eql`, `include`, `property`, `lengthOf`, `match`, `keys`, `oneOf`, `a`, `above`, `below`, `not`, `deep` |
+| `Buffer`, `btoa`, `atob` | ✓ | ✓ | `Buffer.from` / `toString` with utf8, base64, base64url, hex, latin1 |
 | `console.log` | ✓ | ✓ | Shown for failed steps, or all steps with `-v` |
 | `pm.sendRequest` | ✗ | n/a | The script fails with a clear error. Make it a step of its own |
 | `require` (lodash, moment, …) | ✗ | ✗ | The script fails with a clear error |
