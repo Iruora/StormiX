@@ -396,6 +396,13 @@ export type LoadReport_Deserialize = {
 	 *  saved before 1.1.
 	 */
 	samples?: StepResult_Deserialize[],
+	/**
+	 *  Steps run once before the load started, to fill the cache: every
+	 *  step up to the last one marked `cache: true`. Prerequisites like a
+	 *  login, so they are not in the summary or the thresholds. Empty when
+	 *  no step is cached.
+	 */
+	setup?: StepResult_Deserialize[],
 };
 
 export type LoadReport_Serialize = {
@@ -408,6 +415,13 @@ export type LoadReport_Serialize = {
 	 *  saved before 1.1.
 	 */
 	samples: StepResult_Serialize[],
+	/**
+	 *  Steps run once before the load started, to fill the cache: every
+	 *  step up to the last one marked `cache: true`. Prerequisites like a
+	 *  login, so they are not in the summary or the thresholds. Empty when
+	 *  no step is cached.
+	 */
+	setup?: StepResult_Serialize[],
 };
 
 /**  An environment read from a file of its own. */

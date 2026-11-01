@@ -75,6 +75,7 @@ fn load_report_has_thresholds_timeline_and_steps() {
             passed: false,
         }],
         samples: Vec::new(),
+        setup: Vec::new(),
     };
     let html = load_report(&report);
     assert!(html.contains("Thresholds failed"));

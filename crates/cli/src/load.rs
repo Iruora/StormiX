@@ -263,6 +263,21 @@ fn render_text(report: &LoadReport, title: Option<String>) -> String {
         }
         None => out.push('\n'),
     }
+    if !report.setup.is_empty() {
+        let _ = writeln!(out, "  set up once, not measured");
+        for step in &report.setup {
+            let outcome = match (&step.error, step.status) {
+                (Some(error), _) => format!("✗ {error}"),
+                (None, status) => {
+                    let mark = if step.passed() { "✓" } else { "✗" };
+                    let status = status.map_or("---".to_owned(), |s| s.to_string());
+                    format!("{mark} {status} {:.0} ms", step.duration_ms)
+                }
+            };
+            let _ = writeln!(out, "    {}  {outcome}", step.name);
+        }
+        out.push('\n');
+    }
     let _ = writeln!(
         out,
         "  requests    {} ({:.1}/s), {} failed ({:.2}%)",

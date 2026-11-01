@@ -145,8 +145,8 @@ export function LoadSetup({
                       aria-label={`Cache ${step.name}`}
                       title={
                         cache[i]
-                          ? "Cached: sent once, then every iteration reuses the response. Click to send it every time."
-                          : "Sent every iteration. Click to send it once and reuse the response, like a login."
+                          ? "Run once before the load and reuse the response; not in the metrics. For prerequisites like a login. Click to send it every iteration."
+                          : "Sent every iteration and measured. Click to run it once before the load instead, like a login."
                       }
                       onClick={(e) => {
                         e.preventDefault();
@@ -156,7 +156,7 @@ export function LoadSetup({
                         cache[i] ? "bg-accent-soft text-accent" : "text-subtle hover:bg-surface-2 hover:text-ink"
                       }`}
                     >
-                      <Database size={11} /> {cache[i] ? "cache on" : "cache off"}
+                      <Database size={11} /> {cache[i] ? "once, cached" : "every iteration"}
                     </button>
                   </label>
                 </li>
@@ -182,8 +182,8 @@ export function LoadSetup({
           <ThresholdsEditor thresholds={thresholds} onChange={setThresholds} />
           <p className="text-xs text-subtle">
             The load profile, thresholds and cache settings are saved into the test file. The endpoint choice only
-            applies to this run. A cached endpoint is sent once and its response reused, so it does not count as a
-            request in the results.
+            applies to this run. A cached endpoint runs once before the load starts and every iteration reuses its
+            response, so prerequisites like a login stay out of the metrics.
           </p>
         </div>
 

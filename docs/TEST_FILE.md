@@ -95,7 +95,8 @@ A step with `cache: true` is sent once; after that, runs and load test iteration
 - A response is kept per distinct request: the same method, URL, headers and body once variables are filled in. Change a variable the request uses and it is sent (and kept) again.
 - Only a response that passed is kept: no error, every check passing, and not a 4xx or 5xx that nothing checks. A failed login is retried on the next run.
 - Pre-request scripts still run first. Assertions, extraction and test scripts run on the reused response, so variables like a token are still set.
-- Reused responses are marked `cached` in results. In a load test they are counted apart (`cached_responses`, and per step), not as requests, and stay out of the latency figures.
+- In a load test, cached steps are prerequisites: before the load starts, Stormix runs the flow once up to the last cached step (so a cached step still gets the variables of the steps before it), and every iteration then reuses those responses. That setup pass is reported on its own (`setup` in the JSON report) and is not in the summary or the thresholds. Reused responses are counted apart (`cached_responses`, and per step), not as requests, and stay out of the latency figures.
+- Reused responses are marked `cached` in results.
 - The cache is kept in memory, for as long as the desktop app (or one `stormix` command) runs. In the desktop app, clear it for one step or for the whole flow from the Flow tab, the Steps tab or the load test setup dialog.
 - Steps without `cache` behave as before: Stormix does not cache HTTP responses otherwise, and sends no cache headers of its own. To ask servers and proxies not to answer from their caches, add a `Cache-Control: no-cache` header to the request.
 

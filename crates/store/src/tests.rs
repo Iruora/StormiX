@@ -150,6 +150,7 @@ fn load(latency_ms: f64, failed: usize, seconds: u64) -> RunData {
         summary: recorder.summary(Duration::from_secs(seconds)),
         thresholds: Vec::new(),
         samples: Vec::new(),
+        setup: Vec::new(),
     })
 }
 
