@@ -18,6 +18,9 @@ use specta::Type;
 pub struct WorkspaceEnv {
     pub variables: BTreeMap<String, String>,
     pub secrets: Vec<String>,
+    /// The file it was read from, where Variables saves it; `None` for a
+    /// collection's environment not saved yet.
+    pub path: Option<String>,
 }
 
 /// Everything needed to pick the work back up.
@@ -160,6 +163,7 @@ mod tests {
             WorkspaceEnv {
                 variables: [("base".to_owned(), "http://x".to_owned())].into(),
                 secrets: vec!["token".into()],
+                path: Some("/tmp/environments/local.yaml".into()),
             },
         );
         file.save(b.clone()).unwrap();

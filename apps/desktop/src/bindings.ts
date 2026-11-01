@@ -29,6 +29,17 @@ export const commands = {
 	 */
 	environmentsBeside: (path: string) => typedError<LoadedEnvironment[], string>(__TAURI_INVOKE("environments_beside", { path })),
 	/**
+	 *  Where an environment without a file of its own is saved for a test
+	 *  file: `environments/NAME.yaml` next to it, which Open reads back.
+	 */
+	environmentPathBeside: (path: string, name: string) => __TAURI_INVOKE<string>("environment_path_beside", { path, name }),
+	/**
+	 *  Writes an environment to `path` in that file's own format (see
+	 *  `environment::write_file`) and reads it back. Secrets are saved by
+	 *  name only, never with a value.
+	 */
+	saveEnvironment: (path: string, variables: { [key in string]: string }, secrets: string[]) => typedError<LoadedEnvironment, string>(__TAURI_INVOKE("save_environment", { path, variables, secrets })),
+	/**
 	 *  Runs the file's flow under its load profile and checks its thresholds,
 	 *  sending [`LoadProgress`] events as it goes.
 	 */
@@ -441,6 +452,8 @@ export type LoadedEnvironment = {
 	variables: { [key in string]: string },
 	/**  Secrets the file names without a value. */
 	secrets: string[],
+	/**  The file it was read from, where saving writes it back. */
+	path: string,
 };
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
@@ -958,6 +971,11 @@ export type WorkspaceEnv = WorkspaceEnv_Serialize | WorkspaceEnv_Deserialize;
 export type WorkspaceEnv_Deserialize = {
 	variables?: { [key in string]: string },
 	secrets?: string[],
+	/**
+	 *  The file it was read from, where Variables saves it; `None` for a
+	 *  collection's environment not saved yet.
+	 */
+	path?: string | null,
 };
 
 /**
@@ -967,6 +985,11 @@ export type WorkspaceEnv_Deserialize = {
 export type WorkspaceEnv_Serialize = {
 	variables: { [key in string]: string },
 	secrets: string[],
+	/**
+	 *  The file it was read from, where Variables saves it; `None` for a
+	 *  collection's environment not saved yet.
+	 */
+	path: string | null,
 };
 
 /**  Everything needed to pick the work back up. */

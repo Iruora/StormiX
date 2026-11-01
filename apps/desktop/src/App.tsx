@@ -18,6 +18,7 @@ import {
   PanelRightOpen,
   Play,
   Save,
+  SlidersHorizontal,
   TriangleAlert,
   X,
   Zap,
@@ -46,6 +47,7 @@ import { LoadSetup, type LoadSetupChoice } from "./views/LoadSetup";
 import { RunResult, stepPassed } from "./views/RunResult";
 import { RUNS_KEY, RunsView } from "./views/Runs";
 import { SplitView, usePanel } from "./views/SidePanel";
+import { applyOverrides, EnvEditor, type EnvOverrides } from "./views/EnvEditor";
 import { EnvSecrets } from "./views/EnvSecrets";
 import { FlowView } from "./views/FlowView";
 import { StepsEditor } from "./views/StepsEditor";
@@ -252,8 +254,11 @@ function NavItem({
   );
 }
 
-/** Variables to run with, and the names of secrets to fill in by hand. */
-type Env = { variables: Record<string, string>; secrets: string[] };
+/**
+ * Variables to run with, the names of secrets to fill in by hand, and the
+ * file it came from (null for a collection's, until saved).
+ */
+type Env = { variables: Record<string, string>; secrets: string[]; path: string | null };
 
 /** Edit a test file and see it parsed and checked as you type. */
 function TestFileView({
@@ -285,6 +290,10 @@ function TestFileView({
   const [envs, setEnvs] = useState<Record<string, Env>>(ws.environments);
   const [envName, setEnvName] = useState(ws.environment in ws.environments ? ws.environment : "");
   const [envError, setEnvError] = useState<string | null>(null);
+  // Changes to each environment for this session only, by environment name.
+  // Runs use them; they reach the file only when saved.
+  const [overrides, setOverrides] = useState<Record<string, EnvOverrides>>({});
+  const [envEditorOpen, setEnvEditorOpen] = useState(false);
   const panel = usePanel();
   const [path, setPath] = useState<string | null>(ws.path);
   const [savedText, setSavedText] = useState<string | null>(ws.dirty ? null : ws.text);
@@ -309,12 +318,13 @@ function TestFileView({
   });
   const env = envs[envName] as Env | undefined;
   const envVars = useMemo(() => {
-    const vars = { ...env?.variables };
+    const vars = applyOverrides(env?.variables ?? {}, overrides[envName]);
     for (const name of env?.secrets ?? []) {
       if (secretValues[name]) vars[name] = secretValues[name];
     }
     return vars;
-  }, [env, secretValues]);
+  }, [env, envName, overrides, secretValues]);
+  const sessionOnly = useMemo(() => new Set(Object.keys(overrides[envName] ?? {})), [overrides, envName]);
   // The validator does not know the chosen environment; drop its warnings
   // about variables that environment provides.
   const result = useMemo(
@@ -411,8 +421,8 @@ function TestFileView({
         : null;
   const shown = draft ?? result?.test ?? null;
   const variables = useMemo(
-    () => variableTable(shown, envVars, envName, lastRun),
-    [shown, envVars, envName, lastRun],
+    () => variableTable(shown, envVars, envName, lastRun, sessionOnly),
+    [shown, envVars, envName, lastRun, sessionOnly],
   );
   const edit = (next: string | null) => {
     writes.current += 1;
@@ -455,7 +465,9 @@ function TestFileView({
       if (!live || beside.status === "error") return;
       setEnvs((current) => ({
         ...current,
-        ...Object.fromEntries(beside.data.map((e) => [e.name, { variables: e.variables, secrets: e.secrets }])),
+        ...Object.fromEntries(
+          beside.data.map((e) => [e.name, { variables: e.variables, secrets: e.secrets, path: e.path }]),
+        ),
       }));
     })();
     return () => {
@@ -499,7 +511,9 @@ function TestFileView({
         } else if (beside.data.length > 0) {
           const names = beside.data.map((e) => e.name);
           addEnvs(
-            Object.fromEntries(beside.data.map((e) => [e.name, { variables: e.variables, secrets: e.secrets }])),
+            Object.fromEntries(
+              beside.data.map((e) => [e.name, { variables: e.variables, secrets: e.secrets, path: e.path }]),
+            ),
             names.includes(envName) ? envName : names[0],
           );
         }
@@ -542,7 +556,7 @@ function TestFileView({
         Object.fromEntries(
           names.map((name) => [
             name,
-            { variables: collection.environments[name], secrets: collection.secrets[name] ?? [] },
+            { variables: collection.environments[name], secrets: collection.secrets[name] ?? [], path: null },
           ]),
         ),
         names.length > 0 ? names[0] : null,
@@ -706,7 +720,10 @@ function TestFileView({
     },
     onSuccess: (loaded) => {
       if (!loaded) return;
-      addEnvs({ [loaded.name]: { variables: loaded.variables, secrets: loaded.secrets } }, loaded.name);
+      addEnvs(
+        { [loaded.name]: { variables: loaded.variables, secrets: loaded.secrets, path: loaded.path } },
+        loaded.name,
+      );
     },
     onError: (e) => {
       setEnvError(`The environment could not be imported: ${e.message}`);
@@ -715,9 +732,56 @@ function TestFileView({
   });
   const removeEnv = (name: string) => {
     setEnvs(({ [name]: _, ...rest }) => rest);
+    setOverrides(({ [name]: _, ...rest }) => rest);
     setEnvName("");
     run.reset();
   };
+  /** Changes a variable of the chosen environment for this session only. */
+  const overrideVar = (name: string, value: string | null) => {
+    setOverrides((all) => ({ ...all, [envName]: { ...all[envName], [name]: value } }));
+    run.reset();
+  };
+  /** Drops this session's change to one variable, or to all of them. */
+  const resetVar = (name: string | null) => {
+    setOverrides(({ [envName]: current, ...rest }) => {
+      if (name === null || !current) return rest;
+      const { [name]: _, ...kept } = current;
+      return Object.keys(kept).length ? { ...rest, [envName]: kept } : rest;
+    });
+    run.reset();
+  };
+  /** Writes this session's changes to these variables (all when null) to the environment's file. */
+  const saveVars = async (names: string[] | null) => {
+    if (!env) return;
+    const changes = overrides[envName] ?? {};
+    const chosen = names ?? Object.keys(changes);
+    let target = env.path;
+    if (!target && path) target = await commands.environmentPathBeside(path, envName);
+    if (!target) {
+      target = await save({
+        title: `Save the ${envName} environment`,
+        defaultPath: `${envName}.yaml`,
+        filters: [{ name: "Environment", extensions: ["yaml", "yml", "json", "bru"] }],
+      });
+      if (!target) return;
+    }
+    const picked = Object.fromEntries(chosen.filter((n) => n in changes).map((n) => [n, changes[n]]));
+    const res = await commands.saveEnvironment(target, applyOverrides(env.variables, picked), env.secrets);
+    if (res.status === "error") throw new Error(res.error);
+    const saved = res.data;
+    setEnvs((all) => ({ ...all, [envName]: { variables: saved.variables, secrets: saved.secrets, path: saved.path } }));
+    setOverrides(({ [envName]: current, ...rest }) => {
+      const kept = Object.fromEntries(Object.entries(current ?? {}).filter(([n]) => !chosen.includes(n)));
+      return Object.keys(kept).length ? { ...rest, [envName]: kept } : rest;
+    });
+  };
+  const changedCount = Object.keys(overrides[envName] ?? {}).length;
+  // Where an environment without a file of its own would be saved.
+  const besidePath = useQuery({
+    queryKey: ["env-path", path, envName],
+    queryFn: () => commands.environmentPathBeside(path!, envName),
+    enabled: !!path && !!env && !env.path,
+  });
   const envNames = Object.keys(envs);
 
   return (
@@ -775,6 +839,26 @@ function TestFileView({
                   </option>
                 ))}
               </select>
+            )}
+            {env && (
+              <button
+                type="button"
+                onClick={() => setEnvEditorOpen(true)}
+                title={
+                  changedCount
+                    ? `${changedCount} variable${changedCount === 1 ? "" : "s"} changed for this session only`
+                    : "See and change this environment's variables"
+                }
+                className={`flex items-center gap-1.5 border-r border-line px-2 py-1 text-xs hover:bg-surface-2 ${
+                  changedCount ? "text-warn" : "text-muted"
+                }`}
+              >
+                <SlidersHorizontal size="0.8125rem" />
+                Variables
+                {changedCount > 0 && (
+                  <span className="rounded-full bg-warn-soft px-1.5 text-[0.6875rem] font-semibold">{changedCount}</span>
+                )}
+              </button>
             )}
             {env && env.secrets.length > 0 && (
               <EnvSecrets
@@ -845,6 +929,24 @@ function TestFileView({
           </button>
         </div>
       </header>
+      {envEditorOpen && env && (
+        <EnvEditor
+          name={envName}
+          variables={env.variables}
+          secrets={env.secrets}
+          overrides={overrides[envName] ?? {}}
+          secretValues={secretValues}
+          savesTo={env.path ?? (path ? (besidePath.data ?? null) : null)}
+          onOverride={overrideVar}
+          onReset={resetVar}
+          onSave={saveVars}
+          onSecret={(name, value) => {
+            setSecretValues((v) => ({ ...v, [name]: value }));
+            run.reset();
+          }}
+          onClose={() => setEnvEditorOpen(false)}
+        />
+      )}
       {setupOpen && result?.test && (
         <LoadSetup
           test={result.test}
