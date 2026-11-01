@@ -124,7 +124,7 @@ pub fn join_scripts(parts: Vec<String>) -> Option<String> {
         _ => Some(
             parts
                 .iter()
-                .map(|p| format!("(function () {{\n{}\n}})();", p.trim_end()))
+                .map(|p| format!("await (async function () {{\n{}\n}})();", p.trim_end()))
                 .collect::<Vec<_>>()
                 .join("\n"),
         ),
@@ -194,7 +194,7 @@ mod tests {
         );
         assert_eq!(
             join_scripts(vec!["const x = 1;".into(), "const x = 2;".into()]).as_deref(),
-            Some("(function () {\nconst x = 1;\n})();\n(function () {\nconst x = 2;\n})();")
+            Some("await (async function () {\nconst x = 1;\n})();\nawait (async function () {\nconst x = 2;\n})();")
         );
     }
 }

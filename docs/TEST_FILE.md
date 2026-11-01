@@ -122,7 +122,7 @@ scripts:
     pm.test("has an id", () => pm.expect(pm.response.json().id).to.be.a("number"));
 ```
 
-Each `pm.test` or `test` becomes a check with that name. Scripts run sandboxed, with no network or file access. [Collections](COLLECTIONS.md) lists the API they can use.
+Each `pm.test` or `test` becomes a check with that name. Scripts run sandboxed, with no file access, and reach the network only through `sendRequest`. [Collections](COLLECTIONS.md) lists the API they can use.
 
 ## Variables
 

@@ -66,17 +66,40 @@ pub struct Runner {
 
 impl Runner {
     pub fn new(options: RunOptions) -> Result<Self, RunnerError> {
-        let client = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .timeout(options.timeout)
-            .redirect(if options.follow_redirects {
-                Policy::limited(10)
-            } else {
-                Policy::none()
-            })
-            .tls_danger_accept_invalid_certs(options.insecure)
-            .build()?;
+        let client = build_client(&options)?;
         Ok(Self { client, options })
+    }
+
+    /// Sends a request for `bru.sendRequest` / `pm.sendRequest`, with the
+    /// same client settings, taking no longer than the script has left.
+    /// Scripts run on a blocking thread, so this blocks too.
+    fn send_for_script(
+        &self,
+        call: &ScriptRequest,
+        left: Duration,
+    ) -> Result<ScriptResponse, String> {
+        let timeout = left.min(self.options.timeout);
+        match tokio::runtime::Handle::try_current() {
+            // Inside `block_in_place`, so the runtime can drive this.
+            Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+                handle.block_on(script_exchange(&self.client, call, timeout))
+            }
+            // A single-threaded runtime is busy running the script, so use
+            // a runtime and client of our own on another thread.
+            _ => std::thread::scope(|scope| {
+                scope
+                    .spawn(|| {
+                        let runtime = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .map_err(|e| e.to_string())?;
+                        let client = build_client(&self.options).map_err(|e| e.to_string())?;
+                        runtime.block_on(script_exchange(&client, call, timeout))
+                    })
+                    .join()
+                    .unwrap_or_else(|_| Err("the request thread failed".into()))
+            }),
+        }
     }
 
     /// The same client and connection pool, with other exchange keeping.
@@ -123,8 +146,9 @@ impl Runner {
         if let Some(source) = &step.scripts.pre_request {
             let before = outgoing.script_view();
             let snapshot = vars.to_map();
+            let send = |call: &ScriptRequest, left: Duration| self.send_for_script(call, left);
             let out = blocking(|| {
-                script::run(
+                script::run_with(
                     source,
                     &ScriptInput {
                         phase: Phase::PreRequest,
@@ -134,6 +158,7 @@ impl Runner {
                         response: None,
                     },
                     self.options.script_timeout,
+                    Some(&send),
                 )
             });
             apply_variables(vars, &out.variables);
@@ -284,8 +309,9 @@ impl Runner {
             let mut request = outgoing.script_view();
             request.url = result.url.clone();
             let snapshot = vars.to_map();
+            let send = |call: &ScriptRequest, left: Duration| self.send_for_script(call, left);
             let out = blocking(|| {
-                script::run(
+                script::run_with(
                     source,
                     &ScriptInput {
                         phase: Phase::Test,
@@ -295,6 +321,7 @@ impl Runner {
                         response: Some(&response),
                     },
                     self.options.script_timeout,
+                    Some(&send),
                 )
             });
             for (name, value) in &out.variables {
@@ -544,6 +571,56 @@ fn describe(err: &reqwest::Error, timeout: Duration) -> String {
         source = cause.source();
     }
     message
+}
+
+fn build_client(options: &RunOptions) -> reqwest::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(options.timeout)
+        .redirect(if options.follow_redirects {
+            Policy::limited(10)
+        } else {
+            Policy::none()
+        })
+        .tls_danger_accept_invalid_certs(options.insecure)
+        .build()
+}
+
+async fn script_exchange(
+    client: &reqwest::Client,
+    call: &ScriptRequest,
+    timeout: Duration,
+) -> Result<ScriptResponse, String> {
+    let method = reqwest::Method::from_bytes(call.method.as_bytes())
+        .map_err(|_| format!("`{}` is not an HTTP method", call.method))?;
+    let mut builder = client.request(method, &call.url).timeout(timeout);
+    for (name, value) in &call.headers {
+        builder = builder.header(name, value);
+    }
+    if let Some(body) = &call.body {
+        builder = builder.body(body.clone());
+    }
+    let started = Instant::now();
+    let response = builder.send().await.map_err(|e| describe(&e, timeout))?;
+    let status = response.status();
+    let headers = response
+        .headers()
+        .iter()
+        .map(|(k, v)| {
+            (
+                k.as_str().to_owned(),
+                String::from_utf8_lossy(v.as_bytes()).into_owned(),
+            )
+        })
+        .collect();
+    let body = response.bytes().await.map_err(|e| describe(&e, timeout))?;
+    Ok(ScriptResponse {
+        status: status.as_u16(),
+        status_text: status.canonical_reason().unwrap_or_default().to_owned(),
+        headers,
+        body: String::from_utf8_lossy(&body).into_owned(),
+        time_ms: millis(started.elapsed()),
+    })
 }
 
 fn millis(d: Duration) -> f64 {

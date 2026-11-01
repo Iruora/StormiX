@@ -263,10 +263,10 @@ fn errors_are_reported_and_earlier_tests_kept() {
     let out = test("this is not javascript");
     assert!(out.error.unwrap().starts_with("SyntaxError"));
 
-    let out = test(r#"pm.sendRequest("https://x.test", () => {});"#);
+    let out = test(r#"await pm.sendRequest("https://x.test");"#);
     assert_eq!(
         out.error.as_deref(),
-        Some("pm.sendRequest is not supported by Stormix yet")
+        Some("sending requests from scripts is not available here")
     );
 }
 
@@ -323,4 +323,212 @@ fn base64_helpers() {
     assert_eq!(out.error, None);
     assert_eq!(out.variables["a"], Some("ZGVtbzpzZWNyZXQ=".into()));
     assert_eq!(out.variables["b"], Some("ababcd".into()));
+}
+
+#[test]
+fn top_level_await_works_like_bruno() {
+    let res = response(200, USER);
+    let out = test_with(
+        "const name = await Promise.resolve(res.getBody().name)\nbru.setVar('who', name)\ntest('async test', async () => {\n  expect(await Promise.resolve(1)).to.equal(1)\n})",
+        &res,
+    );
+    assert_eq!(out.error, None);
+    assert_eq!(out.variables.get("who"), Some(&Some("Ada".into())));
+}
+
+#[test]
+fn rejected_await_is_the_script_error() {
+    let res = response(200, USER);
+    let out = test_with(
+        "bru.setVar('before', '1')\nawait Promise.reject(new TypeError('nope'))\nbru.setVar('after', '1')",
+        &res,
+    );
+    assert_eq!(out.error.as_deref(), Some("TypeError: nope"));
+    assert!(out.variables.contains_key("before"));
+    assert!(!out.variables.contains_key("after"));
+}
+
+#[test]
+fn awaiting_forever_is_reported() {
+    let out = pre("await new Promise(() => {})");
+    assert_eq!(
+        out.error.as_deref(),
+        Some("the script awaited something that never finished")
+    );
+}
+
+#[test]
+fn awaiting_in_a_loop_still_times_out() {
+    let out = pre("while (true) { await null }");
+    assert!(out.error.unwrap().contains("did not finish within"));
+}
+
+#[test]
+fn buffer_covers_jwt_style_encoding() {
+    let out = pre(r#"
+const toB64Url = (v) => Buffer.from(v, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+const fromB64Url = (v) => {
+  const n = v.replace(/-/g, '+').replace(/_/g, '/')
+  return Buffer.from(n + '='.repeat((4 - (n.length % 4)) % 4), 'base64').toString('utf8')
+}
+const header = toB64Url(JSON.stringify({ alg: 'none', typ: 'JWT' }))
+pm.environment.set('header', header)
+pm.environment.set('round', fromB64Url(toB64Url('héllo €')))
+pm.environment.set('hex', Buffer.from('hi').toString('hex'))
+pm.environment.set('url', Buffer.from('é?', 'utf8').toString('base64url'))
+"#);
+    assert_eq!(out.error, None);
+    let get = |k: &str| out.variables.get(k).cloned().flatten().unwrap();
+    assert_eq!(get("header"), "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0");
+    assert_eq!(get("round"), "héllo €");
+    assert_eq!(get("hex"), "6869");
+    assert_eq!(get("url"), "w6k_");
+}
+
+#[test]
+fn bru_sleep_waits_and_resolves() {
+    let started = std::time::Instant::now();
+    let out = pre("await bru.sleep(50)\nbru.setVar('done', 'yes')");
+    assert_eq!(out.error, None);
+    assert!(started.elapsed() >= Duration::from_millis(50));
+    assert_eq!(out.variables.get("done"), Some(&Some("yes".into())));
+}
+
+#[test]
+fn bru_sleep_stops_at_the_time_limit() {
+    let started = std::time::Instant::now();
+    let out = pre("await bru.sleep(60000)\nbru.setVar('done', 'yes')");
+    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(out.error.unwrap().contains("did not finish within"));
+}
+
+/// Runs a test script whose requests `send` answers, recording each request.
+fn with_server(
+    source: &str,
+    send: impl Fn(&ScriptRequest) -> ScriptResponse + Sync,
+) -> (ScriptOutput, Vec<ScriptRequest>) {
+    let vars = vars();
+    let req = request();
+    let res = response(500, "{}");
+    let seen = std::sync::Mutex::new(Vec::new());
+    let sender = |r: &ScriptRequest, _left: Duration| -> Result<ScriptResponse, String> {
+        seen.lock().unwrap().push(r.clone());
+        Ok(send(r))
+    };
+    let out = run_with(
+        source,
+        &ScriptInput {
+            phase: Phase::Test,
+            step_name: "Token",
+            variables: &vars,
+            request: &req,
+            response: Some(&res),
+        },
+        Duration::from_secs(2),
+        Some(&sender),
+    );
+    (out, seen.into_inner().unwrap())
+}
+
+#[test]
+fn bru_send_request_retries_like_the_collection_does() {
+    let calls = std::sync::atomic::AtomicU32::new(0);
+    let (out, seen) = with_server(
+        r#"
+const url = req.getUrl()
+const method = req.getMethod()
+const headers = req.getHeaders()
+const body = req.getBody({ raw: true })
+let status = res.status
+let token
+for (let attempt = 2; attempt <= 4 && status >= 500; attempt += 1) {
+  await bru.sleep(1)
+  try {
+    const r = await bru.sendRequest({ url, method, headers, data: body })
+    status = r.status
+    token = r.data.id_token
+  } catch (e) {
+    status = e.response.status
+  }
+}
+bru.setVar('status', String(status))
+bru.setVar('token', token)
+"#,
+        |_| {
+            let n = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let (status, body) = if n == 0 {
+                (503, "busy")
+            } else {
+                (200, r#"{"id_token":"a.b.c"}"#)
+            };
+            ScriptResponse {
+                status,
+                status_text: String::new(),
+                headers: vec![("Content-Type".into(), "application/json".into())],
+                body: body.into(),
+                time_ms: 1.0,
+            }
+        },
+    );
+    assert_eq!(out.error, None);
+    assert_eq!(out.variables.get("status"), Some(&Some("200".into())));
+    assert_eq!(out.variables.get("token"), Some(&Some("a.b.c".into())));
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen[0].url, "https://api.test/users/7");
+    assert_eq!(seen[0].method, "GET");
+    assert_eq!(
+        seen[0].headers,
+        [("Accept".to_string(), "application/json".to_string())]
+    );
+}
+
+#[test]
+fn bru_send_request_encodes_objects_as_json() {
+    let (out, seen) = with_server(
+        "const r = await bru.sendRequest({ url: 'https://x.test', method: 'post', data: { a: 1 } })\nbru.setVar('got', r.data)",
+        |_| ScriptResponse {
+            status: 201,
+            status_text: "Created".into(),
+            headers: vec![],
+            body: "plain".into(),
+            time_ms: 1.0,
+        },
+    );
+    assert_eq!(out.error, None);
+    assert_eq!(out.variables.get("got"), Some(&Some("plain".into())));
+    assert_eq!(seen[0].method, "POST");
+    assert_eq!(seen[0].body.as_deref(), Some(r#"{"a":1}"#));
+    assert!(seen[0]
+        .headers
+        .contains(&("Content-Type".into(), "application/json".into())));
+}
+
+#[test]
+fn pm_send_request_with_callback_and_promise() {
+    let (out, seen) = with_server(
+        r#"
+pm.sendRequest({
+  url: 'https://x.test/token',
+  method: 'POST',
+  header: [{ key: 'X-A', value: '1' }],
+  body: { mode: 'urlencoded', urlencoded: [{ key: 'grant type', value: 'a&b' }] },
+}, (err, res) => {
+  pm.environment.set('cb', String(res.code) + ':' + res.json().ok)
+})
+const res = await pm.sendRequest('https://x.test/ping')
+pm.test('ping', () => pm.expect(res.headers.get('content-type')).to.eql('application/json'))
+"#,
+        |_| ScriptResponse {
+            status: 200,
+            status_text: "OK".into(),
+            headers: vec![("Content-Type".into(), "application/json".into())],
+            body: r#"{"ok":true}"#.into(),
+            time_ms: 1.0,
+        },
+    );
+    assert_eq!(out.error, None);
+    assert_eq!(out.variables.get("cb"), Some(&Some("200:true".into())));
+    assert_eq!(outcomes(&out), [("ping".into(), true, None)]);
+    assert_eq!(seen[0].body.as_deref(), Some("grant%20type=a%26b"));
+    assert_eq!(seen[1].method, "GET");
 }

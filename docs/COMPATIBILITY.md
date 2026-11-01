@@ -47,6 +47,7 @@ What Stormix 1.0 runs from Postman and Bruno collections, feature by feature. An
 |---|---|---|---|
 | Pre-request scripts | ✓ collection, folder, request | ✓ `script:pre-request` at every level | Run in that order |
 | Test scripts | ✓ | ✓ `script:post-response`, `tests` | |
+| Top-level `await` | ✓ | ✓ | Scripts run as async functions, as in Postman and Bruno |
 | `pm.test` / `test` | ✓ | ✓ | Each one is a check in every report |
 | Legacy `tests["…"]` | ✓ | n/a | |
 | Declarative assertions | n/a | ✓ `assert`, every operator | |
@@ -55,13 +56,15 @@ What Stormix 1.0 runs from Postman and Bruno collections, feature by feature. An
 | Request API | ✓ `pm.request` headers, URL, body | ✓ `req.getUrl`, `setUrl`, `setHeader`, `setBody`, `setMethod` | |
 | Response API | ✓ `pm.response` `code`, `json()`, `text()`, `headers`, `to.have.*`, `to.be.ok` | ✓ `res.status`, `res.body`, `getStatus()`, `getBody()`, `getHeader()`, `getResponseTime()` | |
 | Chai `expect` | ✓ | ✓ | Common chains: `equal`, `eql`, `include`, `property`, `lengthOf`, `match`, `keys`, `oneOf`, `a`, `above`, `below`, `not`, `deep` |
+| `Buffer`, `btoa`, `atob` | ✓ | ✓ | `Buffer.from` / `toString` with utf8, base64, base64url, hex, latin1 |
 | `console.log` | ✓ | ✓ | Shown for failed steps, or all steps with `-v` |
-| `pm.sendRequest` | ✗ | n/a | The script fails with a clear error. Make it a step of its own |
+| `bru.sleep` | n/a | ✓ | Capped by the script time limit |
+| `pm.sendRequest`, `bru.sendRequest` | ✓ | ✓ | Real requests with the run's client settings, within the script time limit. Callback and `await` forms. `bru.sendRequest` rejects outside 2xx, like axios. Not counted in load-test metrics. Postman `formdata` bodies are not supported |
 | `require` (lodash, moment, …) | ✗ | ✗ | The script fails with a clear error |
 | `pm.iterationData`, data files | ✗ | ✗ | Always empty until data-driven runs arrive |
 | `pm.visualizer` | ✗ | n/a | A call to it fails the script |
 
-Scripts run in an embedded QuickJS engine with no network or file access, a memory cap and a time limit (`--script-timeout`, 5 s by default).
+Scripts run in an embedded QuickJS engine with no file access and no network access apart from `sendRequest`, a memory cap and a time limit (`--script-timeout`, 5 s by default).
 
 ## Request types
 

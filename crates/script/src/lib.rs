@@ -78,10 +78,26 @@ pub struct ScriptOutput {
     pub error: Option<String>,
 }
 
+/// Sends an HTTP request for `bru.sendRequest` / `pm.sendRequest`. It gets
+/// the time the script has left, and should not take longer.
+pub type Sender<'a> =
+    &'a (dyn Fn(&ScriptRequest, Duration) -> Result<ScriptResponse, String> + Sync);
+
 /// Runs `source`. Never panics on bad scripts: syntax errors, exceptions,
-/// timeouts and running out of memory all come back as `error`.
+/// timeouts and running out of memory all come back as `error`. Scripts
+/// cannot send requests; see [`run_with`].
 pub fn run(source: &str, input: &ScriptInput<'_>, timeout: Duration) -> ScriptOutput {
-    match run_inner(source, input, timeout) {
+    run_with(source, input, timeout, None)
+}
+
+/// Like [`run`], with `send` doing the requests a script asks for.
+pub fn run_with(
+    source: &str,
+    input: &ScriptInput<'_>,
+    timeout: Duration,
+    send: Option<Sender<'_>>,
+) -> ScriptOutput {
+    match run_inner(source, input, timeout, send) {
         Ok(output) => output,
         Err(error) => ScriptOutput {
             variables: BTreeMap::new(),
@@ -97,6 +113,7 @@ fn run_inner(
     source: &str,
     input: &ScriptInput<'_>,
     timeout: Duration,
+    send: Option<Sender<'_>>,
 ) -> Result<ScriptOutput, String> {
     let runtime = Runtime::new().map_err(|e| format!("cannot start the script engine: {e}"))?;
     runtime.set_memory_limit(MEMORY_LIMIT);
@@ -106,11 +123,57 @@ fn run_inner(
         Context::full(&runtime).map_err(|e| format!("cannot start the script engine: {e}"))?;
 
     let input_json = serde_json::to_string(input).expect("script input always serializes");
-    let result = context.with(|ctx| -> rquickjs::Result<String> {
+    let started = context.with(|ctx| -> rquickjs::Result<()> {
         ctx.globals().set("__INPUT", input_json)?;
+        // `bru.sleep` blocks this thread; scripts already run off the async
+        // runtime. It never sleeps past the deadline.
+        let sleep = rquickjs::Function::new(ctx.clone(), move |ms: f64| {
+            let left = deadline.saturating_duration_since(Instant::now());
+            std::thread::sleep(Duration::from_secs_f64(ms / 1000.0).min(left));
+        })?;
+        ctx.globals().set("__sleep", sleep)?;
         ctx.eval::<(), _>(PRELUDE)?;
         let run: rquickjs::Function = ctx.globals().get("__run")?;
         run.call((source,))
+    });
+    // Let `await` in the script resume until nothing is left to do. A job
+    // that throws only ends up rejecting the script's promise, which
+    // `__run` already records, so job errors need no handling here. Requests
+    // the script sends wait in an outbox: they are sent here, outside the
+    // engine, and their replies delivered before resuming.
+    let result = started.and_then(|()| loop {
+        while runtime.is_job_pending() && Instant::now() <= deadline {
+            let _ = runtime.execute_pending_job();
+        }
+        if Instant::now() > deadline {
+            return Err(rquickjs::Error::Exception);
+        }
+        let outbox: String = context.with(|ctx| {
+            let take: rquickjs::Function = ctx.globals().get("__takeOutbox")?;
+            take.call(())
+        })?;
+        let calls: Vec<Outgoing> = serde_json::from_str(&outbox).unwrap_or_default();
+        if calls.is_empty() {
+            break context.with(|ctx| -> rquickjs::Result<String> {
+                let finish: rquickjs::Function = ctx.globals().get("__finish")?;
+                finish.call(())
+            });
+        }
+        for call in calls {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let reply = match send {
+                Some(send) => send(&call.request, left),
+                None => Err("sending requests from scripts is not available here".into()),
+            };
+            let reply = match reply {
+                Ok(response) => serde_json::json!({ "response": response }),
+                Err(error) => serde_json::json!({ "error": error }),
+            };
+            context.with(|ctx| -> rquickjs::Result<()> {
+                let deliver: rquickjs::Function = ctx.globals().get("__deliver")?;
+                deliver.call((call.id, reply.to_string()))
+            })?;
+        }
     });
     match result {
         Ok(json) => {
@@ -123,6 +186,13 @@ fn run_inner(
         Err(rquickjs::Error::Allocation) => Err("the script ran out of memory".into()),
         Err(e) => Err(format!("the script engine failed: {e}")),
     }
+}
+
+/// A request a script is waiting on.
+#[derive(Deserialize)]
+struct Outgoing {
+    id: u32,
+    request: ScriptRequest,
 }
 
 #[cfg(test)]

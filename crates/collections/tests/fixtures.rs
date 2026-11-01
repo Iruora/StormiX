@@ -47,7 +47,7 @@ fn postman_collection() {
     assert_eq!(header(&health.request.headers, "authorization"), None);
     let test = health.scripts.test.as_deref().unwrap();
     assert!(
-        test.starts_with("(function () {\npm.test(\"responds within 2 s\""),
+        test.starts_with("await (async function () {\npm.test(\"responds within 2 s\""),
         "{test}"
     );
     assert!(test.contains("tests[\"Status code is 200\"]"));
@@ -114,7 +114,7 @@ fn bruno_collection() {
         .test
         .as_deref()
         .unwrap()
-        .starts_with("(function () {\nbru.setVar(\"token\", (res.body.token));"));
+        .starts_with("await (async function () {\nbru.setVar(\"token\", (res.body.token));"));
 
     assert_eq!(
         header(&profile.request.headers, "authorization"),
