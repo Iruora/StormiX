@@ -36,6 +36,7 @@ import { describeLoad } from "./lib/describe";
 import { methodText } from "./lib/methods";
 import { VariablesContext, variableTable } from "./lib/variables";
 import { LoadLive, LoadResult } from "./views/LoadResult";
+import { LoadSetup, type LoadSetupChoice } from "./views/LoadSetup";
 import { RunResult, stepPassed } from "./views/RunResult";
 import { RUNS_KEY, RunsView } from "./views/Runs";
 import { SplitView, usePanel } from "./views/SidePanel";
@@ -190,6 +191,28 @@ function TestFileView() {
     onSettled: () => client.invalidateQueries({ queryKey: RUNS_KEY }),
   });
   const busy = run.isPending || load.isPending;
+  const [setupOpen, setSetupOpen] = useState(false);
+  // Steps left out of the last load test, by name, offered again next time.
+  const [excluded, setExcluded] = useState<string[]>([]);
+  /** Saves the setup's load profile and thresholds into the file, then runs the chosen steps. */
+  const startLoad = async ({ included, load: profile, thresholds }: LoadSetupChoice) => {
+    const test = result?.test;
+    if (!test) return;
+    setSetupOpen(false);
+    // Turned off steps are not offered, so they are not remembered as left out.
+    setExcluded(
+      test.flow.steps.filter((s, i) => s.enabled !== false && !included.includes(i)).map((s) => s.name),
+    );
+    const configured = { ...test, load: profile, thresholds };
+    if (JSON.stringify([test.load, test.thresholds ?? []]) !== JSON.stringify([profile, thresholds])) {
+      await editSteps(configured);
+    }
+    const steps = configured.flow.steps.filter((_, i) => included.includes(i));
+    const yaml = await commands.testFileToYaml({ ...configured, flow: { ...configured.flow, steps } } as TestFile_Deserialize);
+    run.reset();
+    panel.setOpen(true);
+    load.mutate(yaml);
+  };
   /** Adds environments, replacing ones with the same name, and picks `select`. */
   const addEnvs = (added: Record<string, Env>, select: string | null) => {
     setEnvs((current) => ({ ...current, ...added }));
@@ -562,19 +585,23 @@ function TestFileView() {
         </button>
         <button
           type="button"
-          disabled={!canRun || !result?.test?.load || busy}
-          title={result?.test?.load ? describeLoad(result.test.load) : "Add a load section to run a load test"}
-          onClick={() => {
-            run.reset();
-            panel.setOpen(true);
-            load.mutate(source);
-          }}
+          disabled={!canRun || busy}
+          title={result?.test?.load ? describeLoad(result.test.load) : "Choose the endpoints and load profile, then run"}
+          onClick={() => setSetupOpen(true)}
           className="flex items-center gap-1.5 rounded-md border border-accent px-3 py-1 text-xs font-semibold text-accent hover:bg-accent-soft disabled:opacity-50"
         >
           {load.isPending ? <LoaderCircle size={13} className="animate-spin" /> : <Gauge size={13} />}
           Load test
         </button>
       </header>
+      {setupOpen && result?.test && (
+        <LoadSetup
+          test={result.test}
+          excluded={excluded}
+          onRun={startLoad}
+          onCancel={() => setSetupOpen(false)}
+        />
+      )}
       <SplitView open={panel.open} width={panel.width} onWidth={panel.setWidth} main={editorPane} panel={resultsPane} />
     </div>
   );

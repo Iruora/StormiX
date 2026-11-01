@@ -1,7 +1,7 @@
-import { CircleCheck, CircleX, LoaderCircle } from "lucide-react";
-import { useState } from "react";
+import { ArrowDown, ArrowUp, ChevronsUpDown, CircleCheck, CircleX, LoaderCircle, Search } from "lucide-react";
+import { useMemo, useState } from "react";
 
-import type { LoadProgress, LoadReport, Second, StepResult, ThresholdResult } from "../bindings";
+import type { LoadProgress, LoadReport, Second, StepResult, StepSummary, ThresholdResult } from "../bindings";
 import { DetailsButton } from "./RunResult";
 import { StepDetails } from "./StepDetails";
 
@@ -81,32 +81,7 @@ export function LoadResult({ report }: { report: LoadReport }) {
 
       <Timeline seconds={s.timeline} />
 
-      {s.steps.length > 0 && (
-        <table className="w-full border-t border-line text-[13px]">
-          <thead className="text-xs text-subtle">
-            <tr>
-              <th className="w-1/2 px-4 py-1.5 text-left font-medium">Step</th>
-              <th className="px-2 py-1.5 text-right font-medium">Requests</th>
-              <th className="px-2 py-1.5 text-right font-medium">Failed</th>
-              <th className="px-2 py-1.5 text-right font-medium">p50</th>
-              <th className="px-4 py-1.5 text-right font-medium">p95</th>
-            </tr>
-          </thead>
-          <tbody className="mono whitespace-nowrap text-xs">
-            {s.steps.map((step) => (
-              <tr key={step.name} className="border-t border-line">
-                <td className="max-w-0 truncate px-4 py-1.5 font-sans text-[13px]" title={step.name}>
-                  {step.name}
-                </td>
-                <td className="px-2 py-1.5 text-right">{step.requests}</td>
-                <td className={`px-2 py-1.5 text-right ${step.failed > 0 ? "text-bad" : ""}`}>{step.failed}</td>
-                <td className="px-2 py-1.5 text-right">{formatMs(step.latency.p50 ?? 0)}</td>
-                <td className="px-4 py-1.5 text-right">{formatMs(step.latency.p95 ?? 0)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      {s.steps.length > 0 && <StepTable steps={s.steps} />}
 
       {s.failures.length > 0 && (
         <div className="border-t border-line px-4 py-3">
@@ -133,6 +108,151 @@ export function LoadResult({ report }: { report: LoadReport }) {
       )}
       {open && <StepDetails step={open} onClose={() => setOpen(null)} />}
     </section>
+  );
+}
+
+type Column = "name" | "requests" | "failed" | "p50" | "p95";
+
+const COLUMNS: { key: Column; label: string; value: (s: StepSummary) => number | string }[] = [
+  { key: "name", label: "Step", value: (s) => s.name },
+  { key: "requests", label: "Requests", value: (s) => s.requests },
+  { key: "failed", label: "Failed", value: (s) => s.failed },
+  { key: "p50", label: "p50", value: (s) => s.latency.p50 ?? 0 },
+  { key: "p95", label: "p95", value: (s) => s.latency.p95 ?? 0 },
+];
+
+/**
+ * Each step's figures. A header click sorts by that column (again to flip
+ * the order, a third time to go back to flow order); the bar above filters
+ * by name, failures and slowness.
+ */
+function StepTable({ steps }: { steps: StepSummary[] }) {
+  const [sort, setSort] = useState<{ key: Column; desc: boolean } | null>(null);
+  const [query, setQuery] = useState("");
+  const [failingOnly, setFailingOnly] = useState(false);
+  const [slowerThan, setSlowerThan] = useState("");
+
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const minP95 = Number(slowerThan) || 0;
+    const kept = steps.filter(
+      (s) =>
+        (!q || s.name.toLowerCase().includes(q)) && (!failingOnly || s.failed > 0) && (s.latency.p95 ?? 0) >= minP95,
+    );
+    if (!sort) return kept;
+    const value = COLUMNS.find((c) => c.key === sort.key)!.value;
+    return [...kept].sort((a, b) => {
+      const x = value(a);
+      const y = value(b);
+      const order = typeof x === "string" ? x.localeCompare(y as string) : x - (y as number);
+      return sort.desc ? -order : order;
+    });
+  }, [steps, sort, query, failingOnly, slowerThan]);
+
+  const clickHeader = (key: Column) =>
+    setSort((current) => {
+      // Numbers start largest first, names A to Z.
+      const firstDesc = key !== "name";
+      if (current?.key !== key) return { key, desc: firstDesc };
+      if (current.desc === firstDesc) return { key, desc: !firstDesc };
+      return null;
+    });
+  const filtered = query.trim() !== "" || failingOnly || Number(slowerThan) > 0;
+
+  return (
+    <div className="border-t border-line">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 text-xs">
+        <label className="flex min-w-36 flex-1 items-center gap-1.5 rounded-md border border-line px-2 py-0.5 focus-within:border-accent">
+          <Search size={12} className="text-subtle" />
+          <input
+            aria-label="Filter steps by name"
+            placeholder="Filter steps"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full bg-transparent outline-none placeholder:text-subtle"
+          />
+        </label>
+        <label className="flex items-center gap-1.5 text-muted">
+          <input
+            type="checkbox"
+            checked={failingOnly}
+            onChange={(e) => setFailingOnly(e.target.checked)}
+            className="size-3.5 accent-accent"
+          />
+          Failing only
+        </label>
+        <label className="flex items-center gap-1.5 text-muted">
+          p95 ≥
+          <input
+            aria-label="Only steps with a p95 of at least, in ms"
+            inputMode="numeric"
+            placeholder="0"
+            value={slowerThan}
+            onChange={(e) => /^\d*\.?\d*$/.test(e.target.value) && setSlowerThan(e.target.value)}
+            className="mono w-14 rounded-md border border-line bg-surface px-1.5 py-0.5 text-right outline-none focus:border-accent"
+          />
+          ms
+        </label>
+        {filtered && (
+          <span className="ml-auto text-subtle">
+            {rows.length} of {steps.length}
+          </span>
+        )}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px]">
+          <thead className="whitespace-nowrap text-xs text-subtle">
+            <tr>
+              {COLUMNS.map((c, i) => {
+                const active = sort?.key === c.key;
+                const Icon = active ? (sort.desc ? ArrowDown : ArrowUp) : ChevronsUpDown;
+                return (
+                  <th
+                    key={c.key}
+                    aria-sort={active ? (sort.desc ? "descending" : "ascending") : "none"}
+                    className={`py-1.5 font-medium ${c.key === "name" ? "w-2/5 min-w-28 px-4 text-left" : i === COLUMNS.length - 1 ? "px-4 text-right" : "px-2 text-right"}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => clickHeader(c.key)}
+                      className={`inline-flex items-center gap-0.5 hover:text-ink ${active ? "text-ink" : ""} ${c.key === "name" ? "" : "flex-row-reverse"}`}
+                    >
+                      {c.label}
+                      <Icon size={11} className={active ? "" : "opacity-40"} />
+                    </button>
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody className="mono whitespace-nowrap text-xs">
+            {rows.map((step, i) => (
+              <tr key={`${step.name}-${i}`} className="border-t border-line">
+                <td className="max-w-0 truncate px-4 py-1.5 font-sans text-[13px]" title={step.name}>
+                  {step.name}
+                </td>
+                <td className="px-2 py-1.5 text-right">{step.requests}</td>
+                <td
+                  className={`px-2 py-1.5 text-right ${step.failed > 0 ? "text-bad" : ""}`}
+                  title={step.requests ? `${((step.failed / step.requests) * 100).toFixed(2)}% of requests` : undefined}
+                >
+                  {step.failed}
+                </td>
+                <td className="px-2 py-1.5 text-right">{formatMs(step.latency.p50 ?? 0)}</td>
+                <td className="px-4 py-1.5 text-right">{formatMs(step.latency.p95 ?? 0)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr className="border-t border-line">
+                <td colSpan={COLUMNS.length} className="px-4 py-3 text-center font-sans text-[13px] text-subtle">
+                  No step matches these filters.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
