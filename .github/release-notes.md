@@ -1,8 +1,7 @@
-Stormix 1.4.0 adds a per-step response cache and makes the desktop app follow the system text size.
+Stormix 1.5.0 brings back what you had open when the app restarts, and lets you see and change the loaded environment.
 
-- **Response cache:** mark a step with `cache: true`, or use the cache switch in the Flow tab, the Steps tab and the load test setup, to send it once and reuse its response. In a load test, cached steps such as a login run once before the load and stay out of the metrics. You can clear one step's cache or the whole flow's at any time.
-- **Large text and scaling:** the app scales evenly with the system text size and display scaling. The header and toolbars wrap instead of hiding **Run once** and **Load test**, and the results panel keeps sensible minimum widths when resized.
-- The Flow tab has an **All steps** switch that turns every step on or off.
+- **Workspaces:** what you have open is saved as you work: the test file (and unsaved edits), the environments and the chosen one, the editor tab and the steps left out of the last load test. The app opens the last workspace on launch instead of the example. The new **Workspaces** page lists them to open, rename or delete, and **New workspace** starts another. Secret values are never saved.
+- **Variables:** next to the environment picker, see the chosen environment's variables and change them for this session only, or save them to the environment's file (`.bru`, Postman, JSON or YAML, in its own format). Secrets stay masked and are never written with a value.
 
 If you are on 1.1 or later, the app offers this update by itself. On 1.0, download it once from the table below.
 

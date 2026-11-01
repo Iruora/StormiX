@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 (2026-11-01)
 
 ### Desktop app
 
+- **Workspaces.** The app keeps what you have open in a workspace, saved as you work, and opens the last one used when it starts instead of the example. A workspace holds the test file, or the editor text when it is not saved to a file (an imported collection, say), with changes not yet saved to the file; every environment in the list and the one chosen; the editor tab and page; and the steps left out of the last load test. On reopening, the file is read again from disk, along with the environments beside it; if it is gone, the copy kept with the workspace opens instead. The new **Workspaces** page lists them with their file, environment and when they were last saved, to open, rename or delete; **New workspace** starts one from the example. Workspaces are kept in `workspaces.json` in the app's data folder. Secret values are never saved, and neither are changes made for this session only in **Variables**.
 - **Variables** next to the environment picker opens the chosen environment's variables to see and change. A change applies to runs at once, for this session only, and is marked **this session** (the toolbar button shows how many). Save one variable, or **Save all to file**, to make the change permanent; reset one, or **Reset all**, to go back to the file. Variables can also be added and removed, for the session or for good. Saving writes the environment's own file in its own format (`.bru`, Postman export, JSON or YAML), keeping a `.bru` file's disabled lines and a Postman export's other fields; an environment that came with a collection is saved to `environments/NAME.yaml` next to the test file, or asks where. Secrets stay masked, and their values are never written to a file.
 
 ## 1.4.0 (2026-11-01)

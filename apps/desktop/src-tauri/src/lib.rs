@@ -1,4 +1,5 @@
 mod commands;
+mod workspaces;
 
 use std::sync::Mutex;
 
@@ -30,6 +31,10 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::read_text_file,
             commands::write_text_file,
             commands::test_file_to_yaml,
+            commands::list_workspaces,
+            commands::save_workspace,
+            commands::select_workspace,
+            commands::delete_workspace,
         ])
         .events(collect_events![commands::LoadProgress])
 }
@@ -69,6 +74,9 @@ pub fn run() {
             let data = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data)?;
             app.manage(Mutex::new(Store::open(&data.join("runs.db"))?));
+            app.manage(Mutex::new(workspaces::WorkspaceFile::open(
+                &data.join("workspaces.json"),
+            )));
             Ok(())
         })
         .run(tauri::generate_context!())

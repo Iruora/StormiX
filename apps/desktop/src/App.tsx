@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
+  ChevronDown,
   CircleAlert,
   CircleCheck,
   FileCode,
@@ -10,6 +12,7 @@ import {
   FolderOpen,
   Gauge,
   History,
+  Layers,
   LoaderCircle,
   PanelRightClose,
   PanelRightOpen,
@@ -20,7 +23,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 
 import {
   commands,
@@ -31,12 +34,14 @@ import {
   type LoadProgress,
   type TestFile,
   type TestFile_Deserialize,
+  type Workspace_Serialize as Workspace,
 } from "./bindings";
 import { YamlEditor } from "./editor/YamlEditor";
 import { CACHE_KEY } from "./lib/cache";
 import { describeLoad } from "./lib/describe";
 import { methodText } from "./lib/methods";
 import { VariablesContext, variableTable } from "./lib/variables";
+import { newWorkspace, WORKSPACES_KEY, workspaceTitle } from "./lib/workspace";
 import { LoadLive, LoadResult } from "./views/LoadResult";
 import { LoadSetup, type LoadSetupChoice } from "./views/LoadSetup";
 import { RunResult, stepPassed } from "./views/RunResult";
@@ -47,10 +52,114 @@ import { EnvSecrets } from "./views/EnvSecrets";
 import { FlowView } from "./views/FlowView";
 import { StepsEditor } from "./views/StepsEditor";
 import { UpdateBanner } from "./views/UpdateBanner";
+import { WorkspacesView } from "./views/Workspaces";
 
 export function App() {
   const info = useQuery({ queryKey: ["app-info"], queryFn: commands.getAppInfo });
-  const [view, setView] = useState<"file" | "runs">("file");
+  const client = useQueryClient();
+  const list = useQuery({ queryKey: WORKSPACES_KEY, queryFn: commands.listWorkspaces });
+  const [view, setView] = useState<"file" | "runs" | "workspaces">("file");
+  // The workspace open in the editor, as it was when opened. The editor
+  // reports its changes through `onSnapshot`; they are saved shortly after.
+  const [active, setActive] = useState<Workspace | null>(null);
+  const [activeName, setActiveName] = useState("");
+  // Secret values typed in, by variable name. Kept in memory for the whole
+  // session, across workspaces, and never saved.
+  const [secretValues, setSecretValues] = useState<Record<string, string>>({});
+  const latest = useRef<Workspace | null>(null);
+  const pending = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const flush = async () => {
+    clearTimeout(timer.current);
+    if (!pending.current || !latest.current) return;
+    pending.current = false;
+    await commands.saveWorkspace(latest.current);
+    client.invalidateQueries({ queryKey: WORKSPACES_KEY });
+  };
+  const persist = (ws: Workspace) => {
+    latest.current = ws;
+    pending.current = true;
+    clearTimeout(timer.current);
+    timer.current = setTimeout(flush, 400);
+  };
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
+
+  // On launch, reopen the workspace used last, else start a new one.
+  useEffect(() => {
+    if (active) return;
+    // Without the saved list, still let the user work.
+    if (list.isError) openWorkspace(newWorkspace());
+    if (!list.data) return;
+    const pick = list.data.items.find((w) => w.id === list.data.last) ?? list.data.items[0] ?? newWorkspace();
+    openWorkspace(pick);
+  }, [list.data, list.isError]);
+
+  // Save what is pending before the window closes.
+  useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    let unlisten: (() => void) | undefined;
+    getCurrentWindow()
+      .onCloseRequested(() => flushRef.current())
+      .then((f) => (unlisten = f));
+    return () => unlisten?.();
+  }, []);
+
+  /** Opens a workspace in the editor; the one open before is saved first. */
+  const openWorkspace = (ws: Workspace) => {
+    void flush();
+    latest.current = ws;
+    setActive(ws);
+    setActiveName(ws.name);
+    setView(ws.view === "runs" ? "runs" : "file");
+    // A new one is saved once the editor reports what it shows.
+    if (ws.updatedMs) void commands.selectWorkspace(ws.id);
+  };
+  const showView = (next: typeof view) => {
+    setView(next);
+    if (latest.current && next !== "workspaces" && latest.current.view !== next) {
+      persist({ ...latest.current, view: next });
+    }
+  };
+  const onSnapshot = (snap: Snapshot) => {
+    const base = latest.current;
+    if (!base) return;
+    const { title, ...rest } = snap;
+    const name = base.renamed ? base.name : title;
+    setActiveName(name);
+    persist({ ...base, ...rest, name });
+  };
+  const rename = async (ws: Workspace, name: string) => {
+    if (ws.id === latest.current?.id) {
+      latest.current = { ...latest.current, name, renamed: true };
+      setActiveName(name);
+      pending.current = true;
+      await flush();
+    } else {
+      // Saving moves a workspace to the top and makes it the one reopened;
+      // put the open one back there.
+      await commands.saveWorkspace({ ...ws, name, renamed: true });
+      if (latest.current) await commands.selectWorkspace(latest.current.id);
+      client.invalidateQueries({ queryKey: WORKSPACES_KEY });
+    }
+  };
+  const remove = async (ws: Workspace) => {
+    await commands.deleteWorkspace(ws.id);
+    if (ws.id === latest.current?.id) {
+      pending.current = false;
+      const rest = (list.data?.items ?? []).filter((w) => w.id !== ws.id);
+      openWorkspace(rest[0] ?? newWorkspace());
+      setView("workspaces");
+    }
+    client.invalidateQueries({ queryKey: WORKSPACES_KEY });
+  };
+  // The open workspace shows first, even before its first save.
+  const items = useMemo(() => {
+    const saved = list.data?.items ?? [];
+    if (!active || saved.some((w) => w.id === active.id)) return saved;
+    return [{ ...active, name: activeName }, ...saved];
+  }, [list.data, active, activeName]);
 
   return (
     <div className="flex h-full">
@@ -61,25 +170,60 @@ export function App() {
         >
           <Zap size="1.0625rem" fill="currentColor" />
         </span>
-        <NavItem icon={<FileCode size="1.125rem" />} label="Test file" active={view === "file"} onClick={() => setView("file")} />
-        <NavItem icon={<History size="1.125rem" />} label="Runs" active={view === "runs"} onClick={() => setView("runs")} />
+        <NavItem icon={<FileCode size="1.125rem" />} label="Test file" active={view === "file"} onClick={() => showView("file")} />
+        <NavItem icon={<History size="1.125rem" />} label="Runs" active={view === "runs"} onClick={() => showView("runs")} />
+        <NavItem
+          icon={<Layers size="1.125rem" />}
+          label="Workspaces"
+          active={view === "workspaces"}
+          onClick={() => showView("workspaces")}
+        />
         <div className="mt-auto text-[0.625rem] text-subtle">{info.data ? `v${info.data.version}` : ""}</div>
       </nav>
       <main className="flex min-w-0 flex-1 flex-col">
         <UpdateBanner />
-        {/* Kept mounted so the editor keeps its text while the history is open. */}
+        {/* Kept mounted so the editor keeps its text while another page is open. */}
         <div className={view === "file" ? "min-h-0 flex-1" : "hidden"}>
-          <TestFileView />
+          {active && (
+            <TestFileView
+              key={active.id}
+              workspace={active}
+              workspaceName={activeName}
+              onWorkspaces={() => showView("workspaces")}
+              onSnapshot={onSnapshot}
+              secretValues={secretValues}
+              setSecretValues={setSecretValues}
+            />
+          )}
         </div>
         {view === "runs" && (
           <div className="min-h-0 flex-1">
             <RunsView />
           </div>
         )}
+        {view === "workspaces" && (
+          <div className="min-h-0 flex-1">
+            <WorkspacesView
+              items={items}
+              activeId={active?.id ?? null}
+              loading={list.isPending}
+              onOpen={openWorkspace}
+              onNew={() => openWorkspace(newWorkspace())}
+              onRename={rename}
+              onDelete={remove}
+            />
+          </div>
+        )}
       </main>
     </div>
   );
 }
+
+/** What the editor reports for its workspace to be saved. */
+type Snapshot = Pick<
+  Workspace,
+  "path" | "text" | "dirty" | "imported" | "environments" | "environment" | "tab" | "excluded"
+> & { title: string };
 
 function NavItem({
   icon,
@@ -117,26 +261,46 @@ function NavItem({
 type Env = { variables: Record<string, string>; secrets: string[]; path: string | null };
 
 /** Edit a test file and see it parsed and checked as you type. */
-function TestFileView() {
+function TestFileView({
+  workspace: ws,
+  workspaceName,
+  onWorkspaces,
+  onSnapshot,
+  secretValues,
+  setSecretValues,
+}: {
+  /** What to show at first; the view reports its changes to `onSnapshot`. */
+  workspace: Workspace;
+  workspaceName: string;
+  onWorkspaces: () => void;
+  onSnapshot: (snap: Snapshot) => void;
+  secretValues: Record<string, string>;
+  setSecretValues: Dispatch<SetStateAction<Record<string, string>>>;
+}) {
   const example = useQuery({ queryKey: ["example"], queryFn: commands.exampleTestFile });
-  const [text, setText] = useState<string | null>(null);
-  const [imported, setImported] = useState<ImportedCollection | null>(null);
+  const [text, setText] = useState<string | null>(ws.text);
+  // A restored workspace only knows that its text was imported, not the
+  // import's warnings.
+  const [imported, setImported] = useState<ImportedCollection | null>(
+    ws.imported ? { yaml: "", environments: {}, secrets: {}, warnings: [] } : null,
+  );
   // Every environment met so far: a collection's, ones found next to an
   // opened file and ones imported from a file. They stay when another
   // file is opened, until removed.
-  const [envs, setEnvs] = useState<Record<string, Env>>({});
-  const [envName, setEnvName] = useState("");
-  // Secret values typed in, by variable name. Never written to disk.
-  const [secretValues, setSecretValues] = useState<Record<string, string>>({});
+  const [envs, setEnvs] = useState<Record<string, Env>>(ws.environments);
+  const [envName, setEnvName] = useState(ws.environment in ws.environments ? ws.environment : "");
   const [envError, setEnvError] = useState<string | null>(null);
   // Changes to each environment for this session only, by environment name.
   // Runs use them; they reach the file only when saved.
   const [overrides, setOverrides] = useState<Record<string, EnvOverrides>>({});
   const [envEditorOpen, setEnvEditorOpen] = useState(false);
   const panel = usePanel();
-  const [path, setPath] = useState<string | null>(null);
-  const [savedText, setSavedText] = useState<string | null>(null);
-  const [tab, setTab] = useState<"steps" | "flow" | "yaml">("steps");
+  const [path, setPath] = useState<string | null>(ws.path);
+  const [savedText, setSavedText] = useState<string | null>(ws.dirty ? null : ws.text);
+  const [restoreNote, setRestoreNote] = useState<string | null>(null);
+  const [tab, setTab] = useState<"steps" | "flow" | "yaml">(
+    ws.tab === "flow" || ws.tab === "yaml" ? ws.tab : "steps",
+  );
   const [lastRun, setLastRun] = useState<FlowResult | null>(null);
   // What the steps editor shows while its YAML is being written.
   const [draft, setDraft] = useState<TestFile | null>(null);
@@ -210,7 +374,7 @@ function TestFileView() {
   const busy = run.isPending || load.isPending;
   const [setupOpen, setSetupOpen] = useState(false);
   // Steps left out of the last load test, by name, offered again next time.
-  const [excluded, setExcluded] = useState<string[]>([]);
+  const [excluded, setExcluded] = useState<string[]>(ws.excluded);
   /** Saves the setup's load profile and thresholds into the file, then runs the chosen steps. */
   const startLoad = async ({ included, cache, load: profile, thresholds }: LoadSetupChoice) => {
     const test = result?.test;
@@ -276,6 +440,56 @@ function TestFileView() {
     const yaml = await commands.testFileToYaml(next as TestFile_Deserialize);
     if (id === writes.current) setText(yaml);
   };
+
+  // A restored workspace reads its file again, which may have changed
+  // since, and the environments beside it. Unsaved changes are kept.
+  useEffect(() => {
+    if (!ws.path) return;
+    const at = ws.path;
+    let live = true;
+    (async () => {
+      const res = await commands.readTextFile(at);
+      if (!live) return;
+      if (res.status === "error") {
+        console.warn(res.error);
+        setPath(null);
+        setSavedText(null);
+        setRestoreNote(
+          `${at} could not be read; it may have been moved or deleted. The copy kept with this workspace is open instead: save it to keep it.`,
+        );
+        return;
+      }
+      setSavedText(res.data);
+      if (!ws.dirty) setText(res.data);
+      const beside = await commands.environmentsBeside(at);
+      if (!live || beside.status === "error") return;
+      setEnvs((current) => ({
+        ...current,
+        ...Object.fromEntries(
+          beside.data.map((e) => [e.name, { variables: e.variables, secrets: e.secrets, path: e.path }]),
+        ),
+      }));
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // Report what is open, for the workspace to be saved.
+  const title = workspaceTitle(path, result?.test?.flow.name);
+  useEffect(() => {
+    onSnapshot({
+      path,
+      text,
+      dirty,
+      imported: imported != null && path == null,
+      environments: envs,
+      environment: envName,
+      tab,
+      excluded,
+      title,
+    });
+  }, [path, text, dirty, imported, envs, envName, tab, excluded, title]);
 
   const file = useMutation({
     mutationFn: async (action: "open" | "save" | "saveAs") => {
@@ -369,7 +583,13 @@ function TestFileView() {
           </button>
         ))}
         <span className="mono ml-3 min-w-0 flex-1 basis-24 truncate text-xs text-muted" title={path ?? undefined}>
-          {path ? path.split(/[\\/]/).pop() : imported ? "Imported, not saved" : "Unsaved example"}
+          {path
+            ? path.split(/[\\/]/).pop()
+            : imported
+              ? "Imported, not saved"
+              : text == null
+                ? "Unsaved example"
+                : "Not saved to a file"}
           {dirty && <span className="text-warn"> ●</span>}
         </span>
         <FileButton label="Open" icon={<FolderOpen size="0.8125rem" />} onClick={() => file.mutate("open")} />
@@ -431,6 +651,13 @@ function TestFileView() {
         </Banner>
       ) : result?.test ? (
         <>
+          {restoreNote && (
+            <div className="mb-4">
+              <Banner tone="warn" icon={<TriangleAlert size="1rem" />} title="Workspace">
+                {restoreNote}
+              </Banner>
+            </div>
+          )}
           {envError && (
             <div className="mb-4">
               <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="Environment">
@@ -563,7 +790,16 @@ function TestFileView() {
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 whitespace-nowrap border-b border-line bg-surface px-5 py-3">
         <div className="flex min-w-0 flex-1 basis-48 items-baseline gap-3">
           <h1 className="shrink-0 text-[0.9375rem] font-semibold">Test file</h1>
-          <span className="min-w-0 truncate text-xs text-muted">A flow, an optional load profile and thresholds.</span>
+          <button
+            type="button"
+            onClick={onWorkspaces}
+            title="This workspace is saved as you work. Open the list to switch or rename."
+            className="flex min-w-0 items-center gap-1 self-center rounded-md border border-line px-2 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-ink"
+          >
+            <Layers size="0.75rem" className="shrink-0" />
+            <span className="truncate">{workspaceName}</span>
+            <ChevronDown size="0.75rem" className="shrink-0" />
+          </button>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <span className="text-xs text-muted">Import</span>
