@@ -349,6 +349,7 @@ impl Importer {
         self.steps.push(Step {
             name: step,
             enabled: true,
+            cache: false,
             request,
             extract: BTreeMap::new(),
             assertions: Vec::new(),

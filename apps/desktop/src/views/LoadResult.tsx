@@ -100,6 +100,12 @@ export function LoadResult({ report }: { report: LoadReport }) {
           </ul>
         </div>
       )}
+      {!!s.cachedResponses && (
+        <div className="border-t border-line px-4 py-2 text-xs text-muted">
+          {s.cachedResponses} responses came from the cache, for steps marked cached. They were not sent, so they are
+          not in the request count or the latency figures.
+        </div>
+      )}
       {(s.droppedIterations > 0 || s.interruptedIterations > 0) && (
         <div className="border-t border-line px-4 py-2 text-xs text-warn">
           {s.droppedIterations > 0 && `${s.droppedIterations} iterations dropped: too many were already in flight. `}
@@ -231,7 +237,13 @@ function StepTable({ steps }: { steps: StepSummary[] }) {
                 <td className="max-w-0 truncate px-4 py-1.5 font-sans text-[13px]" title={step.name}>
                   {step.name}
                 </td>
-                <td className="px-2 py-1.5 text-right">{step.requests}</td>
+                <td
+                  className="px-2 py-1.5 text-right"
+                  title={step.cached ? `Plus ${step.cached} responses reused from the cache, not sent` : undefined}
+                >
+                  {step.requests}
+                  {!!step.cached && <span className="ml-1 text-accent">+{step.cached} cached</span>}
+                </td>
                 <td
                   className={`px-2 py-1.5 text-right ${step.failed > 0 ? "text-bad" : ""}`}
                   title={step.requests ? `${((step.failed / step.requests) * 100).toFixed(2)}% of requests` : undefined}

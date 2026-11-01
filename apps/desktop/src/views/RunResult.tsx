@@ -59,7 +59,16 @@ function Step({ step, onDetails }: { step: StepResult; onDetails: () => void }) 
           ) : (
             <>
               {step.status != null && <StatusPill status={step.status} />}
-              <span className="mono">{formatMs(step.durationMs ?? 0)}</span>
+              {step.cached ? (
+                <span
+                  className="rounded bg-accent-soft px-1.5 py-px text-accent"
+                  title="Reused from the cache; no request was sent. Clear it in the Flow tab."
+                >
+                  cached
+                </span>
+              ) : (
+                <span className="mono">{formatMs(step.durationMs ?? 0)}</span>
+              )}
               <DetailsButton failed={!passed} onClick={onDetails} />
             </>
           )}

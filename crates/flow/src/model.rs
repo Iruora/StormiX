@@ -41,6 +41,13 @@ pub struct Step {
     /// load tests go straight from the step before it to the step after it.
     #[serde(default = "yes", skip_serializing_if = "is_yes")]
     pub enabled: bool,
+    /// Reuse this step's response instead of sending the request again. The
+    /// first passing response to each distinct request (same method, URL,
+    /// headers and body once variables are filled in) is kept until cleared;
+    /// later runs and load test iterations get it back without a network
+    /// call. Checks, extraction and test scripts still run on it.
+    #[serde(default, skip_serializing_if = "is_no")]
+    pub cache: bool,
     pub request: Request,
     /// Variables to set from the response, by variable name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -199,4 +206,8 @@ fn yes() -> bool {
 
 fn is_yes(value: &bool) -> bool {
     *value
+}
+
+fn is_no(value: &bool) -> bool {
+    !*value
 }

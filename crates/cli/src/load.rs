@@ -290,6 +290,13 @@ fn render_text(report: &LoadReport, title: Option<String>) -> String {
         );
     }
     let _ = writeln!(out, "{iterations}");
+    if s.cached_responses > 0 {
+        let _ = writeln!(
+            out,
+            "  cached      {} responses reused, not sent",
+            s.cached_responses
+        );
+    }
     let checks = s.checks_passed + s.checks_failed;
     if checks > 0 {
         let _ = writeln!(
@@ -320,21 +327,34 @@ fn render_text(report: &LoadReport, title: Option<String>) -> String {
             .max()
             .unwrap_or(0)
             .clamp(4, 40);
+        // Only files with cached steps get the extra column.
+        let cached = s.cached_responses > 0;
         let _ = writeln!(
             out,
-            "\n  {:<width$}  {:>8}  {:>6}  {:>9}  {:>9}  {:>9}",
-            "step", "requests", "failed", "p50", "p95", "p99"
+            "\n  {:<width$}  {:>8}  {:>6}  {:>9}  {:>9}  {:>9}{}",
+            "step",
+            "requests",
+            "failed",
+            "p50",
+            "p95",
+            "p99",
+            if cached { "    cached" } else { "" }
         );
         for st in &s.steps {
             let name: String = st.name.chars().take(width).collect();
             let _ = writeln!(
                 out,
-                "  {name:<width$}  {:>8}  {:>6}  {:>9}  {:>9}  {:>9}",
+                "  {name:<width$}  {:>8}  {:>6}  {:>9}  {:>9}  {:>9}{}",
                 st.requests,
                 st.failed,
                 ms(st.latency.p50),
                 ms(st.latency.p95),
-                ms(st.latency.p99)
+                ms(st.latency.p99),
+                if cached {
+                    format!("  {:>8}", st.cached)
+                } else {
+                    String::new()
+                }
             );
         }
     }

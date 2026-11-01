@@ -224,7 +224,11 @@ fn render_text(result: &FlowResult, verbose: bool) -> String {
             "skipped".to_owned()
         } else {
             let status = step.status.map_or("---".to_owned(), |s| s.to_string());
-            format!("{:<7} {status} {:>6.0} ms", step.method, step.duration_ms)
+            let cached = if step.cached { " (cached)" } else { "" };
+            format!(
+                "{:<7} {status} {:>6.0} ms{cached}",
+                step.method, step.duration_ms
+            )
         };
         let _ = writeln!(out, "  {mark} {:<width$}  {outcome}", step.name);
 
@@ -318,6 +322,7 @@ mod tests {
             logs: Vec::new(),
             error: None,
             skipped: false,
+            cached: false,
             exchange: None,
         }
     }

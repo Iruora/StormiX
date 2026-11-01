@@ -81,12 +81,31 @@ flow:
       request: { method: POST, url: "{{baseUrl}}/v1/pay" }
 ```
 
+### Caching a step
+
+A step with `cache: true` is sent once; after that, runs and load test iterations reuse its response instead of sending the request again. This suits a login or a lookup that every iteration needs but that should not be part of the load.
+
+```yaml
+    - name: Log in
+      cache: true
+      request: { method: POST, url: "{{baseUrl}}/login", body: { json: { user: demo, password: "{{password}}" } } }
+      extract: { token: { json: $.token } }
+```
+
+- A response is kept per distinct request: the same method, URL, headers and body once variables are filled in. Change a variable the request uses and it is sent (and kept) again.
+- Only a response that passed is kept: no error, every check passing, and not a 4xx or 5xx that nothing checks. A failed login is retried on the next run.
+- Pre-request scripts still run first. Assertions, extraction and test scripts run on the reused response, so variables like a token are still set.
+- Reused responses are marked `cached` in results. In a load test they are counted apart (`cached_responses`, and per step), not as requests, and stay out of the latency figures.
+- The cache is kept in memory, for as long as the desktop app (or one `stormix` command) runs. In the desktop app, clear it for one step or for the whole flow from the Flow tab, the Steps tab or the load test setup dialog.
+- Steps without `cache` behave as before: Stormix does not cache HTTP responses otherwise, and sends no cache headers of its own. To ask servers and proxies not to answer from their caches, add a `Cache-Control: no-cache` header to the request.
+
 ## Steps
 
 | Field | Required | |
 |---|---|---|
 | `name` | yes | Unique names make reports and comparisons clearer |
 | `enabled` | no | `false` skips the step in runs and load tests; defaults to `true` |
+| `cache` | no | `true` reuses the step's response instead of sending the request again; defaults to `false`. See [Caching a step](#caching-a-step) |
 | `request` | yes | See below |
 | `extract` | no | Variables to set from the response |
 | `assert` | no | Checks on the response |

@@ -1,7 +1,8 @@
-import { Gauge, TriangleAlert, X } from "lucide-react";
+import { Database, Eraser, Gauge, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { LoadProfile, Step, TestFile } from "../bindings";
+import { cachedTitle, useResponseCache } from "../lib/cache";
 import { describeLoad } from "../lib/describe";
 import { methodText } from "../lib/methods";
 import { DEFAULT_LOAD, LoadEditor, ThresholdsEditor } from "./StepsEditor";
@@ -10,6 +11,8 @@ import { DEFAULT_LOAD, LoadEditor, ThresholdsEditor } from "./StepsEditor";
 export type LoadSetupChoice = {
   /** The steps to load test, in flow order. */
   included: number[];
+  /** Whether each of the flow's steps is cached, by index; saved into the file. */
+  cache: boolean[];
   load: LoadProfile;
   thresholds: string[];
 };
@@ -37,6 +40,9 @@ export function LoadSetup({
   const on = steps.map((s) => s.enabled !== false);
   const offered = on.filter(Boolean).length;
   const [checked, setChecked] = useState<boolean[]>(() => steps.map((s, i) => on[i] && !excluded.includes(s.name)));
+  const [cache, setCache] = useState<boolean[]>(() => steps.map((s) => !!s.cache));
+  const kept = useResponseCache(test.flow.name);
+  const keptCount = steps.filter((s, i) => on[i] && kept.steps.has(s.name)).length;
   const [load, setLoad] = useState<LoadProfile>(test.load ?? DEFAULT_LOAD);
   const [thresholds, setThresholds] = useState<string[]>(test.thresholds ?? []);
   const selected = checked.filter(Boolean).length;
@@ -53,7 +59,7 @@ export function LoadSetup({
   }, [onCancel]);
 
   const broken = useMemo(() => missingVariables(steps, checked), [steps, checked]);
-  const run = () => onRun({ included: checked.flatMap((on, i) => (on ? [i] : [])), load, thresholds });
+  const run = () => onRun({ included: checked.flatMap((on, i) => (on ? [i] : [])), cache, load, thresholds });
 
   return (
     <div
@@ -119,6 +125,39 @@ export function LoadSetup({
                         {step.request.url}
                       </div>
                     </div>
+                    {kept.steps.has(step.name) && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          kept.clear(step.name);
+                        }}
+                        title={`${cachedTitle(kept.steps.get(step.name)!)} Click to clear it.`}
+                        className="flex shrink-0 items-center gap-1 self-center rounded bg-accent-soft px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent hover:text-white"
+                      >
+                        <Eraser size={11} /> cached
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={cache[i]}
+                      aria-label={`Cache ${step.name}`}
+                      title={
+                        cache[i]
+                          ? "Cached: sent once, then every iteration reuses the response. Click to send it every time."
+                          : "Sent every iteration. Click to send it once and reuse the response, like a login."
+                      }
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setCache(cache.map((c, j) => (j === i ? !c : c)));
+                      }}
+                      className={`flex shrink-0 items-center gap-1 self-center rounded px-1.5 py-0.5 text-[11px] ${
+                        cache[i] ? "bg-accent-soft text-accent" : "text-subtle hover:bg-surface-2 hover:text-ink"
+                      }`}
+                    >
+                      <Database size={11} /> {cache[i] ? "cache on" : "cache off"}
+                    </button>
                   </label>
                 </li>
               ))}
@@ -142,11 +181,23 @@ export function LoadSetup({
           <LoadEditor load={load} required onChange={(next) => next && setLoad(next)} />
           <ThresholdsEditor thresholds={thresholds} onChange={setThresholds} />
           <p className="text-xs text-subtle">
-            The load profile and thresholds are saved into the test file. The endpoint choice only applies to this run.
+            The load profile, thresholds and cache settings are saved into the test file. The endpoint choice only
+            applies to this run. A cached endpoint is sent once and its response reused, so it does not count as a
+            request in the results.
           </p>
         </div>
 
         <footer className="flex items-center justify-end gap-2 border-t border-line px-5 py-3">
+          {keptCount > 0 && (
+            <button
+              type="button"
+              onClick={() => kept.clear(null)}
+              title="Forget the cached responses, so cached endpoints are sent again on their first iteration"
+              className="mr-auto flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs text-muted hover:border-accent hover:text-accent"
+            >
+              <Eraser size={12} /> Clear cache ({keptCount} endpoint{keptCount === 1 ? "" : "s"})
+            </button>
+          )}
           <button
             type="button"
             onClick={onCancel}

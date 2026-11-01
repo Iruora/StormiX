@@ -33,6 +33,13 @@ export const commands = {
 	 *  sending [`LoadProgress`] events as it goes.
 	 */
 	runLoadTest: (text: string, variables: { [key in string]: string }, source: string | null) => typedError<LoadReport_Serialize, string>(__TAURI_INVOKE("run_load_test", { text, variables, source })),
+	/**  Steps with a cached response, from steps marked `cache: true`. */
+	cachedSteps: () => __TAURI_INVOKE<CachedStep[]>("cached_steps"),
+	/**
+	 *  Forgets cached responses: one step's (`flow` and `step`), one flow's,
+	 *  or with neither, all of them. Returns how many were forgotten.
+	 */
+	clearCache: (flow: string | null, step: string | null) => __TAURI_INVOKE<number>("clear_cache", { flow, step }),
 	/**  The most recent runs first. */
 	listRuns: (limit: number) => typedError<RunSummary_Serialize[], string>(__TAURI_INVOKE("list_runs", { limit })),
 	getRun: (id: number) => typedError<StoredRun_Serialize, string>(__TAURI_INVOKE("get_run", { id })),
@@ -86,6 +93,16 @@ export type Body =
 ({ form: KeyValue[] }) & { json?: never; multipart?: never; raw?: never } | 
 /**  Sent as `multipart/form-data`, text fields only. */
 ({ multipart: KeyValue[] }) & { form?: never; json?: never; raw?: never };
+
+/**  What the cache holds for one step, for the UI. */
+export type CachedStep = {
+	flow: string,
+	step: string,
+	/**  Distinct requests with a response kept; usually one. */
+	responses: number,
+	/**  When the newest was kept, in milliseconds since the Unix epoch. */
+	storedAt: number | null,
+};
 
 /**  One assertion or extraction and how it went. */
 export type Check = Check_Serialize | Check_Deserialize;
@@ -371,7 +388,7 @@ export type LoadReport = LoadReport_Serialize | LoadReport_Deserialize;
 
 export type LoadReport_Deserialize = {
 	name: string,
-	summary: Summary,
+	summary: Summary_Deserialize,
 	thresholds: ThresholdResult[],
 	/**
 	 *  The first failure of each step, with the request and response, so
@@ -383,7 +400,7 @@ export type LoadReport_Deserialize = {
 
 export type LoadReport_Serialize = {
 	name: string,
-	summary: Summary,
+	summary: Summary_Serialize,
 	thresholds: ThresholdResult[],
 	/**
 	 *  The first failure of each step, with the request and response, so
@@ -462,13 +479,22 @@ export type ResponseRecord_Serialize = {
 	body: Payload | null,
 };
 
-/**  What a run produced. */
+/**
+ *  What a run produced. One is held at a time, on its way to or from the
+ *  database, so the size gap between the variants costs nothing.
+ */
 export type RunData = RunData_Serialize | RunData_Deserialize;
 
-/**  What a run produced. */
+/**
+ *  What a run produced. One is held at a time, on its way to or from the
+ *  database, so the size gap between the variants costs nothing.
+ */
 export type RunData_Deserialize = { kind: "functional"; result: FlowResult_Deserialize } | { kind: "load"; result: LoadReport_Deserialize };
 
-/**  What a run produced. */
+/**
+ *  What a run produced. One is held at a time, on its way to or from the
+ *  database, so the size gap between the variants costs nothing.
+ */
 export type RunData_Serialize = { kind: "functional"; result: FlowResult_Serialize } | { kind: "load"; result: LoadReport_Serialize };
 
 export type RunDiff = RunDiff_Serialize | RunDiff_Deserialize;
@@ -640,6 +666,12 @@ export type StepResult_Deserialize = {
 	/**  Not run because an earlier step failed and the run stops at the first failure. */
 	skipped: boolean,
 	/**
+	 *  The response was reused from the cache (the step has `cache: true`)
+	 *  rather than sent for: no request went out, and the time is the
+	 *  lookup's. Missing from runs saved before 1.4.
+	 */
+	cached?: boolean,
+	/**
 	 *  What was sent and what came back. Kept for every step of a single
 	 *  run; under load, only for failed steps. Missing from runs saved
 	 *  before 1.1.
@@ -670,6 +702,12 @@ export type StepResult_Serialize = {
 	/**  Not run because an earlier step failed and the run stops at the first failure. */
 	skipped: boolean,
 	/**
+	 *  The response was reused from the cache (the step has `cache: true`)
+	 *  rather than sent for: no request went out, and the time is the
+	 *  lookup's. Missing from runs saved before 1.4.
+	 */
+	cached?: boolean,
+	/**
 	 *  What was sent and what came back. Kept for every step of a single
 	 *  run; under load, only for failed steps. Missing from runs saved
 	 *  before 1.1.
@@ -677,11 +715,30 @@ export type StepResult_Serialize = {
 	exchange?: Exchange_Serialize,
 };
 
-export type StepSummary = {
+export type StepSummary = StepSummary_Serialize | StepSummary_Deserialize;
+
+export type StepSummary_Deserialize = {
 	name: string,
 	requests: number,
 	failed: number,
 	latency: Latency,
+	/**
+	 *  Times the step reused a cached response instead of sending a
+	 *  request. Not counted in `requests` or the latency figures.
+	 */
+	cached?: number,
+};
+
+export type StepSummary_Serialize = {
+	name: string,
+	requests: number,
+	failed: number,
+	latency: Latency,
+	/**
+	 *  Times the step reused a cached response instead of sending a
+	 *  request. Not counted in `requests` or the latency figures.
+	 */
+	cached: number,
 };
 
 export type Step_Deserialize = {
@@ -691,6 +748,14 @@ export type Step_Deserialize = {
 	 *  load tests go straight from the step before it to the step after it.
 	 */
 	enabled?: boolean,
+	/**
+	 *  Reuse this step's response instead of sending the request again. The
+	 *  first passing response to each distinct request (same method, URL,
+	 *  headers and body once variables are filled in) is kept until cleared;
+	 *  later runs and load test iterations get it back without a network
+	 *  call. Checks, extraction and test scripts still run on it.
+	 */
+	cache?: boolean,
 	request: Request_Deserialize,
 	/**  Variables to set from the response, by variable name. */
 	extract?: { [key in string]: ExtractSource },
@@ -706,6 +771,14 @@ export type Step_Serialize = {
 	 *  load tests go straight from the step before it to the step after it.
 	 */
 	enabled?: boolean,
+	/**
+	 *  Reuse this step's response instead of sending the request again. The
+	 *  first passing response to each distinct request (same method, URL,
+	 *  headers and body once variables are filled in) is kept until cleared;
+	 *  later runs and load test iterations get it back without a network
+	 *  call. Checks, extraction and test scripts still run on it.
+	 */
+	cache?: boolean,
 	request: Request_Serialize,
 	/**  Variables to set from the response, by variable name. */
 	extract?: { [key in string]: ExtractSource },
@@ -730,7 +803,13 @@ export type StoredRun_Serialize = {
  *  Counts are u32 so they cross to TypeScript as numbers; a load test that
  *  sends four billion requests from one machine is not on the roadmap.
  */
-export type Summary = {
+export type Summary = Summary_Serialize | Summary_Deserialize;
+
+/**
+ *  Counts are u32 so they cross to TypeScript as numbers; a load test that
+ *  sends four billion requests from one machine is not on the roadmap.
+ */
+export type Summary_Deserialize = {
 	durationMs: number | null,
 	iterations: number,
 	failedIterations: number,
@@ -743,13 +822,52 @@ export type Summary = {
 	interruptedIterations: number,
 	requests: number,
 	failedRequests: number,
+	/**
+	 *  Responses reused from the cache by steps marked `cache: true`; no
+	 *  request went out for them, so they are not in `requests`.
+	 */
+	cachedResponses?: number,
 	/**  Requests per second over the whole run. */
 	rps: number | null,
 	latency: Latency,
 	checksPassed: number,
 	checksFailed: number,
 	bytesReceived: number | null,
-	steps: StepSummary[],
+	steps: StepSummary_Deserialize[],
+	/**  The most common reasons requests failed, most frequent first. */
+	failures: Failure[],
+	timeline: Second[],
+};
+
+/**
+ *  Counts are u32 so they cross to TypeScript as numbers; a load test that
+ *  sends four billion requests from one machine is not on the roadmap.
+ */
+export type Summary_Serialize = {
+	durationMs: number | null,
+	iterations: number,
+	failedIterations: number,
+	/**
+	 *  Open models only: iterations that were due but not started because
+	 *  too many were already in flight.
+	 */
+	droppedIterations: number,
+	/**  Still running when the test ended and the grace period ran out. */
+	interruptedIterations: number,
+	requests: number,
+	failedRequests: number,
+	/**
+	 *  Responses reused from the cache by steps marked `cache: true`; no
+	 *  request went out for them, so they are not in `requests`.
+	 */
+	cachedResponses: number,
+	/**  Requests per second over the whole run. */
+	rps: number | null,
+	latency: Latency,
+	checksPassed: number,
+	checksFailed: number,
+	bytesReceived: number | null,
+	steps: StepSummary_Serialize[],
 	/**  The most common reasons requests failed, most frequent first. */
 	failures: Failure[],
 	timeline: Second[],

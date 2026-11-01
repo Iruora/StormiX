@@ -38,6 +38,11 @@ pub struct StepResult {
     pub error: Option<String>,
     /// Not run because an earlier step failed and the run stops at the first failure.
     pub skipped: bool,
+    /// The response was reused from the cache (the step has `cache: true`)
+    /// rather than sent for: no request went out, and the time is the
+    /// lookup's. Missing from runs saved before 1.4.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cached: bool,
     /// What was sent and what came back. Kept for every step of a single
     /// run; under load, only for failed steps. Missing from runs saved
     /// before 1.1.

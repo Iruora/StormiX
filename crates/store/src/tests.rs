@@ -29,6 +29,7 @@ fn step(name: &str, status: u16, checks: &[(&str, bool)]) -> StepResult {
         logs: Vec::new(),
         error: None,
         skipped: false,
+        cached: false,
         exchange: None,
     }
 }

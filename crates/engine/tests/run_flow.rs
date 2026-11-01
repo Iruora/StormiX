@@ -400,3 +400,119 @@ async fn scripts_send_requests_on_a_single_threaded_runtime() {
         .await;
     check_send_from_script(&result);
 }
+
+/// Serves `/count`, which answers with how many times it was called, and
+/// `/fail`, which always answers 500 and counts too.
+async fn serve_counter() -> (String, std::sync::Arc<std::sync::atomic::AtomicU32>) {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+    let calls = Arc::new(AtomicU32::new(0));
+    let (a, b) = (calls.clone(), calls.clone());
+    let app = Router::new()
+        .route(
+            "/count",
+            get(move || async move { (a.fetch_add(1, Ordering::SeqCst) + 1).to_string() }),
+        )
+        .route(
+            "/fail",
+            get(move || async move {
+                b.fetch_add(1, Ordering::SeqCst);
+                StatusCode::INTERNAL_SERVER_ERROR
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (format!("http://{addr}"), calls)
+}
+
+const CACHED: &str = r#"
+  name: cached
+  steps:
+    - name: Token
+      cache: true
+      request: { method: GET, url: "{{base}}/count?user={{user}}" }
+      extract: { first: { regex: "\\d+" } }
+      assert: [{ status: 200 }]
+    - name: Live
+      request: { method: GET, url: "{{base}}/count" }
+"#;
+
+#[tokio::test]
+async fn a_cached_step_reuses_its_response_until_cleared() {
+    use std::sync::atomic::Ordering;
+    let (url, calls) = serve_counter().await;
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let mut vars = base(&url);
+    vars.set("user", "a");
+    let f = flow(CACHED);
+
+    let first = runner.run(&f, &vars).await;
+    assert!(!first.steps[0].cached && !first.steps[1].cached);
+    assert_eq!(first.steps[0].extracted["first"], "1");
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+    // A clone shares the cache, as load test iterations do.
+    let second = runner.clone().run(&f, &vars).await;
+    assert!(second.steps[0].cached, "{second:#?}");
+    assert!(!second.steps[1].cached);
+    // Checks and extraction ran on the kept response.
+    assert!(second.passed(), "{second:#?}");
+    assert_eq!(second.steps[0].extracted["first"], "1");
+    assert_eq!(second.steps[0].status, Some(200));
+    assert!(second.steps[0].exchange.is_some());
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        3,
+        "only the live step was sent"
+    );
+
+    let steps = runner.cache().steps();
+    assert_eq!(steps.len(), 1);
+    assert_eq!(
+        (steps[0].flow.as_str(), steps[0].step.as_str()),
+        ("cached", "Token")
+    );
+    assert_eq!(steps[0].responses, 1);
+
+    // Another value in the request is another request: sent and kept apart.
+    vars.set("user", "b");
+    let other = runner.run(&f, &vars).await;
+    assert!(!other.steps[0].cached);
+    assert_eq!(other.steps[0].extracted["first"], "4");
+    assert_eq!(runner.cache().steps()[0].responses, 2);
+
+    // Clearing another step leaves this one; clearing this one empties it.
+    assert_eq!(runner.cache().clear(Some("cached"), Some("Live")), 0);
+    assert_eq!(runner.cache().clear(Some("cached"), Some("Token")), 2);
+    assert!(runner.cache().is_empty());
+    let after = runner.run(&f, &vars).await;
+    assert!(!after.steps[0].cached);
+    assert_eq!(after.steps[0].extracted["first"], "6");
+
+    assert_eq!(runner.cache().clear(None, None), 1);
+}
+
+#[tokio::test]
+async fn steps_without_cache_and_failed_responses_are_not_kept() {
+    use std::sync::atomic::Ordering;
+    let (url, calls) = serve_counter().await;
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let f = flow(
+        r#"
+  name: uncached
+  steps:
+    - name: Plain
+      request: { method: GET, url: "{{base}}/count" }
+    - name: Broken
+      cache: true
+      request: { method: GET, url: "{{base}}/fail" }
+"#,
+    );
+    for _ in 0..2 {
+        let result = runner.run(&f, &base(&url)).await;
+        assert!(result.steps.iter().all(|s| !s.cached), "{result:#?}");
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+    assert!(runner.cache().is_empty());
+}

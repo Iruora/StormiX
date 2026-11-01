@@ -249,6 +249,10 @@ async fn drive(
 
 fn record(recorder: &mut Recorder, samples: &mut Vec<StepResult>, result: FlowResult) {
     for step in result.steps.iter().filter(|s| !s.skipped) {
+        if step.cached {
+            recorder.cached(&step.name);
+            continue;
+        }
         let failed: Vec<&str> = step
             .checks
             .iter()

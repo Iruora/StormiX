@@ -55,6 +55,8 @@ struct Stats {
     checks_passed: u64,
     checks_failed: u64,
     bytes: u64,
+    /// Responses reused from the cache, not sent for, so not requests.
+    cached: u64,
 }
 
 impl Stats {
@@ -69,6 +71,7 @@ impl Stats {
             checks_passed: 0,
             checks_failed: 0,
             bytes: 0,
+            cached: 0,
         }
     }
 
@@ -153,6 +156,10 @@ pub struct StepSummary {
     pub requests: u32,
     pub failed: u32,
     pub latency: Latency,
+    /// Times the step reused a cached response instead of sending a
+    /// request. Not counted in `requests` or the latency figures.
+    #[serde(default)]
+    pub cached: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -180,6 +187,10 @@ pub struct Summary {
     pub interrupted_iterations: u32,
     pub requests: u32,
     pub failed_requests: u32,
+    /// Responses reused from the cache by steps marked `cache: true`; no
+    /// request went out for them, so they are not in `requests`.
+    #[serde(default)]
+    pub cached_responses: u32,
     /// Requests per second over the whole run.
     pub rps: f64,
     pub latency: Latency,
@@ -276,6 +287,20 @@ impl Recorder {
         }
     }
 
+    /// A step that reused a cached response. It shows in the step table but
+    /// adds no request, latency or check counts.
+    pub fn cached(&mut self, step: &str) {
+        self.total.cached += 1;
+        match self.steps.iter_mut().find(|(name, _)| name == step) {
+            Some((_, stats)) => stats.cached += 1,
+            None => {
+                let mut stats = Stats::new();
+                stats.cached = 1;
+                self.steps.push((step.to_owned(), stats));
+            }
+        }
+    }
+
     fn fail(&mut self, reason: String) {
         // Bounded, so a URL with a random id in every error cannot grow it
         // without limit; the rest still count in `failed_requests`.
@@ -335,6 +360,7 @@ impl Recorder {
             interrupted_iterations: self.interrupted_iterations,
             requests: self.total.requests as u32,
             failed_requests: self.total.failed as u32,
+            cached_responses: self.total.cached as u32,
             rps: if secs > 0.0 {
                 self.total.requests as f64 / secs
             } else {
@@ -352,6 +378,7 @@ impl Recorder {
                     requests: stats.requests as u32,
                     failed: stats.failed as u32,
                     latency: stats.latency(),
+                    cached: stats.cached as u32,
                 })
                 .collect(),
             failures,

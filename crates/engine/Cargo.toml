@@ -11,6 +11,7 @@ license.workspace = true
 specta = ["dep:specta", "stormix-flow/specta", "stormix-metrics/specta"]
 
 [dependencies]
+bytes.workspace = true
 fastrand.workspace = true
 regex.workspace = true
 reqwest.workspace = true

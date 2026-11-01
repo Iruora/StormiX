@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Flows
+
+- Steps can cache their response with `cache: true`. A cached step is sent once; later runs and load test iterations reuse the response (checks, extraction and test scripts still run on it) until the cache is cleared. Only passing responses are kept, one per distinct request. In load test results, reused responses are counted apart from requests and kept out of the latency figures. Files without `cache` run as before.
+- Desktop app: turn caching on or off per step in the Flow tab (database icon), the Steps tab and the load test setup dialog. Steps with a cached response show **cached**; clear one step's cache there, or the whole flow's with **Clear cache**. Results mark steps that came from the cache.
+
 ## 1.3.1 (2026-11-01)
 
 ### Downloads

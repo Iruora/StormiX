@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::error::Error as _;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use reqwest::header::{HeaderMap, CONTENT_TYPE};
@@ -11,6 +12,7 @@ use stormix_script::{
     self as script, Phase, ScriptInput, ScriptRequest, ScriptResponse, TestOutcome,
 };
 
+use crate::cache::{Key, ResponseCache};
 use crate::checks::{self, Response};
 use crate::result::{Exchange, HeaderPair, Payload, ResponseRecord};
 use crate::{Check, FlowResult, StepResult, Variables};
@@ -57,17 +59,29 @@ pub enum RunnerError {
     Client(#[from] reqwest::Error),
 }
 
-/// Holds one HTTP client, so connections are reused across steps and runs.
+/// Holds one HTTP client, so connections are reused across steps and runs,
+/// and the responses kept for steps marked `cache: true`.
 #[derive(Debug, Clone)]
 pub struct Runner {
     client: reqwest::Client,
     options: RunOptions,
+    cache: Arc<ResponseCache>,
 }
 
 impl Runner {
     pub fn new(options: RunOptions) -> Result<Self, RunnerError> {
         let client = build_client(&options)?;
-        Ok(Self { client, options })
+        Ok(Self {
+            client,
+            options,
+            cache: Arc::default(),
+        })
+    }
+
+    /// The responses kept for cached steps, shared by every clone of this
+    /// runner. Clear it to make those steps send their requests again.
+    pub fn cache(&self) -> &ResponseCache {
+        &self.cache
     }
 
     /// Sends a request for `bru.sendRequest` / `pm.sendRequest`, with the
@@ -124,7 +138,7 @@ impl Runner {
                 steps.push(skipped(step));
                 continue;
             }
-            let result = self.run_step(step, &mut vars).await;
+            let result = self.run_step(&flow.name, step, &mut vars).await;
             stopped = self.options.bail && !result.passed();
             steps.push(result);
         }
@@ -137,7 +151,9 @@ impl Runner {
 
     /// Sends one step's request and checks the response. Variables the step
     /// extracts, or its scripts set, are kept in `vars` for the steps after it.
-    pub async fn run_step(&self, step: &Step, vars: &mut Variables) -> StepResult {
+    /// A step marked `cache: true` takes a kept response for the same request
+    /// instead of sending it; `flow` names the flow it is kept under.
+    pub async fn run_step(&self, flow: &str, step: &Step, vars: &mut Variables) -> StepResult {
         let mut checks = Vec::new();
         let mut logs = Vec::new();
         let mut outgoing = Outgoing::from(&step.request);
@@ -185,6 +201,7 @@ impl Runner {
             logs,
             error: None,
             skipped: false,
+            cached: false,
             exchange: None,
         };
         let method = match reqwest::Method::from_bytes(outgoing.method.as_bytes()) {
@@ -245,33 +262,43 @@ impl Runner {
                 return result;
             }
         };
+        let cache_key = step
+            .cache
+            .then(|| Key::new(flow, &step.name, &request, multipart_text.as_deref()));
         let sent = Sent::of(&request, multipart_text);
 
         let started = Instant::now();
-        let response = match self.client.execute(request).await {
-            Ok(response) => response,
-            Err(err) => {
-                result.duration_ms = millis(started.elapsed());
-                result.error = Some(describe(&err, self.options.timeout));
-                result.exchange = Some(sent.into_exchange(None));
-                return result;
-            }
-        };
-        result.time_to_headers_ms = Some(millis(started.elapsed()));
-        let status = response.status();
-        let headers = response.headers().clone();
-        let body = match response.bytes().await {
-            Ok(body) => body,
-            Err(err) => {
-                result.duration_ms = millis(started.elapsed());
-                result.status = Some(status.as_u16());
-                result.error = Some(describe(&err, self.options.timeout));
-                result.exchange = Some(sent.into_exchange(Some(ResponseRecord {
-                    status_text: status.canonical_reason().unwrap_or_default().to_owned(),
-                    headers: header_pairs(&headers),
-                    body: None,
-                })));
-                return result;
+        let kept = cache_key.as_ref().and_then(|key| self.cache.get(key));
+        let (status, headers, body) = if let Some(kept) = kept {
+            result.cached = true;
+            result.time_to_headers_ms = Some(millis(started.elapsed()));
+            (kept.status, kept.headers.clone(), kept.body.clone())
+        } else {
+            let response = match self.client.execute(request).await {
+                Ok(response) => response,
+                Err(err) => {
+                    result.duration_ms = millis(started.elapsed());
+                    result.error = Some(describe(&err, self.options.timeout));
+                    result.exchange = Some(sent.into_exchange(None));
+                    return result;
+                }
+            };
+            result.time_to_headers_ms = Some(millis(started.elapsed()));
+            let status = response.status();
+            let headers = response.headers().clone();
+            match response.bytes().await {
+                Ok(body) => (status, headers, body),
+                Err(err) => {
+                    result.duration_ms = millis(started.elapsed());
+                    result.status = Some(status.as_u16());
+                    result.error = Some(describe(&err, self.options.timeout));
+                    result.exchange = Some(sent.into_exchange(Some(ResponseRecord {
+                        status_text: status.canonical_reason().unwrap_or_default().to_owned(),
+                        headers: header_pairs(&headers),
+                        body: None,
+                    })));
+                    return result;
+                }
             }
         };
         result.duration_ms = millis(started.elapsed());
@@ -335,6 +362,15 @@ impl Runner {
                 .checks
                 .extend(script_checks("test script", out.tests, out.error));
             result.logs.extend(out.logs);
+        }
+        // Only a response that passed is worth reusing: a failed login kept
+        // would fail every run after it until cleared. As under load, a 4xx
+        // or 5xx nothing checked counts as failed.
+        if let Some(key) = cache_key {
+            let unchecked_error = result.checks.is_empty() && status.as_u16() >= 400;
+            if !result.cached && result.passed() && !unchecked_error {
+                self.cache.put(key, status, headers.clone(), body.clone());
+            }
         }
         // Under load an unchecked 4xx or 5xx counts as failed too.
         if self.options.exchanges == Exchanges::All || !result.passed() || status.as_u16() >= 400 {
@@ -551,6 +587,7 @@ fn skipped(step: &Step) -> StepResult {
         logs: Vec::new(),
         error: None,
         skipped: true,
+        cached: false,
         exchange: None,
     }
 }

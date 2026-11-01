@@ -207,3 +207,46 @@ load:
     assert_eq!(report.summary.iterations, 0);
     assert!(report.passed(), "no thresholds, so nothing to fail");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cached_steps_are_counted_apart_from_requests() {
+    let url = serve().await;
+    let test = test_file(
+        r#"
+flow:
+  name: cached
+  steps:
+    - name: setup
+      cache: true
+      request: { method: GET, url: "{{base}}/fast" }
+      assert: [{ status: 200 }]
+    - name: fast
+      request: { method: GET, url: "{{base}}/fast" }
+load:
+  virtual_users: { count: 1, duration: 1s }
+"#,
+    );
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(&url),
+        test.load.as_ref().unwrap(),
+        &[],
+        &LoadOptions::default(),
+        |_| {},
+    )
+    .await;
+
+    let s = &report.summary;
+    assert!(s.iterations > 2, "{s:?}");
+    // One user, so only its first iteration had to send the setup request.
+    assert_eq!(s.cached_responses, s.iterations - 1);
+    assert_eq!(s.requests, s.iterations + 1);
+    let setup = &s.steps[0];
+    assert_eq!(
+        (setup.name.as_str(), setup.requests, setup.cached),
+        ("setup", 1, s.iterations - 1)
+    );
+    assert_eq!(s.failed_iterations, 0);
+}

@@ -25,6 +25,7 @@ fn step(name: &str, status: u16, passed: bool) -> StepResult {
         logs: vec!["hello".into()],
         error: None,
         skipped: false,
+        cached: false,
         exchange: None,
     }
 }

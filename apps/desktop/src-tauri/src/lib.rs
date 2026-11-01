@@ -18,6 +18,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::read_environment,
             commands::environments_beside,
             commands::run_load_test,
+            commands::cached_steps,
+            commands::clear_cache,
             commands::list_runs,
             commands::get_run,
             commands::delete_run,

@@ -6,7 +6,9 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use stormix_engine::{run_load, FlowResult, LoadOptions, LoadReport, Runner, Variables};
+use stormix_engine::{
+    run_load, CachedStep, FlowResult, LoadOptions, LoadReport, Runner, Variables,
+};
 use stormix_flow::{Issue, Severity, TestFile};
 use stormix_store::{RunData, RunDiff, RunSummary, Store, StoredRun};
 use tauri::{AppHandle, State};
@@ -230,6 +232,21 @@ pub async fn run_test_file(
         source.as_deref(),
     );
     Ok(result)
+}
+
+/// Steps with a cached response, from steps marked `cache: true`.
+#[tauri::command]
+#[specta::specta]
+pub fn cached_steps(runner: State<'_, Runner>) -> Vec<CachedStep> {
+    runner.cache().steps()
+}
+
+/// Forgets cached responses: one step's (`flow` and `step`), one flow's,
+/// or with neither, all of them. Returns how many were forgotten.
+#[tauri::command]
+#[specta::specta]
+pub fn clear_cache(flow: Option<String>, step: Option<String>, runner: State<'_, Runner>) -> u32 {
+    runner.cache().clear(flow.as_deref(), step.as_deref()) as u32
 }
 
 /// The most recent runs first.
