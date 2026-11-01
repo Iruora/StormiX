@@ -350,6 +350,9 @@ function encodeFields(fields: KeyValue[]): string {
   return fields.map((f) => `${f.key}=${f.value}`).join("&");
 }
 
+/** The profile a load test starts from when the file has none. */
+export const DEFAULT_LOAD: LoadProfile = { constant_rate: { rate: 10, duration: "30s" } };
+
 type LoadKind = "none" | "constant_rate" | "ramping" | "virtual_users";
 
 function loadKind(load: LoadProfile | null): LoadKind {
@@ -366,11 +369,20 @@ const LOAD_LABELS: Record<LoadKind, string> = {
   virtual_users: "Virtual users",
 };
 
-function LoadEditor({ load, onChange }: { load: LoadProfile | null; onChange: (load: LoadProfile | null) => void }) {
+/** Picks and edits the load profile. `required` leaves out "None (run once)". */
+export function LoadEditor({
+  load,
+  required,
+  onChange,
+}: {
+  load: LoadProfile | null;
+  required?: boolean;
+  onChange: (load: LoadProfile | null) => void;
+}) {
   const kind = loadKind(load);
   const switchTo = (next: LoadKind) => {
     if (next === "none") onChange(null);
-    else if (next === "constant_rate") onChange({ constant_rate: { rate: 10, duration: "30s" } });
+    else if (next === "constant_rate") onChange(DEFAULT_LOAD);
     else if (next === "ramping")
       onChange({ ramping: { start_rate: 0, stages: [{ duration: "30s", target: 20 }, { duration: "1m", target: 20 }] } });
     else onChange({ virtual_users: { count: 10, duration: "30s", think_time: null } });
@@ -386,7 +398,7 @@ function LoadEditor({ load, onChange }: { load: LoadProfile | null; onChange: (l
           onChange={(e) => switchTo(e.target.value as LoadKind)}
           className={`${input} ml-auto text-xs`}
         >
-          {(Object.keys(LOAD_LABELS) as LoadKind[]).map((k) => (
+          {(Object.keys(LOAD_LABELS) as LoadKind[]).filter((k) => !required || k !== "none").map((k) => (
             <option key={k} value={k}>
               {LOAD_LABELS[k]}
             </option>
@@ -482,7 +494,7 @@ function Field({
 
 const THRESHOLD_HINT = "e.g. p95 < 200ms, errors < 1%, checks > 99%, rps > 50";
 
-function ThresholdsEditor({ thresholds, onChange }: { thresholds: string[]; onChange: (t: string[]) => void }) {
+export function ThresholdsEditor({ thresholds, onChange }: { thresholds: string[]; onChange: (t: string[]) => void }) {
   const [draft, setDraft] = useState("");
   const add = () => {
     const t = draft.trim();
