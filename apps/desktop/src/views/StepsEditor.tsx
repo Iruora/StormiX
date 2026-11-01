@@ -9,7 +9,7 @@ import { VarField } from "./VarField";
 const METHODS: Method[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
 const input =
-  "rounded-md border border-line bg-surface px-2 py-1 text-[13px] outline-none focus:border-accent";
+  "rounded-md border border-line bg-surface px-2 py-1 text-[0.8125rem] outline-none focus:border-accent";
 
 /**
  * Edits the parsed test file as forms: the flow's steps, the load profile and
@@ -68,9 +68,9 @@ export function StepsEditor({ test, onChange }: { test: TestFile; onChange: (nex
             { name: `Step ${steps.length + 1}`, request: { method: "GET", url: "{{baseUrl}}/" }, assert: [{ status: 200 }] },
           ])
         }
-        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-line py-2 text-[13px] text-muted hover:border-accent hover:text-accent"
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-line py-2 text-[0.8125rem] text-muted hover:border-accent hover:text-accent"
       >
-        <Plus size={14} /> Add a step
+        <Plus size="0.875rem" /> Add a step
       </button>
 
       <LoadEditor load={test.load ?? null} onChange={(load) => onChange({ ...test, load })} />
@@ -122,63 +122,66 @@ function StepCard({
       id={`step-${index}`}
       className={`scroll-mt-4 rounded-lg border bg-surface ${on ? "border-line" : "border-dashed border-line opacity-70"}`}
     >
-      <div className="flex items-center gap-2 border-b border-line px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
         <span className="w-5 text-right text-xs text-subtle">{index + 1}</span>
         <input
           aria-label={`Step ${index + 1} name`}
           value={step.name}
           onChange={(e) => onChange({ ...step, name: e.target.value })}
-          className="min-w-0 flex-1 bg-transparent font-medium outline-none"
+          className="min-w-0 flex-1 basis-32 bg-transparent font-medium outline-none"
         />
-        {!on && <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-subtle">turned off, skipped in runs</span>}
-        <label className="flex items-center gap-1 text-xs text-subtle" title="Off steps keep their place but are not sent">
-          <input
-            type="checkbox"
-            aria-label="Run this step"
-            checked={on}
-            onChange={() => onChange({ ...step, enabled: !on })}
-            className="accent-[var(--accent)]"
-          />
-          run
-        </label>
-        <label
-          className="flex items-center gap-1 text-xs text-subtle"
-          title="Reuse this step's response in later runs and load test iterations instead of sending it again"
-        >
-          <input
-            type="checkbox"
-            aria-label="Cache this step's response"
-            checked={!!step.cache}
-            onChange={() => onChange({ ...step, cache: !step.cache })}
-            className="accent-[var(--accent)]"
-          />
-          cache
-        </label>
-        {cached && (
-          <button
-            type="button"
-            onClick={onClearCache}
-            title={`${cachedTitle(cached)} Click to clear it.`}
-            className="flex items-center gap-1 rounded bg-accent-soft px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent hover:text-white"
+        {!on && <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[0.6875rem] text-subtle">turned off, skipped in runs</span>}
+        {/* The step's controls stay together when the header wraps. */}
+        <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
+          <label className="flex items-center gap-1 text-xs text-subtle" title="Off steps keep their place but are not sent">
+            <input
+              type="checkbox"
+              aria-label="Run this step"
+              checked={on}
+              onChange={() => onChange({ ...step, enabled: !on })}
+              className="accent-[var(--accent)]"
+            />
+            run
+          </label>
+          <label
+            className="flex items-center gap-1 text-xs text-subtle"
+            title="Reuse this step's response in later runs and load test iterations instead of sending it again"
           >
-            <Eraser size={11} /> clear cached
-          </button>
-        )}
-        <IconButton label="Move up" disabled={index === 0} onClick={() => onMove(index - 1)}>
-          <ArrowUp size={14} />
-        </IconButton>
-        <IconButton label="Move down" disabled={last} onClick={() => onMove(index + 1)}>
-          <ArrowDown size={14} />
-        </IconButton>
-        <IconButton label="Duplicate" onClick={onDuplicate}>
-          <Copy size={14} />
-        </IconButton>
-        <IconButton label="Delete" onClick={onDelete}>
-          <Trash2 size={14} />
-        </IconButton>
+            <input
+              type="checkbox"
+              aria-label="Cache this step's response"
+              checked={!!step.cache}
+              onChange={() => onChange({ ...step, cache: !step.cache })}
+              className="accent-[var(--accent)]"
+            />
+            cache
+          </label>
+          {cached && (
+            <button
+              type="button"
+              onClick={onClearCache}
+              title={`${cachedTitle(cached)} Click to clear it.`}
+              className="flex items-center gap-1 rounded bg-accent-soft px-1.5 py-0.5 text-[0.6875rem] text-accent hover:bg-accent hover:text-white"
+            >
+              <Eraser size="0.6875rem" /> clear cached
+            </button>
+          )}
+          <IconButton label="Move up" disabled={index === 0} onClick={() => onMove(index - 1)}>
+            <ArrowUp size="0.875rem" />
+          </IconButton>
+          <IconButton label="Move down" disabled={last} onClick={() => onMove(index + 1)}>
+            <ArrowDown size="0.875rem" />
+          </IconButton>
+          <IconButton label="Duplicate" onClick={onDuplicate}>
+            <Copy size="0.875rem" />
+          </IconButton>
+          <IconButton label="Delete" onClick={onDelete}>
+            <Trash2 size="0.875rem" />
+          </IconButton>
+        </div>
       </div>
       <div className="space-y-2 px-3 py-2.5">
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <select
             aria-label="Method"
             value={request.method}
@@ -195,7 +198,7 @@ function StepCard({
             aria-label="URL"
             value={request.url}
             onChange={(url) => setRequest({ url })}
-            wrap="flex-1"
+            wrap="min-w-0 flex-1 basis-48"
             className={`${input} mono text-xs`}
           />
           <label className="flex items-center gap-1.5 text-xs text-subtle">
@@ -250,7 +253,7 @@ function Pairs({
           className="ml-1 rounded px-1 hover:bg-surface-2 hover:text-accent"
           aria-label={`Add to ${label.toLowerCase()}`}
         >
-          <Plus size={12} />
+          <Plus size="0.75rem" />
         </button>
       </div>
       {rows.map(([k, v], i) => (
@@ -267,11 +270,11 @@ function Pairs({
             placeholder={placeholder[1]}
             value={v}
             onChange={(value) => onChange(rows.map((r, j) => (j === i ? [r[0], value] : r)))}
-            wrap="flex-1"
+            wrap="min-w-0 flex-1 basis-48"
             className={`${input} mono text-xs`}
           />
           <IconButton label="Remove" onClick={() => onChange(rows.filter((_, j) => j !== i))}>
-            <X size={13} />
+            <X size="0.8125rem" />
           </IconButton>
         </div>
       ))}
@@ -498,7 +501,7 @@ function RampEditor({ ramp, onChange }: { ramp: Ramp; onChange: (ramp: Ramp) => 
           <Field label="to /s" value={stage.target} number onChange={(v) => onChange({ ...ramp, stages: stages.map((s, j) => (j === i ? { ...s, target: Number(v) } : s)) })} />
           <Field label="over" value={stage.duration} onChange={(v) => onChange({ ...ramp, stages: stages.map((s, j) => (j === i ? { ...s, duration: v } : s)) })} />
           <IconButton label="Remove stage" disabled={stages.length === 1} onClick={() => onChange({ ...ramp, stages: stages.filter((_, j) => j !== i) })}>
-            <X size={13} />
+            <X size="0.8125rem" />
           </IconButton>
         </div>
       ))}
@@ -507,7 +510,7 @@ function RampEditor({ ramp, onChange }: { ramp: Ramp; onChange: (ramp: Ramp) => 
         onClick={() => onChange({ ...ramp, stages: [...stages, { duration: "30s", target: stages[stages.length - 1]?.target ?? 10 }] })}
         className="flex items-center gap-1 text-subtle hover:text-accent"
       >
-        <Plus size={12} /> Add a stage
+        <Plus size="0.75rem" /> Add a stage
       </button>
     </div>
   );
@@ -561,7 +564,7 @@ export function ThresholdsEditor({ thresholds, onChange }: { thresholds: string[
           <span key={t} className="mono flex items-center gap-1 rounded bg-surface-2 py-0.5 pl-1.5 pr-0.5 text-xs">
             {t}
             <IconButton label={`Remove ${t}`} onClick={() => onChange(thresholds.filter((x) => x !== t))}>
-              <X size={12} />
+              <X size="0.75rem" />
             </IconButton>
           </span>
         ))}

@@ -12,8 +12,8 @@ export function LoadLive({ points }: { points: LoadProgress[] }) {
   const elapsed = Math.min(last?.elapsedS ?? 0, total);
   return (
     <section className="mt-4 rounded-lg border border-line bg-surface">
-      <div className="flex items-center gap-2 border-b border-line px-4 py-3">
-        <LoaderCircle size={16} className="animate-spin text-accent" />
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line px-4 py-3">
+        <LoaderCircle size="1rem" className="animate-spin text-accent" />
         <span className="font-semibold">Load test running</span>
         <span className="ml-auto text-xs text-muted">
           {elapsed}s of {total}s
@@ -22,7 +22,7 @@ export function LoadLive({ points }: { points: LoadProgress[] }) {
       <div className="h-1 bg-surface-2">
         <div className="h-1 bg-accent transition-all" style={{ width: total ? `${(elapsed / total) * 100}%` : "0%" }} />
       </div>
-      <div className="grid grid-cols-4 gap-3 px-4 py-3">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(5rem,1fr))] gap-3 px-4 py-3">
         <Stat label="req/s" value={last ? String(last.requests) : "–"} />
         <Stat label="p95" value={last ? formatMs(last.p95Ms ?? 0) : "–"} />
         <Stat label="failed/s" value={last ? String(last.failed) : "–"} tone={last && last.failed > 0 ? "bad" : undefined} />
@@ -46,8 +46,8 @@ export function LoadResult({ report }: { report: LoadReport }) {
     samples.find((x) => reason.startsWith(`${x.name}: `) || (x.error != null && reason === x.error));
   return (
     <section className="mt-4 rounded-lg border border-line bg-surface">
-      <div className="flex items-center gap-2 border-b border-line px-4 py-3">
-        {passed ? <CircleCheck size={16} className="text-ok" /> : <CircleX size={16} className="text-bad" />}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line px-4 py-3">
+        {passed ? <CircleCheck size="1rem" className="text-ok" /> : <CircleX size="1rem" className="text-bad" />}
         <span className="font-semibold">
           {report.thresholds.length === 0 ? "Load test finished" : passed ? "Thresholds held" : "Thresholds failed"}
         </span>
@@ -61,7 +61,7 @@ export function LoadResult({ report }: { report: LoadReport }) {
           <span className="text-subtle">Set up once before the load, not measured:</span>
           {(report.setup ?? []).map((st, i) => (
             <span key={i} className={`ml-2 inline-flex items-center gap-1 ${stepPassed(st) ? "text-muted" : "text-bad"}`}>
-              {stepPassed(st) ? <CircleCheck size={12} className="text-ok" /> : <CircleX size={12} />}
+              {stepPassed(st) ? <CircleCheck size="0.75rem" className="text-ok" /> : <CircleX size="0.75rem" />}
               {st.name}
               <span className="mono">
                 {st.error ?? `${st.status ?? "—"} · ${st.cached ? "cached" : formatMs(st.durationMs ?? 0)}`}
@@ -72,7 +72,7 @@ export function LoadResult({ report }: { report: LoadReport }) {
         </div>
       )}
 
-      <div className="grid grid-cols-4 gap-3 px-4 py-3">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(5rem,1fr))] gap-3 px-4 py-3">
         <Stat label="requests" value={String(s.requests)} />
         <Stat label="req/s" value={(s.rps ?? 0).toFixed(1)} />
         <Stat label="p95" value={formatMs(l.p95 ?? 0)} />
@@ -102,7 +102,7 @@ export function LoadResult({ report }: { report: LoadReport }) {
       {s.failures.length > 0 && (
         <div className="border-t border-line px-4 py-3">
           <div className="mb-1 text-xs font-medium text-subtle">Most common failures</div>
-          <ul className="space-y-0.5 text-[13px]">
+          <ul className="space-y-0.5 text-[0.8125rem]">
             {s.failures.map((f) => {
               const sample = sampleFor(f.reason);
               return (
@@ -185,7 +185,7 @@ function StepTable({ steps }: { steps: StepSummary[] }) {
     <div className="border-t border-line">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 text-xs">
         <label className="flex min-w-36 flex-1 items-center gap-1.5 rounded-md border border-line px-2 py-0.5 focus-within:border-accent">
-          <Search size={12} className="text-subtle" />
+          <Search size="0.75rem" className="text-subtle" />
           <input
             aria-label="Filter steps by name"
             placeholder="Filter steps"
@@ -222,7 +222,7 @@ function StepTable({ steps }: { steps: StepSummary[] }) {
         )}
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-[13px]">
+        <table className="w-full text-[0.8125rem]">
           <thead className="whitespace-nowrap text-xs text-subtle">
             <tr>
               {COLUMNS.map((c, i) => {
@@ -240,7 +240,7 @@ function StepTable({ steps }: { steps: StepSummary[] }) {
                       className={`inline-flex items-center gap-0.5 hover:text-ink ${active ? "text-ink" : ""} ${c.key === "name" ? "" : "flex-row-reverse"}`}
                     >
                       {c.label}
-                      <Icon size={11} className={active ? "" : "opacity-40"} />
+                      <Icon size="0.6875rem" className={active ? "" : "opacity-40"} />
                     </button>
                   </th>
                 );
@@ -250,7 +250,7 @@ function StepTable({ steps }: { steps: StepSummary[] }) {
           <tbody className="mono whitespace-nowrap text-xs">
             {rows.map((step, i) => (
               <tr key={`${step.name}-${i}`} className="border-t border-line">
-                <td className="max-w-0 truncate px-4 py-1.5 font-sans text-[13px]" title={step.name}>
+                <td className="max-w-0 truncate px-4 py-1.5 font-sans text-[0.8125rem]" title={step.name}>
                   {step.name}
                 </td>
                 <td
@@ -272,7 +272,7 @@ function StepTable({ steps }: { steps: StepSummary[] }) {
             ))}
             {rows.length === 0 && (
               <tr className="border-t border-line">
-                <td colSpan={COLUMNS.length} className="px-4 py-3 text-center font-sans text-[13px] text-subtle">
+                <td colSpan={COLUMNS.length} className="px-4 py-3 text-center font-sans text-[0.8125rem] text-subtle">
                   No step matches these filters.
                 </td>
               </tr>
@@ -294,14 +294,14 @@ function Threshold({ result }: { result: ThresholdResult }) {
         ? `${actual.toFixed(1)}/s`
         : formatMs(actual);
   return (
-    <li className="flex items-center gap-2 text-[13px]">
+    <li className="flex items-center gap-2 text-[0.8125rem]">
       {result.passed ? (
-        <CircleCheck size={14} className="shrink-0 text-ok" />
+        <CircleCheck size="0.875rem" className="shrink-0 text-ok" />
       ) : (
-        <CircleX size={14} className="shrink-0 text-bad" />
+        <CircleX size="0.875rem" className="shrink-0 text-bad" />
       )}
-      <span className="mono text-xs">{result.threshold}</span>
-      <span className={`ml-auto mono text-xs ${result.passed ? "text-muted" : "text-bad"}`}>{measured}</span>
+      <span className="mono min-w-0 break-words text-xs">{result.threshold}</span>
+      <span className={`mono ml-auto shrink-0 text-xs ${result.passed ? "text-muted" : "text-bad"}`}>{measured}</span>
     </li>
   );
 }
@@ -310,7 +310,7 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "ok
   const color = tone === "bad" ? "text-bad" : tone === "ok" ? "text-ok" : "text-ink";
   return (
     <div>
-      <div className={`text-lg font-semibold tabular-nums ${color}`}>{value}</div>
+      <div className={`break-words text-lg font-semibold tabular-nums ${color}`}>{value}</div>
       <div className="text-xs text-subtle">{label}</div>
     </div>
   );
@@ -332,7 +332,7 @@ function Timeline({ seconds }: { seconds: Point[] }) {
     .join(" ");
   return (
     <div className="border-t border-line px-4 py-3">
-      <div className="mb-1 flex gap-3 text-xs text-subtle">
+      <div className="mb-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-subtle">
         <span className="flex items-center gap-1">
           <span className="inline-block size-2 rounded-sm bg-accent/60" /> req/s (max {maxReq})
         </span>
@@ -355,7 +355,7 @@ function Timeline({ seconds }: { seconds: Point[] }) {
         <line x1={0} x2={width} y1={y(maxReq / 2, maxReq)} y2={y(maxReq / 2, maxReq)} className="stroke-line" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
         <polyline points={line} fill="none" className="stroke-warn" strokeWidth={2} vectorEffect="non-scaling-stroke" />
       </svg>
-      <div className="mono mt-0.5 flex justify-between text-[11px] text-subtle">
+      <div className="mono mt-0.5 flex justify-between text-[0.6875rem] text-subtle">
         <span>{seconds[0].t}s</span>
         <span>{seconds[Math.floor(seconds.length / 2)].t}s</span>
         <span>{seconds[seconds.length - 1].t}s</span>

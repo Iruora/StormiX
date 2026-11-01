@@ -43,7 +43,7 @@ export function EnvSecrets({
         title={missing ? "Some secrets have no value yet" : "Secrets"}
         className={`flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-surface-2 ${missing ? "text-warn" : "text-muted"}`}
       >
-        <KeyRound size={13} />
+        <KeyRound size="0.8125rem" />
         Secrets {filled}/{names.length}
       </button>
       {open && (
@@ -56,7 +56,7 @@ export function EnvSecrets({
               aria-label={reveal ? "Hide the values" : "Show the values"}
               className="ml-auto rounded p-1 text-muted hover:bg-surface-2"
             >
-              {reveal ? <EyeOff size={13} /> : <Eye size={13} />}
+              {reveal ? <EyeOff size="0.8125rem" /> : <Eye size="0.8125rem" />}
             </button>
           </div>
           <div className="space-y-2">
@@ -75,7 +75,7 @@ export function EnvSecrets({
               </label>
             ))}
           </div>
-          <p className="mt-2 text-[11px] text-subtle">Kept in memory only, never saved to a file.</p>
+          <p className="mt-2 text-[0.6875rem] text-subtle">Kept in memory only, never saved to a file.</p>
         </div>
       )}
     </div>

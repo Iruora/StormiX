@@ -16,11 +16,11 @@ export function RunResult({ result }: { result: FlowResult }) {
 
   return (
     <section className="mt-4 rounded-lg border border-line bg-surface">
-      <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line px-4 py-3">
         {ok ? (
-          <CircleCheck size={16} className="text-ok" />
+          <CircleCheck size="1rem" className="text-ok" />
         ) : (
-          <CircleX size={16} className="text-bad" />
+          <CircleX size="1rem" className="text-bad" />
         )}
         <span className="font-semibold">{ok ? "Run passed" : "Run failed"}</span>
         <span className="ml-auto text-xs text-muted">
@@ -44,15 +44,16 @@ function Step({ step, onDetails }: { step: StepResult; onDetails: () => void }) 
 
   return (
     <li className="px-4 py-2.5">
-      <div className="flex items-center gap-2">
+      {/* The status, time and Details move under the name when the panel is narrow. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         {step.skipped ? (
-          <CircleMinus size={14} className="shrink-0 text-subtle" />
+          <CircleMinus size="0.875rem" className="shrink-0 text-subtle" />
         ) : passed ? (
-          <CircleCheck size={14} className="shrink-0 text-ok" />
+          <CircleCheck size="0.875rem" className="shrink-0 text-ok" />
         ) : (
-          <CircleX size={14} className="shrink-0 text-bad" />
+          <CircleX size="0.875rem" className="shrink-0 text-bad" />
         )}
-        <span className="min-w-0 truncate">{step.name}</span>
+        <span className="min-w-0 flex-1 basis-32 truncate">{step.name}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted">
           {step.skipped ? (
             "skipped"
@@ -75,11 +76,11 @@ function Step({ step, onDetails }: { step: StepResult; onDetails: () => void }) 
         </span>
       </div>
       {!step.skipped && (
-        <div className="mono mt-0.5 truncate pl-[22px] text-xs text-subtle" title={step.url}>
+        <div className="mono mt-0.5 truncate pl-[1.375rem] text-xs text-subtle" title={step.url}>
           <span className={`font-semibold ${methodText(step.method)}`}>{step.method}</span> {step.url}
         </div>
       )}
-      <ul className="mt-1 space-y-0.5 pl-[22px] text-[13px]">
+      <ul className="mt-1 space-y-0.5 pl-[1.375rem] text-[0.8125rem]">
         {step.error && <li className="text-bad">{step.error}</li>}
         {failedChecks.map((c, i) => (
           <li key={`f${i}`} className="text-bad">
@@ -99,7 +100,7 @@ function Step({ step, onDetails }: { step: StepResult; onDetails: () => void }) 
         ))}
       </ul>
       {step.logs.length > 0 && (
-        <details className="mt-1 pl-[22px]" open={!passed}>
+        <details className="mt-1 pl-[1.375rem]" open={!passed}>
           <summary className="cursor-pointer text-xs text-subtle">
             Console ({step.logs.length})
           </summary>
@@ -124,7 +125,7 @@ export function DetailsButton({ failed, onClick }: { failed: boolean; onClick: (
           : "border-line text-muted hover:bg-surface-2 hover:text-ink"
       }`}
     >
-      <PanelRightOpen size={12} />
+      <PanelRightOpen size="0.75rem" />
       Details
     </button>
   );

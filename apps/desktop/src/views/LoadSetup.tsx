@@ -73,7 +73,7 @@ export function LoadSetup({
         className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-2xl"
       >
         <header className="flex items-start gap-3 border-b border-line px-5 py-3">
-          <Gauge size={18} className="mt-0.5 shrink-0 text-accent" />
+          <Gauge size="1.125rem" className="mt-0.5 shrink-0 text-accent" />
           <div className="min-w-0 flex-1">
             <div className="font-semibold">Load test {test.flow.name}</div>
             <div className="text-xs text-muted">{describeLoad(load)}</div>
@@ -84,7 +84,7 @@ export function LoadSetup({
             onClick={onCancel}
             className="rounded p-1 text-muted hover:bg-surface-2 hover:text-ink"
           >
-            <X size={16} />
+            <X size="1rem" />
           </button>
         </header>
 
@@ -120,7 +120,7 @@ export function LoadSetup({
                       {step.request.method}
                     </span>
                     <div className={`min-w-0 flex-1 ${checked[i] ? "" : "opacity-50"}`}>
-                      <div className="truncate text-[13px]">{step.name}</div>
+                      <div className="truncate text-[0.8125rem]">{step.name}</div>
                       <div className="mono truncate text-xs text-muted" title={step.request.url}>
                         {step.request.url}
                       </div>
@@ -133,9 +133,9 @@ export function LoadSetup({
                           kept.clear(step.name);
                         }}
                         title={`${cachedTitle(kept.steps.get(step.name)!)} Click to clear it.`}
-                        className="flex shrink-0 items-center gap-1 self-center rounded bg-accent-soft px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent hover:text-white"
+                        className="flex shrink-0 items-center gap-1 self-center rounded bg-accent-soft px-1.5 py-0.5 text-[0.6875rem] text-accent hover:bg-accent hover:text-white"
                       >
-                        <Eraser size={11} /> cached
+                        <Eraser size="0.6875rem" /> cached
                       </button>
                     )}
                     <button
@@ -152,11 +152,11 @@ export function LoadSetup({
                         e.preventDefault();
                         setCache(cache.map((c, j) => (j === i ? !c : c)));
                       }}
-                      className={`flex shrink-0 items-center gap-1 self-center rounded px-1.5 py-0.5 text-[11px] ${
+                      className={`flex shrink-0 items-center gap-1 self-center rounded px-1.5 py-0.5 text-[0.6875rem] ${
                         cache[i] ? "bg-accent-soft text-accent" : "text-subtle hover:bg-surface-2 hover:text-ink"
                       }`}
                     >
-                      <Database size={11} /> {cache[i] ? "once, cached" : "every iteration"}
+                      <Database size="0.6875rem" /> {cache[i] ? "once, cached" : "every iteration"}
                     </button>
                   </label>
                 </li>
@@ -164,7 +164,7 @@ export function LoadSetup({
             </ul>
             {broken.length > 0 && (
               <div className="flex gap-2 border-t border-line bg-warn-soft px-3 py-2 text-xs text-warn">
-                <TriangleAlert size={14} className="mt-px shrink-0" />
+                <TriangleAlert size="0.875rem" className="mt-px shrink-0" />
                 <ul className="space-y-0.5 text-ink">
                   {broken.map((b) => (
                     <li key={`${b.step}-${b.variable}`}>
@@ -195,7 +195,7 @@ export function LoadSetup({
               title="Forget the cached responses, so cached endpoints are sent again on their first iteration"
               className="mr-auto flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs text-muted hover:border-accent hover:text-accent"
             >
-              <Eraser size={12} /> Clear cache ({keptCount} endpoint{keptCount === 1 ? "" : "s"})
+              <Eraser size="0.75rem" /> Clear cache ({keptCount} endpoint{keptCount === 1 ? "" : "s"})
             </button>
           )}
           <button
@@ -211,7 +211,7 @@ export function LoadSetup({
             onClick={run}
             className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
           >
-            <Gauge size={13} />
+            <Gauge size="0.8125rem" />
             Run
           </button>
         </footer>

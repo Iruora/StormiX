@@ -68,7 +68,7 @@ export function RunsView() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-3 border-b border-line bg-surface px-5 py-3">
-        <h1 className="text-[15px] font-semibold">Runs</h1>
+        <h1 className="text-[0.9375rem] font-semibold">Runs</h1>
         <span className="text-xs text-muted">
           Every run is kept. Tick two to see what changed between them.
         </span>
@@ -85,12 +85,12 @@ export function RunsView() {
       {list.length === 0 ? (
         <div className="grid flex-1 place-items-center text-center text-muted">
           <div>
-            <History size={28} className="mx-auto mb-2 text-subtle" />
+            <History size="1.75rem" className="mx-auto mb-2 text-subtle" />
             {runs.isPending ? "Loading runs…" : "No runs yet. Run a test file and it shows up here."}
           </div>
         </div>
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(300px,0.7fr)_minmax(0,1fr)]">
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(18rem,0.7fr)_minmax(0,1fr)]">
           <ul className="min-h-0 divide-y divide-line overflow-y-auto border-r border-line bg-surface">
             {list.map((run, i) => (
               <RunRow
@@ -158,21 +158,21 @@ function RunRow({
       <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
         <div className="flex items-center gap-1.5">
           {run.passed ? (
-            <CircleCheck size={14} className="shrink-0 text-ok" />
+            <CircleCheck size="0.875rem" className="shrink-0 text-ok" />
           ) : (
-            <CircleX size={14} className="shrink-0 text-bad" />
+            <CircleX size="0.875rem" className="shrink-0 text-bad" />
           )}
           <span className="truncate font-medium">{run.name}</span>
           {regressed && (
-            <span className="rounded bg-bad-soft px-1 text-[11px] font-semibold text-bad">regressed</span>
+            <span className="rounded bg-bad-soft px-1 text-[0.6875rem] font-semibold text-bad">regressed</span>
           )}
-          <span className="ml-auto flex shrink-0 items-center gap-1 text-[11px] text-subtle">
-            {run.kind === "load" ? <Gauge size={12} /> : <ListChecks size={12} />}
+          <span className="ml-auto flex shrink-0 items-center gap-1 text-[0.6875rem] text-subtle">
+            {run.kind === "load" ? <Gauge size="0.75rem" /> : <ListChecks size="0.75rem" />}
             {when(run.startedAt ?? 0)}
           </span>
         </div>
         <div className="mt-0.5 truncate text-xs text-muted">{run.headline}</div>
-        {run.source && <div className="mono mt-0.5 truncate text-[11px] text-subtle">{basename(run.source)}</div>}
+        {run.source && <div className="mono mt-0.5 truncate text-[0.6875rem] text-subtle">{basename(run.source)}</div>}
       </button>
     </li>
   );
@@ -217,7 +217,7 @@ function RunDetail({
     <div>
       <div className="flex flex-wrap items-center gap-2">
         <div className="min-w-0">
-          <div className="text-[15px] font-semibold">{summary.name}</div>
+          <div className="text-[0.9375rem] font-semibold">{summary.name}</div>
           <div className="text-xs text-muted">
             {new Date(summary.startedAt ?? 0).toLocaleString()}
             {summary.source && <span className="mono"> · {summary.source}</span>}
@@ -225,20 +225,20 @@ function RunDetail({
         </div>
         <div className="ml-auto flex gap-1.5">
           {previous && (
-            <ToolButton onClick={() => onCompare(previous.id)} icon={<GitCompareArrows size={13} />}>
+            <ToolButton onClick={() => onCompare(previous.id)} icon={<GitCompareArrows size="0.8125rem" />}>
               Compare with previous
             </ToolButton>
           )}
-          <ToolButton onClick={() => exportTo.mutate("html")} icon={<Download size={13} />}>
+          <ToolButton onClick={() => exportTo.mutate("html")} icon={<Download size="0.8125rem" />}>
             HTML report
           </ToolButton>
-          <ToolButton onClick={() => exportTo.mutate("json")} icon={<Download size={13} />}>
+          <ToolButton onClick={() => exportTo.mutate("json")} icon={<Download size="0.8125rem" />}>
             JSON
           </ToolButton>
-          <ToolButton onClick={() => exportTo.mutate("junit")} icon={<Download size={13} />}>
+          <ToolButton onClick={() => exportTo.mutate("junit")} icon={<Download size="0.8125rem" />}>
             JUnit
           </ToolButton>
-          <ToolButton onClick={onDelete} icon={<Trash2 size={13} />}>
+          <ToolButton onClick={onDelete} icon={<Trash2 size="0.8125rem" />}>
             Delete
           </ToolButton>
         </div>
@@ -259,7 +259,7 @@ function Compare({ before, after }: { before: RunSummary; after: RunSummary }) {
     <div>
       <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
         <RunCard run={before} label="Before" />
-        <ArrowRight size={16} className="text-subtle" />
+        <ArrowRight size="1rem" className="text-subtle" />
         <RunCard run={after} label="After" />
       </div>
       {diff.error && <div className="mt-4 text-bad">{diff.error.message}</div>}
@@ -275,7 +275,7 @@ function RunCard({ run, label }: { run: RunSummary; label: string }) {
         {label} · {new Date(run.startedAt ?? 0).toLocaleString()}
       </div>
       <div className="flex items-center gap-1.5 font-medium">
-        {run.passed ? <CircleCheck size={14} className="text-ok" /> : <CircleX size={14} className="text-bad" />}
+        {run.passed ? <CircleCheck size="0.875rem" className="text-ok" /> : <CircleX size="0.875rem" className="text-bad" />}
         <span className="truncate">{run.name}</span>
       </div>
       <div className="truncate text-xs text-muted">{run.headline}</div>
@@ -315,12 +315,12 @@ function DiffBody({ diff }: { diff: RunDiff }) {
 }
 
 const CHANGES: Record<StepChange, { label: string; className: string; icon: React.ReactNode }> = {
-  broke: { label: "broke", className: "bg-bad-soft text-bad", icon: <CircleX size={14} className="text-bad" /> },
-  fixed: { label: "fixed", className: "bg-ok-soft text-ok", icon: <CircleCheck size={14} className="text-ok" /> },
-  still_failing: { label: "still failing", className: "bg-warn-soft text-warn", icon: <CircleX size={14} className="text-warn" /> },
-  still_passing: { label: "", className: "", icon: <CircleCheck size={14} className="text-subtle" /> },
-  added: { label: "new", className: "bg-accent-soft text-accent", icon: <CirclePlus size={14} className="text-accent" /> },
-  removed: { label: "removed", className: "bg-surface-2 text-subtle", icon: <CircleMinus size={14} className="text-subtle" /> },
+  broke: { label: "broke", className: "bg-bad-soft text-bad", icon: <CircleX size="0.875rem" className="text-bad" /> },
+  fixed: { label: "fixed", className: "bg-ok-soft text-ok", icon: <CircleCheck size="0.875rem" className="text-ok" /> },
+  still_failing: { label: "still failing", className: "bg-warn-soft text-warn", icon: <CircleX size="0.875rem" className="text-warn" /> },
+  still_passing: { label: "", className: "", icon: <CircleCheck size="0.875rem" className="text-subtle" /> },
+  added: { label: "new", className: "bg-accent-soft text-accent", icon: <CirclePlus size="0.875rem" className="text-accent" /> },
+  removed: { label: "removed", className: "bg-surface-2 text-subtle", icon: <CircleMinus size="0.875rem" className="text-subtle" /> },
 };
 
 function StepDiffRow({ step }: { step: StepDiff }) {
@@ -331,7 +331,7 @@ function StepDiffRow({ step }: { step: StepDiff }) {
       <div className="flex items-center gap-2">
         {c.icon}
         <span className={step.change === "still_passing" ? "text-muted" : "font-medium"}>{step.name}</span>
-        {c.label && <span className={`rounded px-1.5 text-[11px] font-semibold ${c.className}`}>{c.label}</span>}
+        {c.label && <span className={`rounded px-1.5 text-[0.6875rem] font-semibold ${c.className}`}>{c.label}</span>}
         <span className="mono ml-auto flex shrink-0 gap-3 text-xs text-muted">
           {statusChanged && (
             <span>
@@ -372,7 +372,7 @@ function LoadDiffView({ diff }: { diff: LoadDiff }) {
           {worse > 0 ? `${count(worse, "figure")} got worse` : "No figure got worse by more than 10%"}
         </span>
       </div>
-      <table className="w-full text-[13px]">
+      <table className="w-full text-[0.8125rem]">
         <thead className="text-xs text-subtle">
           <tr>
             <th className="px-4 py-1.5 text-left font-medium">Figure</th>
@@ -388,7 +388,7 @@ function LoadDiffView({ diff }: { diff: LoadDiff }) {
         </tbody>
       </table>
       {diff.steps.length > 0 && (
-        <table className="w-full border-t border-line text-[13px]">
+        <table className="w-full border-t border-line text-[0.8125rem]">
           <thead className="text-xs text-subtle">
             <tr>
               <th className="w-1/2 px-4 py-1.5 text-left font-medium">Step</th>
@@ -399,7 +399,7 @@ function LoadDiffView({ diff }: { diff: LoadDiff }) {
           <tbody className="mono whitespace-nowrap text-xs">
             {diff.steps.map((s) => (
               <tr key={s.name} className="border-t border-line">
-                <td className="max-w-0 truncate px-4 py-1.5 font-sans text-[13px]" title={s.name}>
+                <td className="max-w-0 truncate px-4 py-1.5 font-sans text-[0.8125rem]" title={s.name}>
                   {s.name}
                 </td>
                 <td className="px-2 py-1.5 text-right">
@@ -426,7 +426,7 @@ function MetricRow({ metric: m }: { metric: Metric }) {
     m.unit === "ms" ? fmt(v) : m.unit === "%" ? `${v.toFixed(2)}%` : `${v.toFixed(1)}/s`;
   return (
     <tr className="border-t border-line">
-      <td className="px-4 py-1.5 font-sans text-[13px]">{m.name}</td>
+      <td className="px-4 py-1.5 font-sans text-[0.8125rem]">{m.name}</td>
       <td className="px-2 py-1.5 text-right text-muted">{value(before)}</td>
       <td className="px-2 py-1.5 text-right">{value(after)}</td>
       <td className={`px-4 py-1.5 text-right font-semibold ${tone}`}>

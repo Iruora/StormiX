@@ -36,9 +36,9 @@ export function StepDetails({ step, onClose }: { step: StepResult; onClose: () =
       >
         <header className="flex items-start gap-3 border-b border-line px-5 py-3">
           {passed ? (
-            <CircleCheck size={18} className="mt-0.5 shrink-0 text-ok" />
+            <CircleCheck size="1.125rem" className="mt-0.5 shrink-0 text-ok" />
           ) : (
-            <CircleX size={18} className="mt-0.5 shrink-0 text-bad" />
+            <CircleX size="1.125rem" className="mt-0.5 shrink-0 text-bad" />
           )}
           <div className="min-w-0 flex-1">
             <div className="font-semibold">{step.name}</div>
@@ -60,7 +60,7 @@ export function StepDetails({ step, onClose }: { step: StepResult; onClose: () =
               onClick={onClose}
               className="rounded p-1 text-muted hover:bg-surface-2 hover:text-ink"
             >
-              <X size={16} />
+              <X size="1rem" />
             </button>
           </div>
         </header>
@@ -108,7 +108,7 @@ export function StepDetails({ step, onClose }: { step: StepResult; onClose: () =
             (!exchange ? (
               <NotKept />
             ) : !response ? (
-              <p className="text-[13px] text-muted">
+              <p className="text-[0.8125rem] text-muted">
                 No response came back{step.error ? `: ${step.error}` : "."}
               </p>
             ) : (
@@ -137,12 +137,12 @@ function Outcome({ step }: { step: StepResult }) {
     <>
       {step.error && (
         <Section title="Error">
-          <div className="rounded-md border border-bad/30 bg-bad-soft px-3 py-2 text-[13px] text-bad">{step.error}</div>
+          <div className="rounded-md border border-bad/30 bg-bad-soft px-3 py-2 text-[0.8125rem] text-bad">{step.error}</div>
         </Section>
       )}
       {unchecked && (
         <Section title="Error">
-          <div className="rounded-md border border-bad/30 bg-bad-soft px-3 py-2 text-[13px] text-bad">
+          <div className="rounded-md border border-bad/30 bg-bad-soft px-3 py-2 text-[0.8125rem] text-bad">
             Status {step.status}. Under load a 4xx or 5xx counts as a failed request even without an assertion.
           </div>
         </Section>
@@ -151,7 +151,7 @@ function Outcome({ step }: { step: StepResult }) {
         <Section title={`Failed checks (${failed.length})`}>
           <ul className="space-y-1.5">
             {failed.map((c, i) => (
-              <li key={i} className="rounded-md border border-bad/30 bg-bad-soft px-3 py-2 text-[13px]">
+              <li key={i} className="rounded-md border border-bad/30 bg-bad-soft px-3 py-2 text-[0.8125rem]">
                 <div className="mono font-medium text-bad">{c.name}</div>
                 {c.message && <div className="mt-0.5 text-ink">{c.message}</div>}
               </li>
@@ -161,7 +161,7 @@ function Outcome({ step }: { step: StepResult }) {
       )}
       {step.warnings.length > 0 && (
         <Section title="Warnings">
-          <ul className="space-y-1 text-[13px] text-warn">
+          <ul className="space-y-1 text-[0.8125rem] text-warn">
             {step.warnings.map((w, i) => (
               <li key={i}>{w}</li>
             ))}
@@ -170,10 +170,10 @@ function Outcome({ step }: { step: StepResult }) {
       )}
       {passed.length > 0 && (
         <Section title={`Passed checks (${passed.length})`}>
-          <ul className="space-y-0.5 text-[13px]">
+          <ul className="space-y-0.5 text-[0.8125rem]">
             {passed.map((c, i) => (
               <li key={i} className="flex items-center gap-1.5 text-muted">
-                <Check size={13} className="text-ok" />
+                <Check size="0.8125rem" className="text-ok" />
                 <span className="mono">{c.name}</span>
               </li>
             ))}
@@ -191,7 +191,7 @@ function Outcome({ step }: { step: StepResult }) {
         </Section>
       )}
       {step.checks.length === 0 && !step.error && !unchecked && (
-        <p className="text-[13px] text-muted">This step has no checks.</p>
+        <p className="text-[0.8125rem] text-muted">This step has no checks.</p>
       )}
     </>
   );
@@ -207,7 +207,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 function Headers({ headers }: { headers: HeaderPair[] }) {
-  if (headers.length === 0) return <p className="text-[13px] text-muted">None.</p>;
+  if (headers.length === 0) return <p className="text-[0.8125rem] text-muted">None.</p>;
   return <Table rows={headers} />;
 }
 
@@ -227,8 +227,8 @@ function Table({ rows }: { rows: { name: string; value: string }[] }) {
 }
 
 function Body({ payload, empty }: { payload: Payload | null; empty: string }) {
-  if (!payload) return <p className="text-[13px] text-muted">{empty}</p>;
-  if (payload.binary) return <p className="text-[13px] text-muted">{payload.text}</p>;
+  if (!payload) return <p className="text-[0.8125rem] text-muted">{empty}</p>;
+  if (payload.binary) return <p className="text-[0.8125rem] text-muted">{payload.text}</p>;
   const text = pretty(payload.text);
   return (
     <>
@@ -256,7 +256,7 @@ function Pre({ children }: { children: ReactNode }) {
 
 function NotKept() {
   return (
-    <p className="text-[13px] text-muted">
+    <p className="text-[0.8125rem] text-muted">
       Not kept for this step. Runs saved before Stormix 1.1 have no request or response, and load tests keep them only
       for failures.
     </p>
@@ -275,7 +275,7 @@ function CopyButton({ label, text }: { label: string; text: () => string }) {
       }}
       className="flex items-center gap-1 rounded border border-line bg-surface px-1.5 py-0.5 text-xs text-muted hover:text-ink"
     >
-      {done ? <Check size={12} className="text-ok" /> : <Copy size={12} />}
+      {done ? <Check size="0.75rem" className="text-ok" /> : <Copy size="0.75rem" />}
       {done ? "Copied" : label}
     </button>
   );
