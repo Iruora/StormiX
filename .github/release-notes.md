@@ -1,4 +1,8 @@
-Stormix 1.3.1 adds a Windows installer zip to the downloads: `Stormix_1.3.1_x64_installer.zip` holds the setup `.exe` and the `.msi`, for places that only take or let through `.zip` files. The app itself is the same as 1.3.0, which brought the Flow tab and the load test setup dialog.
+Stormix 1.4.0 adds a per-step response cache and makes the desktop app follow the system text size.
+
+- **Response cache:** mark a step with `cache: true`, or use the cache switch in the Flow tab, the Steps tab and the load test setup, to send it once and reuse its response. In a load test, cached steps such as a login run once before the load and stay out of the metrics. You can clear one step's cache or the whole flow's at any time.
+- **Large text and scaling:** the app scales evenly with the system text size and display scaling. The header and toolbars wrap instead of hiding **Run once** and **Load test**, and the results panel keeps sensible minimum widths when resized.
+- The Flow tab has an **All steps** switch that turns every step on or off.
 
 If you are on 1.1 or later, the app offers this update by itself. On 1.0, download it once from the table below.
 
