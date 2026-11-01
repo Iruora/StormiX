@@ -47,7 +47,7 @@ pub struct StepResult {
     /// header: Stormix's own when the flow has `trace` on, or one the step
     /// set itself. Look it up in Dynatrace or another APM tool to see what
     /// the request did in each service. Missing when no valid
-    /// `traceparent` went out, and on runs saved before 1.6.
+    /// `traceparent` went out, and on runs saved before 1.7.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
     /// The span the request was sent from, the parent of the first span
