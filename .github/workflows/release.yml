@@ -205,6 +205,39 @@ jobs:
             "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets?name=$zip" `
             --input $zip --silent
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Zip the Windows installers
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release-id }}
+        run: |
+          # The setup .exe and the .msi in one zip, for places that only
+          # take or let through .zip downloads.
+          $version = (Get-Content apps/desktop/src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          $bundle = "target/${{ matrix.target }}/release/bundle"
+          $dir = New-Item -ItemType Directory -Force -Path "installer/Stormix_${version}_${{ matrix.arch }}_installer"
+          $setup = Get-ChildItem "$bundle/nsis/*-setup.exe"
+          $msi = Get-ChildItem "$bundle/msi/*.msi"
+          if (-not $setup -or -not $msi) { Write-Error "No setup .exe or .msi in $bundle"; exit 1 }
+          Copy-Item $setup, $msi $dir
+          Set-Content -Path "$dir/README.txt" -Value @(
+            "Stormix $version for Windows (x64)",
+            "",
+            "Run $($setup.Name) to install Stormix for your user, or $($msi.Name) for an",
+            "install managed by Windows Installer (for example with msiexec or Group Policy).",
+            "The builds are not code signed yet: if SmartScreen warns, choose More info, then Run anyway."
+          )
+          $zip = "Stormix_${version}_${{ matrix.arch }}_installer.zip"
+          Compress-Archive -Path $dir -DestinationPath $zip -Force
+          # A rerun replaces the zip from the previous attempt.
+          $jq = '.[] | select(.name == "' + $zip + '") | .id'
+          $old = gh api "repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets" --jq $jq
+          if ($old) { gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$old" }
+          gh api --method POST -H "Content-Type: application/zip" `
+            "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets?name=$zip" `
+            --input $zip --silent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   publish:
     name: Publish the release
@@ -220,7 +253,7 @@ jobs:
           names=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate --jq '.[].name')
           echo "$names"
           missing=0
-          for suffix in _aarch64.dmg _x64.dmg _aarch64.app.zip _x64.app.zip -setup.exe .msi _portable.zip .AppImage .deb .rpm \
+          for suffix in _aarch64.dmg _x64.dmg _aarch64.app.zip _x64.app.zip -setup.exe .msi _portable.zip _installer.zip .AppImage .deb .rpm \
             _aarch64-apple-darwin.tar.gz _x86_64-apple-darwin.tar.gz _x86_64-unknown-linux-gnu.tar.gz _x86_64-pc-windows-msvc.zip \
             latest.json; do
             if ! grep -q -- "$suffix\$" <<< "$names"; then

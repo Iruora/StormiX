@@ -9,7 +9,7 @@ Download the latest release from the [Releases page](https://github.com/Iruora/S
 | You want | Download |
 |---|---|
 | The desktop app on macOS | `Stormix_<version>_aarch64.dmg` (Apple silicon) or `_x64.dmg` (Intel) |
-| The desktop app on Windows | `Stormix_<version>_x64-setup.exe` or the `.msi`, or `_x64_portable.zip` to run without installing |
+| The desktop app on Windows | `Stormix_<version>_x64-setup.exe` or the `.msi`, `_x64_installer.zip` (both installers in one zip), or `_x64_portable.zip` to run without installing |
 | The desktop app on Linux | `.AppImage`, `.deb` or `.rpm` |
 | Only the command line | `stormix-cli_<version>_<platform>.tar.gz` or `.zip`; put `stormix` on your `PATH` |
 
