@@ -110,6 +110,145 @@ class Buffer {
 }
 globalThis.Buffer = Buffer;
 
+// ---------------------------------------------------------------- sending requests
+
+// `bru.sendRequest` and `pm.sendRequest` put the request in an outbox and
+// return a promise. Rust sends what is in the outbox once the script is
+// waiting, then calls `__deliver` with the reply.
+let __outbox = [];
+const __waiting = new Map();
+let __nextCall = 1;
+function __send(request) {
+  return new Promise((resolve, reject) => {
+    const id = __nextCall++;
+    __outbox.push({ id, request });
+    __waiting.set(id, { resolve, reject });
+  });
+}
+globalThis.__takeOutbox = () => {
+  const taken = __outbox;
+  __outbox = [];
+  return JSON.stringify(taken);
+};
+globalThis.__deliver = (id, json) => {
+  const waiting = __waiting.get(id);
+  if (!waiting) return;
+  __waiting.delete(id);
+  const reply = JSON.parse(json);
+  if (reply.error !== undefined) waiting.reject(new Error(reply.error));
+  else waiting.resolve(reply.response);
+};
+
+// Headers as an object, a Postman `[{ key, value }]` list or "Name: value"
+// lines, as `[name, value]` pairs.
+function __headerPairs(headers) {
+  if (!headers) return [];
+  if (typeof headers === "string") {
+    return headers
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.includes(":"))
+      .map((line) => [line.slice(0, line.indexOf(":")).trim(), line.slice(line.indexOf(":") + 1).trim()]);
+  }
+  if (Array.isArray(headers)) {
+    return headers.filter((h) => h && !h.disabled).map((h) => [String(h.key), __text(h.value)]);
+  }
+  return Object.entries(headers)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => [k, __text(v)]);
+}
+const __withHeader = (pairs, name, value) =>
+  pairs.some(([k]) => k.toLowerCase() === name.toLowerCase()) ? pairs : pairs.concat([[name, value]]);
+const __headerObject = (pairs) => Object.fromEntries(pairs.map(([k, v]) => [k.toLowerCase(), v]));
+const __maybeJson = (text) => {
+  try { return JSON.parse(text); } catch (e) { return text; }
+};
+const __formEncode = (pairs) =>
+  pairs.map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v)).join("&");
+
+// Bruno's, which is axios underneath: `{ url, method, headers, data }`
+// resolves to `{ status, statusText, headers, data }` and rejects on a
+// status outside 2xx with that response as `error.response`. An optional
+// `(error, response)` callback is called as well.
+function __bruSendRequest(options, callback) {
+  const o = typeof options === "string" ? { url: options } : options || {};
+  let headers = __headerPairs(o.headers);
+  let body = o.data !== undefined ? o.data : o.body;
+  if (body instanceof Buffer) {
+    body = body.toString("latin1");
+  } else if (body !== undefined && body !== null && typeof body !== "string") {
+    body = JSON.stringify(body);
+    headers = __withHeader(headers, "Content-Type", "application/json");
+  }
+  const promise = __send({
+    method: String(o.method || "GET").toUpperCase(),
+    url: String(o.url),
+    headers,
+    body: body === undefined || body === null ? null : String(body),
+  }).then((r) => {
+    const response = {
+      status: r.status,
+      statusText: r.statusText,
+      headers: __headerObject(r.headers),
+      data: __maybeJson(r.body),
+      responseTime: r.timeMs,
+    };
+    if (r.status < 200 || r.status >= 300) {
+      const error = new Error("Request failed with status code " + r.status);
+      error.response = response;
+      error.status = r.status;
+      throw error;
+    }
+    return response;
+  });
+  if (typeof callback !== "function") return promise;
+  return promise.then(
+    (response) => callback(null, response),
+    (error) => callback(error, error.response),
+  );
+}
+
+// Postman's: a URL or `{ url, method, header, body: { mode, raw | urlencoded } }`.
+// The callback gets `(error, response)`, with an error only when the request
+// could not be sent; without a callback it returns a promise of the response.
+function __pmSendRequest(request, callback) {
+  const r = typeof request === "string" ? { url: request } : request || {};
+  let headers = __headerPairs(r.header || r.headers);
+  let body = null;
+  const b = r.body;
+  if (typeof b === "string") {
+    body = b;
+  } else if (b && (b.mode === "raw" || (b.mode === undefined && b.raw !== undefined))) {
+    body = __text(b.raw);
+  } else if (b && b.mode === "urlencoded") {
+    body = __formEncode((b.urlencoded || []).filter((f) => !f.disabled).map((f) => [String(f.key), __text(f.value)]));
+    headers = __withHeader(headers, "Content-Type", "application/x-www-form-urlencoded");
+  } else if (b && b.mode) {
+    throw new Error("pm.sendRequest: " + b.mode + " bodies are not supported yet");
+  }
+  const url = typeof r.url === "string" ? r.url : r.url && r.url.raw ? r.url.raw : String(r.url);
+  const promise = __send({ method: String(r.method || "GET").toUpperCase(), url, headers, body }).then((res) => {
+    const find = (name) => {
+      const hit = res.headers.find(([k]) => k.toLowerCase() === String(name).toLowerCase());
+      return hit ? hit[1] : undefined;
+    };
+    return {
+      code: res.status,
+      status: res.statusText,
+      responseTime: res.timeMs,
+      responseSize: res.body.length,
+      headers: { get: find, has: (name) => find(name) !== undefined, toObject: () => __headerObject(res.headers) },
+      text: () => res.body,
+      json: () => JSON.parse(res.body),
+    };
+  });
+  if (typeof callback !== "function") return promise;
+  return promise.then(
+    (response) => callback(null, response),
+    (error) => callback(error, undefined),
+  );
+}
+
 // ---------------------------------------------------------------- console
 
 globalThis.console = {};
@@ -444,9 +583,7 @@ const pm = {
       toString: () => __request.body || "",
     },
   },
-  sendRequest: () => {
-    throw new Error("pm.sendRequest is not supported by Stormix yet");
-  },
+  sendRequest: __pmSendRequest,
 };
 if (__response) {
   pm.response = {
@@ -498,6 +635,7 @@ globalThis.bru = {
   getRequestVar: __store.get,
   getProcessEnv: () => undefined,
   interpolate: __store.replaceIn,
+  sendRequest: __bruSendRequest,
   // Waits for real, up to the script's time limit, then resolves.
   sleep: (ms) => {
     __sleep(Math.max(0, Number(ms) || 0));
@@ -513,7 +651,8 @@ globalThis.req = {
   getHeaders: __pmHeaders.toObject,
   setHeader: (k, v) => __pmHeaders.upsert({ key: k, value: v }),
   deleteHeader: __pmHeaders.remove,
-  getBody: () => {
+  getBody: (options) => {
+    if (options && options.raw) return __request.body;
     try { return JSON.parse(__request.body); } catch (e) { return __request.body; }
   },
   setBody: (b) => { __request.body = __text(b); },

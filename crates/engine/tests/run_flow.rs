@@ -311,3 +311,66 @@ fn payloads_are_cut_on_a_character_boundary_and_binary_is_described() {
     assert!(payload.binary);
     assert_eq!(payload.text, "3 bytes of binary data");
 }
+
+const SEND_FROM_SCRIPT: &str = r#"
+  name: send from script
+  steps:
+    - name: Token
+      request: { method: GET, url: "{{base}}/slow" }
+      scripts:
+        test: |
+          const login = await bru.sendRequest({
+            url: bru.getVar("base") + "/login",
+            method: "POST",
+            data: { user: "demo", password: "secret" },
+          })
+          bru.setVar("token", login.data.token)
+          try {
+            await bru.sendRequest({ url: bru.getVar("base") + "/me" })
+          } catch (e) {
+            bru.setVar("denied", String(e.response.status))
+          }
+          const echo = await pm.sendRequest({
+            url: bru.getVar("base") + "/echo",
+            method: "POST",
+            body: { mode: "raw", raw: "hi" },
+          })
+          test("echo", () => expect(echo.text()).to.equal("hi"))
+"#;
+
+fn check_send_from_script(result: &stormix_engine::FlowResult) {
+    let step = &result.steps[0];
+    assert!(step.passed(), "{step:#?}");
+    assert_eq!(step.extracted["token"], "tok-demo");
+    assert_eq!(step.extracted["denied"], "401");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scripts_send_requests_on_a_multi_threaded_runtime() {
+    let url = serve().await;
+    let result = Runner::new(RunOptions::default())
+        .unwrap()
+        .run(&flow(SEND_FROM_SCRIPT), &base(&url))
+        .await;
+    check_send_from_script(&result);
+}
+
+/// The CLI's `run` uses a single-threaded runtime, which is busy running
+/// the script while it waits, so the API lives on a runtime of its own.
+#[tokio::test]
+async fn scripts_send_requests_on_a_single_threaded_runtime() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            tx.send(serve().await).unwrap();
+            std::future::pending::<()>().await
+        })
+    });
+    let url = rx.recv().unwrap();
+    let result = Runner::new(RunOptions::default())
+        .unwrap()
+        .run(&flow(SEND_FROM_SCRIPT), &base(&url))
+        .await;
+    check_send_from_script(&result);
+}
