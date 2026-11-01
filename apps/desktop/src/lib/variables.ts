@@ -31,6 +31,8 @@ export function variableTable(
   environment: Record<string, string>,
   envName: string,
   lastRun?: FlowResult | null,
+  /** Environment values changed for this session only, not in its file. */
+  sessionOnly?: ReadonlySet<string>,
 ): VariableTable {
   const table: VariableTable = new Map();
   for (const [name, description] of Object.entries(GENERATED)) {
@@ -40,7 +42,8 @@ export function variableTable(
     table.set(name, { value, source: "flow variables", kind: "defined" });
   }
   for (const [name, value] of Object.entries(environment)) {
-    table.set(name, { value, source: `environment "${envName}"`, kind: "defined" });
+    const changed = sessionOnly?.has(name) ? ", changed for this session" : "";
+    table.set(name, { value, source: `environment "${envName}"${changed}`, kind: "defined" });
   }
   // Disabled steps are not sent, so they set nothing.
   for (const step of (test?.flow.steps ?? []).filter((s) => s.enabled !== false)) {

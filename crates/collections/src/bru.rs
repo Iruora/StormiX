@@ -144,6 +144,55 @@ impl Block {
     }
 }
 
+/// Writes blocks back out in the format [`parse`] reads.
+pub fn write(blocks: &[Block]) -> String {
+    let mut out = String::new();
+    for (i, block) in blocks.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        match &block.content {
+            Content::Pairs(pairs) => {
+                out.push_str(&format!("{} {{\n", block.name));
+                for (key, value, enabled) in pairs {
+                    let off = if *enabled { "" } else { "~" };
+                    let key = if key.contains(':')
+                        || key.contains(char::is_whitespace)
+                        || key.starts_with('~')
+                    {
+                        format!("\"{key}\"")
+                    } else {
+                        key.clone()
+                    };
+                    let sep = if value.is_empty() { ":" } else { ": " };
+                    out.push_str(&format!("  {off}{key}{sep}{value}\n"));
+                }
+                out.push_str("}\n");
+            }
+            Content::List(items) => {
+                out.push_str(&format!("{} [\n", block.name));
+                for (j, item) in items.iter().enumerate() {
+                    let comma = if j + 1 < items.len() { "," } else { "" };
+                    out.push_str(&format!("  {item}{comma}\n"));
+                }
+                out.push_str("]\n");
+            }
+            Content::Text(text) => {
+                out.push_str(&format!("{} {{\n", block.name));
+                for line in text.lines() {
+                    if line.is_empty() {
+                        out.push('\n');
+                    } else {
+                        out.push_str(&format!("  {line}\n"));
+                    }
+                }
+                out.push_str("}\n");
+            }
+        }
+    }
+    out
+}
+
 pub fn find<'a>(blocks: &'a [Block], name: &str) -> Option<&'a Block> {
     blocks.iter().find(|b| b.name == name)
 }

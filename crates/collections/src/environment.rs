@@ -59,6 +59,11 @@ pub fn dir_for(test_file: &Path) -> PathBuf {
 /// Every environment in `dir` (`.yaml`, `.yml`, `.json` or `.bru` files),
 /// by name. A missing folder has none.
 pub fn read_dir(dir: &Path) -> Result<Vec<Environment>, ImportError> {
+    files_in(dir)?.iter().map(|f| read_file(f)).collect()
+}
+
+/// The environment files in `dir`, sorted. A missing folder has none.
+pub fn files_in(dir: &Path) -> Result<Vec<PathBuf>, ImportError> {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -78,7 +83,167 @@ pub fn read_dir(dir: &Path) -> Result<Vec<Environment>, ImportError> {
         })
         .collect();
     files.sort();
-    files.iter().map(|f| read_file(f)).collect()
+    Ok(files)
+}
+
+/// Writes `env` to `path` in the file's own format, judged by its
+/// extension and, for JSON, by what is already there: a Bruno `.bru`
+/// environment, a Postman environment export, flat JSON or flat YAML.
+/// What the model does not hold is kept where the format allows it: a
+/// Postman export's other fields and disabled values, a `.bru` file's
+/// disabled lines and other blocks. Secrets are written by name only,
+/// never with a value. YAML comments are not kept.
+pub fn write_file(path: &Path, env: &Environment) -> Result<(), String> {
+    let existing = match std::fs::read_to_string(path) {
+        Ok(text) => Some(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+    };
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let text = match ext.as_str() {
+        "bru" => to_bru(env, existing.as_deref())?,
+        "json" => to_json(env, existing.as_deref())?,
+        _ => to_yaml(env),
+    };
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    }
+    std::fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))
+}
+
+/// A `.bru` environment: `vars { .. }` and `vars:secret [ .. ]`, keeping
+/// the disabled lines and any other blocks of `existing`.
+fn to_bru(env: &Environment, existing: Option<&str>) -> Result<String, String> {
+    use crate::bru::{Block, Content};
+    if let Some((k, _)) = env.variables.iter().find(|(_, v)| v.contains('\n')) {
+        return Err(format!(
+            "{k}: a .bru environment cannot hold a value on several lines"
+        ));
+    }
+    let mut blocks = match existing {
+        Some(text) => crate::bru::parse(text).map_err(|(line, m)| format!("line {line}: {m}"))?,
+        None => Vec::new(),
+    };
+    let disabled_pairs: Vec<(String, String, bool)> = match blocks.iter().find(|b| b.name == "vars")
+    {
+        Some(Block {
+            content: Content::Pairs(pairs),
+            ..
+        }) => pairs
+            .iter()
+            .filter(|(k, _, on)| !on && !env.variables.contains_key(k))
+            .cloned()
+            .collect(),
+        _ => Vec::new(),
+    };
+    let disabled_secrets: Vec<String> = match blocks.iter().find(|b| b.name == "vars:secret") {
+        Some(Block {
+            content: Content::List(names),
+            ..
+        }) => names
+            .iter()
+            .filter(|n| {
+                n.strip_prefix('~')
+                    .is_some_and(|n| !env.secrets.iter().any(|s| s == n))
+            })
+            .cloned()
+            .collect(),
+        _ => Vec::new(),
+    };
+    let mut pairs: Vec<(String, String, bool)> = env
+        .variables
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone(), true))
+        .collect();
+    pairs.extend(disabled_pairs);
+    let mut secrets = env.secrets.clone();
+    secrets.extend(disabled_secrets);
+    let vars = Block {
+        name: "vars".into(),
+        line: 0,
+        content: Content::Pairs(pairs),
+    };
+    let secret = Block {
+        name: "vars:secret".into(),
+        line: 0,
+        content: Content::List(secrets),
+    };
+    let keep_secret =
+        !env.secrets.is_empty() || matches!(&secret.content, Content::List(l) if !l.is_empty());
+    let mut place =
+        |block: Block, keep: bool| match blocks.iter().position(|b| b.name == block.name) {
+            Some(i) if keep => blocks[i] = block,
+            Some(i) => {
+                blocks.remove(i);
+            }
+            None if keep => blocks.push(block),
+            None => {}
+        };
+    place(vars, true);
+    place(secret, keep_secret);
+    Ok(crate::bru::write(&blocks))
+}
+
+/// A Postman export keeps its shape: values are updated in place, new ones
+/// added, removed ones dropped (disabled ones stay). Any other JSON is
+/// written as a flat map, with secret names under `$secrets`.
+fn to_json(env: &Environment, existing: Option<&str>) -> Result<String, String> {
+    let current: Option<Value> = existing.and_then(|t| serde_json::from_str(t).ok());
+    let out = match current {
+        Some(Value::Object(mut map)) if matches!(map.get("values"), Some(Value::Array(_))) => {
+            let Some(Value::Array(entries)) = map.remove("values") else {
+                unreachable!()
+            };
+            let mut seen = std::collections::BTreeSet::new();
+            let mut values = Vec::new();
+            for mut entry in entries {
+                let key = entry.get("key").and_then(Value::as_str).map(str::to_owned);
+                let enabled = entry
+                    .get("enabled")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true);
+                match key {
+                    Some(key) if env.variables.contains_key(&key) => {
+                        if seen.insert(key.clone()) {
+                            entry["value"] = Value::String(env.variables[&key].clone());
+                            entry["enabled"] = Value::Bool(true);
+                            values.push(entry);
+                        }
+                    }
+                    Some(_) if enabled => {}
+                    _ => values.push(entry),
+                }
+            }
+            for (key, value) in &env.variables {
+                if !seen.contains(key) {
+                    values.push(serde_json::json!({
+                        "key": key, "value": value, "type": "default", "enabled": true
+                    }));
+                }
+            }
+            map.insert("values".into(), Value::Array(values));
+            Value::Object(map)
+        }
+        _ => {
+            let mut map: serde_json::Map<String, Value> = env
+                .variables
+                .iter()
+                .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+                .collect();
+            if !env.secrets.is_empty() {
+                map.insert(SECRETS_KEY.into(), serde_json::json!(env.secrets));
+            }
+            Value::Object(map)
+        }
+    };
+    let mut text = serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?;
+    text.push('\n');
+    Ok(text)
 }
 
 /// The key a flat YAML or JSON environment lists its secrets under.
@@ -243,6 +408,89 @@ mod tests {
         assert_eq!(vars["base_url"], "https://staging.test");
         assert_eq!(vars.get("off"), None);
         assert_eq!(vars["n"], "3");
+    }
+
+    fn env(vars: &[(&str, &str)], secrets: &[&str]) -> Environment {
+        Environment {
+            name: String::new(),
+            variables: vars
+                .iter()
+                .map(|(k, v)| ((*k).into(), (*v).into()))
+                .collect(),
+            secrets: secrets.iter().map(|s| (*s).into()).collect(),
+        }
+    }
+
+    #[test]
+    fn writes_bru_back_keeping_disabled_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("local.bru");
+        std::fs::write(
+            &path,
+            "vars {\n  base_url: http://x.test\n  ~off: 1\n  gone: 2\n}\nvars:secret [\n  token,\n  ~old\n]\n",
+        )
+        .unwrap();
+        write_file(
+            &path,
+            &env(
+                &[("base_url", "http://y.test"), ("added", "a b: c")],
+                &["token"],
+            ),
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("~off: 1"), "{text}");
+        assert!(text.contains("~old"), "{text}");
+        assert!(!text.contains("gone"), "{text}");
+        let back = read_file(&path).unwrap();
+        assert_eq!(back.variables["base_url"], "http://y.test");
+        assert_eq!(back.variables["added"], "a b: c");
+        assert_eq!(back.variables.get("off"), None);
+        assert_eq!(back.secrets, ["token"]);
+        assert!(write_file(&path, &env(&[("x", "a\nb")], &[])).is_err());
+    }
+
+    #[test]
+    fn writes_postman_exports_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("staging.postman_environment.json");
+        std::fs::write(
+            &path,
+            r#"{"id": "e1", "name": "Staging", "values": [
+                {"key": "base_url", "value": "https://s.test", "type": "default", "enabled": true},
+                {"key": "off", "value": "x", "enabled": false},
+                {"key": "gone", "value": "y", "enabled": true}
+            ], "_postman_exported_using": "Postman"}"#,
+        )
+        .unwrap();
+        write_file(
+            &path,
+            &env(&[("base_url", "https://t.test"), ("new", "1")], &[]),
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let json: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(json["id"], "e1");
+        assert_eq!(json["_postman_exported_using"], "Postman");
+        let back = read_file(&path).unwrap();
+        assert_eq!(back.name, "Staging");
+        assert_eq!(back.variables.len(), 2);
+        assert_eq!(back.variables["base_url"], "https://t.test");
+        assert_eq!(back.variables["new"], "1");
+        assert!(text.contains("\"off\""));
+    }
+
+    #[test]
+    fn writes_flat_json_and_yaml() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = env(&[("a", "1"), ("url", "http://x.test")], &["token"]);
+        for name in ["dev.json", "nested/dev.yaml"] {
+            let path = dir.path().join(name);
+            write_file(&path, &e).unwrap();
+            let back = read_file(&path).unwrap();
+            assert_eq!(back.variables, e.variables, "{name}");
+            assert_eq!(back.secrets, e.secrets, "{name}");
+        }
     }
 
     #[test]
