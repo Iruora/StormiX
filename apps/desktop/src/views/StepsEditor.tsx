@@ -1,7 +1,7 @@
 import { ArrowDown, ArrowUp, Copy, Eraser, Plus, Trash2, X } from "lucide-react";
 import { useRef, useState } from "react";
 
-import type { Assertion, Body, CachedStep, Header, KeyValue, LoadProfile, Method, Step, TestFile } from "../bindings";
+import type { Assertion, Body, CachedStep, GraphqlBody, Header, KeyValue, LoadProfile, Method, Step, TestFile } from "../bindings";
 import { cachedTitle, useResponseCache } from "../lib/cache";
 import { methodText, methodTone } from "../lib/methods";
 import { VarField } from "./VarField";
@@ -282,15 +282,16 @@ function Pairs({
   );
 }
 
-type BodyKind = "none" | "json" | "raw" | "form" | "multipart";
+type BodyKind = "none" | "json" | "raw" | "form" | "multipart" | "graphql";
 
-const BODY_KINDS: BodyKind[] = ["none", "json", "raw", "form", "multipart"];
+const BODY_KINDS: BodyKind[] = ["none", "json", "raw", "form", "multipart", "graphql"];
 
 function bodyKind(body: Body | null): BodyKind {
   if (!body) return "none";
   if ("json" in body) return "json";
   if ("raw" in body) return "raw";
   if ("form" in body) return "form";
+  if ("graphql" in body) return "graphql";
   return "multipart";
 }
 
@@ -302,6 +303,7 @@ function bodyKind(body: Body | null): BodyKind {
  */
 function BodyEditor({ body, onChange }: { body: Body | null; onChange: (body: Body | null) => void }) {
   const kind = bodyKind(body);
+  const graphql = body && "graphql" in body ? body.graphql : undefined;
   const [draft, setDraft] = useState<string | null>(null);
   const [bad, setBad] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -314,7 +316,9 @@ function BodyEditor({ body, onChange }: { body: Body | null; onChange: (body: Bo
     if (body) remembered.current[kind] = body;
     setNotice(null);
     // A JSON body being typed but not parsing yet is still kept, as raw text.
-    const current = kind === "json" && bad ? text : kind === "json" || kind === "raw" ? text : null;
+    // A GraphQL body carries over as the JSON payload it is sent as.
+    const current =
+      kind === "json" || kind === "raw" ? text : graphql ? graphqlPayloadText(graphql) : null;
     const fields = body && "form" in body ? body.form : body && "multipart" in body ? body.multipart : null;
     let replacement: Body | null;
     if (next === "none") {
@@ -327,6 +331,10 @@ function BodyEditor({ body, onChange }: { body: Body | null; onChange: (body: Bo
         return;
       }
       replacement ??= remembered.current.json ?? { json: {} };
+    } else if (next === "graphql") {
+      // `{ "query": ..., "variables": ... }` typed as JSON or raw, or imported
+      // that way by an older version, becomes a GraphQL body.
+      replacement = graphqlFrom(current) ?? remembered.current.graphql ?? { graphql: { query: "" } };
     } else if (next === "raw") {
       replacement = current != null ? { raw: current } : remembered.current.raw ?? { raw: fields ? encodeFields(fields) : "" };
     } else {
@@ -375,6 +383,7 @@ function BodyEditor({ body, onChange }: { body: Body | null; onChange: (body: Bo
           />
         </div>
       )}
+      {graphql && <GraphqlEditor graphql={graphql} onChange={(next) => onChange({ graphql: next })} />}
       {body && ("form" in body || "multipart" in body) && (
         <div className="mt-1">
           <Pairs
@@ -390,6 +399,140 @@ function BodyEditor({ body, onChange }: { body: Body | null; onChange: (body: Bo
       )}
     </div>
   );
+}
+
+/**
+ * The query, its variables and what to do with errors. Variables are edited
+ * as JSON text: an object is kept as an object, and text that is only JSON
+ * once `{{variables}}` are filled in, like `{ "id": {{id}} }`, is kept as
+ * text and filled in before it is parsed, as Postman and Bruno do.
+ */
+function GraphqlEditor({ graphql, onChange }: { graphql: GraphqlBody; onChange: (graphql: GraphqlBody) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const variables = draft ?? variablesText(graphql.variables);
+  const problem = variablesProblem(variables);
+  const lines = (text: string, most: number) => Math.min(most, Math.max(2, text.split("\n").length));
+  return (
+    <div className="mt-1 space-y-1.5">
+      <VarField
+        multiline
+        aria-label="GraphQL query"
+        placeholder={"query User($id: Int!) {\n  user(id: $id) { name }\n}"}
+        rows={lines(graphql.query, 12)}
+        value={graphql.query}
+        onChange={(query) => onChange({ ...graphql, query })}
+        className={`${input} mono block resize-y text-xs ${graphql.query.trim() ? "" : "border-bad"}`}
+      />
+      <div className="flex flex-wrap items-center gap-2 text-xs text-subtle">
+        Variables
+        <span title="A {{name}} value is sent as the type the query declares for it, so $id: Int! gets a number">
+          {"{{name}}"} values take the declared type
+        </span>
+        {problem && <span className="text-bad">{problem}</span>}
+      </div>
+      <VarField
+        multiline
+        aria-label="GraphQL variables"
+        placeholder={'{ "id": "{{id}}" }'}
+        rows={lines(variables, 8)}
+        value={variables}
+        onChange={(text) => {
+          setDraft(text);
+          onChange({ ...graphql, variables: variablesValue(text) });
+        }}
+        onBlur={() => setDraft(null)}
+        className={`${input} mono block resize-y text-xs ${problem ? "border-bad" : ""}`}
+      />
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-subtle">
+        <label className="flex items-center gap-1.5" title="Which operation to run when the query holds several">
+          operation
+          <input
+            aria-label="Operation name"
+            placeholder="optional"
+            value={graphql.operation_name ?? ""}
+            onChange={(e) => onChange({ ...graphql, operation_name: e.target.value || null })}
+            className={`${input} mono w-36 text-xs text-ink`}
+          />
+        </label>
+        <label
+          className="flex items-center gap-1.5"
+          title="By default a response with an errors array fails the step, even with status 200"
+        >
+          <input
+            type="checkbox"
+            aria-label="Pass even with GraphQL errors"
+            checked={!!graphql.allow_errors}
+            onChange={() => onChange({ ...graphql, allow_errors: !graphql.allow_errors })}
+            className="accent-[var(--accent)]"
+          />
+          pass even with GraphQL errors
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function variablesText(variables: unknown): string {
+  if (variables == null) return "";
+  if (typeof variables === "string") return variables;
+  return JSON.stringify(variables, null, 2);
+}
+
+/** An object when the text is one; otherwise the text, filled in when sent. */
+function variablesValue(text: string): unknown {
+  if (!text.trim()) return null;
+  try {
+    const value: unknown = JSON.parse(text);
+    if (value === null) return null;
+    if (typeof value === "object" && !Array.isArray(value)) return value;
+  } catch {
+    // Templated JSON, like `{ "id": {{id}} }`.
+  }
+  return text;
+}
+
+/** Why the variables cannot be sent, trying each `{{name}}` as 0 as the app does. */
+function variablesProblem(text: string): string | null {
+  if (!text.trim()) return null;
+  try {
+    const value: unknown = JSON.parse(text.replace(/\{\{[^{}]*\}\}/g, "0"));
+    if (value === null || (typeof value === "object" && !Array.isArray(value))) return null;
+    return "must be an object";
+  } catch {
+    return "not valid JSON";
+  }
+}
+
+/** The JSON a GraphQL body is sent as, before variables are filled in. */
+function graphqlPayloadText(graphql: GraphqlBody): string {
+  const parts = [`  "query": ${JSON.stringify(graphql.query)}`];
+  if (graphql.variables != null) {
+    const vars = typeof graphql.variables === "string" ? graphql.variables.trim() : JSON.stringify(graphql.variables, null, 2);
+    parts.push(`  "variables": ${vars.replace(/\n/g, "\n  ")}`);
+  }
+  if (graphql.operation_name) parts.push(`  "operationName": ${JSON.stringify(graphql.operation_name)}`);
+  return `{\n${parts.join(",\n")}\n}`;
+}
+
+/** A GraphQL body from `{ "query": ..., "variables": ... }` text, if it is one. */
+function graphqlFrom(text: string | null): Body | null {
+  if (!text) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { query, variables, operationName } = value as Record<string, unknown>;
+  if (typeof query !== "string") return null;
+  return {
+    graphql: {
+      query,
+      variables: variables ?? null,
+      operation_name: typeof operationName === "string" ? operationName : null,
+    },
+  };
 }
 
 function parseJson(text: string): Body | null {

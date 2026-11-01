@@ -33,6 +33,27 @@ async fn echo(body: String) -> String {
     body
 }
 
+/// Echoes the request back as `data`, with an error when the query asks.
+async fn graphql(headers: HeaderMap, Json(body): Json<Value>) -> (StatusCode, Json<Value>) {
+    let query = body["query"].as_str().unwrap_or_default();
+    let content_type = headers.get("content-type").and_then(|v| v.to_str().ok());
+    let data = json!({ "got": body, "contentType": content_type });
+    if query.contains("broken") {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "data": null })),
+        )
+    } else if query.contains("fail") {
+        let errors = json!([{ "message": "nope", "path": ["user", 0] }, { "message": "also" }]);
+        (
+            StatusCode::OK,
+            Json(json!({ "data": data, "errors": errors })),
+        )
+    } else {
+        (StatusCode::OK, Json(json!({ "data": data, "errors": [] })))
+    }
+}
+
 async fn slow() -> &'static str {
     tokio::time::sleep(Duration::from_millis(400)).await;
     "late"
@@ -44,6 +65,7 @@ async fn serve() -> String {
         .route("/login", post(login))
         .route("/me", get(me))
         .route("/echo", post(echo))
+        .route("/graphql", post(graphql))
         .route("/slow", get(slow));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -515,4 +537,91 @@ async fn steps_without_cache_and_failed_responses_are_not_kept() {
     }
     assert_eq!(calls.load(Ordering::SeqCst), 4);
     assert!(runner.cache().is_empty());
+}
+
+#[tokio::test]
+async fn graphql_steps_send_typed_variables_and_fail_on_errors() {
+    let url = serve().await;
+    let f = flow(
+        r#"
+  name: graphql
+  variables: { id: "42", on: "true", name: Ada }
+  steps:
+    - name: typed
+      request:
+        method: POST
+        url: "{{base}}/graphql"
+        body:
+          graphql:
+            query: "query Q($id: Int!, $on: Boolean, $name: String) { user(id: $id) { name } }"
+            variables: { id: "{{id}}", on: "{{on}}", name: "{{name}}", note: "{{id}}" }
+            operation_name: Q
+      assert:
+        - json: { path: $.data.got.variables, equals: { id: 42, on: true, name: Ada, note: "42" } }
+        - json: { path: $.data.got.operationName, equals: Q }
+        - json: { path: $.data.contentType, equals: application/json }
+    - name: text variables
+      request:
+        method: POST
+        url: "{{base}}/graphql"
+        body:
+          graphql:
+            query: "{ user { name } }"
+            variables: '{ "id": {{id}}, "name": "{{name}}" }'
+      assert:
+        - json: { path: $.data.got.variables, equals: { id: 42, name: Ada } }
+    - name: errors fail the step
+      request:
+        method: POST
+        url: "{{base}}/graphql"
+        body: { graphql: { query: "{ fail }" } }
+    - name: unless they are allowed
+      request:
+        method: POST
+        url: "{{base}}/graphql"
+        body: { graphql: { query: "{ fail }", allow_errors: true } }
+    - name: a server error fails too
+      request:
+        method: POST
+        url: "{{base}}/graphql"
+        body: { graphql: { query: "{ broken }" } }
+    - name: text that is not JSON
+      request:
+        method: POST
+        url: "{{base}}/graphql"
+        body: { graphql: { query: "{ x }", variables: '{ "id": {{id}} ' } }
+"#,
+    );
+    let result = Runner::new(RunOptions::default())
+        .unwrap()
+        .run(&f, &base(&url))
+        .await;
+    let [typed, text, errors, allowed, broken, invalid] = &result.steps[..] else {
+        panic!("{result:#?}")
+    };
+    assert!(typed.passed(), "{typed:#?}");
+    assert!(typed.checks.iter().any(|c| c.name == "no GraphQL errors"));
+    assert!(text.passed(), "{text:#?}");
+
+    assert!(!errors.passed());
+    let check = errors.checks.last().unwrap();
+    assert_eq!(check.name, "no GraphQL errors");
+    assert_eq!(
+        check.message.as_deref(),
+        Some("nope (at user.0), and 1 more")
+    );
+
+    assert!(allowed.passed(), "{allowed:#?}");
+    assert!(allowed.checks.is_empty());
+
+    assert!(!broken.passed());
+    assert_eq!(
+        broken.checks.last().unwrap().message.as_deref(),
+        Some("status 500")
+    );
+
+    assert!(
+        invalid.error.as_deref().unwrap().contains("not valid JSON"),
+        "{invalid:#?}"
+    );
 }

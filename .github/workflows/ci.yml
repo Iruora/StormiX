@@ -63,6 +63,9 @@ jobs:
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:3999/health > /dev/null && break; sleep 1; done
       - name: Run examples/demo-api.stormix.yaml
         run: ./target/debug/stormix run examples/demo-api.stormix.yaml --verbose --junit junit/test-file.xml --html reports/test-file.html
+      - name: Run examples/graphql.stormix.yaml
+        if: always()
+        run: ./target/debug/stormix run examples/graphql.stormix.yaml --verbose --junit junit/graphql.xml
       - name: Run the Postman collection unchanged
         if: always()
         run: ./target/debug/stormix run examples/collections/demo-api.postman_collection.json --verbose --junit junit/postman.xml

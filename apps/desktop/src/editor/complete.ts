@@ -40,7 +40,7 @@ const KEYS: Record<string, Key[]> = {
     { label: "method", info: "GET, POST, PUT, PATCH, DELETE, HEAD or OPTIONS" },
     { label: "url", info: "The full URL; query strings go here too" },
     { label: "headers", info: "A list of { name, value }" },
-    { label: "body", info: "json, raw, form or multipart" },
+    { label: "body", info: "json, raw, form, multipart or graphql" },
   ],
   "flow/steps/[]/request/headers/[]": [
     { label: "name", info: "Header name" },
@@ -51,6 +51,13 @@ const KEYS: Record<string, Key[]> = {
     { label: "raw", info: "Text sent as written" },
     { label: "form", info: "[{ key, value }] as x-www-form-urlencoded" },
     { label: "multipart", info: "[{ key, value }] as multipart/form-data" },
+    { label: "graphql", info: "{ query, variables }: a GraphQL operation; errors in the response fail the step" },
+  ],
+  "flow/steps/[]/request/body/graphql": [
+    { label: "query", info: "The GraphQL document; use | for several lines", value: "|" },
+    { label: "variables", info: "An object; {{name}} values take the type the query declares, like $id: Int!" },
+    { label: "operation_name", info: "Which operation to run when the query holds several" },
+    { label: "allow_errors", info: "true passes the step even when the response has GraphQL errors", value: "true" },
   ],
   "flow/steps/[]/request/body/form/[]": [
     { label: "key", info: "Field name" },
@@ -115,6 +122,7 @@ const VALUES: Record<string, string[]> = {
   "flow/steps/[]/assert/[]/json/exists": ["true", "false"],
   "flow/steps/[]/enabled": ["true", "false"],
   "flow/steps/[]/cache": ["true", "false"],
+  "flow/steps/[]/request/body/graphql/allow_errors": ["true", "false"],
   version: ["1"],
 };
 

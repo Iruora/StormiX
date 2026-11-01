@@ -231,18 +231,16 @@ impl Importer {
             "graphql" => {
                 let graphql = body.get("graphql").cloned().unwrap_or(Value::Null);
                 let variables = match graphql.get("variables") {
-                    Some(Value::String(s)) if !s.trim().is_empty() => {
-                        serde_json::from_str(s).unwrap_or(Value::Null)
-                    }
-                    Some(Value::String(_)) | None => Value::Null,
-                    Some(other) => other.clone(),
+                    Some(Value::String(text)) => text.clone(),
+                    None | Some(Value::Null) => String::new(),
+                    Some(other) => other.to_string(),
                 };
-                let payload = serde_json::json!({
-                    "query": text_of(graphql.get("query")),
-                    "variables": variables,
-                });
-                common::default_header(request, "Content-Type", "application/json");
-                request.body = Some(Body::Raw(payload.to_string()));
+                request.body = Some(common::graphql_body(
+                    text_of(graphql.get("query")),
+                    &variables,
+                    step,
+                    &mut self.warnings,
+                ));
             }
             "file" => self.warnings.push(format!(
                 "`{step}`: file bodies are not supported yet; the request is sent without a body"

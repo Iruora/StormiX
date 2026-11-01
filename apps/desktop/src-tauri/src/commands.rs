@@ -502,7 +502,7 @@ mod tests {
         assert!(imported.environments.contains_key("local"));
         let v = validate_test_file(imported.yaml);
         assert_eq!(v.parse_error, None);
-        assert_eq!(v.test.unwrap().flow.steps.len(), 6);
+        assert_eq!(v.test.unwrap().flow.steps.len(), 7);
     }
 
     #[test]

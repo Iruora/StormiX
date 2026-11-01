@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 
 use serde::Serialize;
 
+use crate::graphql;
 use crate::template::variable_refs;
 use crate::{Assertion, Body, ExtractSource, LoadProfile, TestFile};
 
@@ -90,6 +91,33 @@ impl TestFile {
                 Some(Body::Form(fields) | Body::Multipart(fields)) => {
                     for field in fields {
                         templated.push((format!("{at}.request.body"), field.value.as_str()));
+                    }
+                }
+                Some(Body::Graphql(graphql)) => {
+                    let at = format!("{at}.request.body.graphql");
+                    if graphql.query.trim().is_empty() {
+                        issues.error(&format!("{at}.query"), "the GraphQL query is empty");
+                    }
+                    templated.push((format!("{at}.query"), &graphql.query));
+                    if let Some(name) = &graphql.operation_name {
+                        templated.push((format!("{at}.operation_name"), name));
+                    }
+                    match &graphql.variables {
+                        None | Some(serde_json::Value::Null) => {}
+                        Some(serde_json::Value::String(text)) => {
+                            if let Err(message) = graphql::check_variables_text(text) {
+                                issues.error(&format!("{at}.variables"), &message);
+                            }
+                            templated.push((format!("{at}.variables"), text));
+                        }
+                        Some(value @ serde_json::Value::Object(_)) => {
+                            body_text = value.to_string();
+                            templated.push((format!("{at}.variables"), &body_text));
+                        }
+                        Some(_) => issues.error(
+                            &format!("{at}.variables"),
+                            "GraphQL variables are an object, like `{ id: 42 }`",
+                        ),
                     }
                 }
                 None => {}
@@ -372,6 +400,47 @@ load:
                 (Severity::Warning, "flow.steps[1].request.url".into()),
                 (Severity::Error, "load.constant_rate.rate".into()),
                 (Severity::Error, "load.constant_rate.duration".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn checks_graphql_bodies() {
+        let yaml = r#"
+version: 1
+flow:
+  name: graphql
+  variables: { id: "7" }
+  steps:
+    - name: ok
+      request:
+        method: POST
+        url: "https://example.com/graphql"
+        body: { graphql: { query: "query ($id: Int!) { user(id: $id) { name } }", variables: { id: "{{id}}" } } }
+    - name: undefined
+      request:
+        method: POST
+        url: "https://example.com/graphql"
+        body: { graphql: { query: "{ x }", variables: '{ "id": {{other}} }' } }
+    - name: broken
+      request:
+        method: POST
+        url: "https://example.com/graphql"
+        body: { graphql: { query: " ", variables: '{ "id": ' } }
+    - name: not an object
+      request:
+        method: POST
+        url: "https://example.com/graphql"
+        body: { graphql: { query: "{ x }", variables: [1] } }
+"#;
+        let at = |i: usize, field: &str| format!("flow.steps[{i}].request.body.graphql.{field}");
+        assert_eq!(
+            issues(yaml),
+            [
+                (Severity::Warning, at(1, "variables")),
+                (Severity::Error, at(2, "query")),
+                (Severity::Error, at(2, "variables")),
+                (Severity::Error, at(3, "variables")),
             ]
         );
     }

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use reqwest::header::{HeaderMap, CONTENT_TYPE};
 use reqwest::redirect::Policy;
-use stormix_flow::{Body, Flow, KeyValue, Request, Step};
+use stormix_flow::{Body, Flow, GraphqlBody, KeyValue, Request, Step};
 use stormix_script::{
     self as script, Phase, ScriptInput, ScriptRequest, ScriptResponse, TestOutcome,
 };
@@ -254,6 +254,20 @@ impl Runner {
                 }
                 builder.body(serde_json::to_vec(&value).expect("a JSON value always serializes"))
             }
+            OutBody::Graphql(graphql) => match crate::graphql::payload(graphql, vars, &mut missing)
+            {
+                Ok(payload) => {
+                    if !has_content_type {
+                        builder = builder.header(CONTENT_TYPE, "application/json");
+                    }
+                    builder
+                        .body(serde_json::to_vec(&payload).expect("a JSON value always serializes"))
+                }
+                Err(message) => {
+                    result.error = Some(message);
+                    return result;
+                }
+            },
             OutBody::Form(fields) => {
                 let pairs: Vec<(String, String)> = fields
                     .iter()
@@ -333,6 +347,13 @@ impl Runner {
         let res = Response::new(status.as_u16(), &headers, &body, result.duration_ms);
         for assertion in &step.assertions {
             result.checks.push(checks::assert(assertion, &res, vars));
+        }
+        // A pre-request script that rewrote the body made it raw text, but
+        // the request is still GraphQL.
+        if let Some(Body::Graphql(graphql)) = &step.request.body {
+            if !graphql.allow_errors {
+                result.checks.push(checks::graphql_errors(&res));
+            }
         }
         for (name, source) in &step.extract {
             let (check, value) = checks::extract(name, source, &res);
@@ -489,6 +510,7 @@ enum OutBody {
     Raw(String),
     Form(Vec<(String, String)>),
     Multipart(Vec<(String, String)>),
+    Graphql(GraphqlBody),
 }
 
 impl From<&Request> for Outgoing {
@@ -507,6 +529,7 @@ impl From<&Request> for Outgoing {
                 Some(Body::Raw(t)) => OutBody::Raw(t.clone()),
                 Some(Body::Form(f)) => OutBody::Form(pairs(f)),
                 Some(Body::Multipart(f)) => OutBody::Multipart(pairs(f)),
+                Some(Body::Graphql(g)) => OutBody::Graphql(g.clone()),
             },
         }
     }
@@ -525,6 +548,7 @@ impl Outgoing {
             OutBody::None => None,
             OutBody::Json(v) => Some(v.to_string()),
             OutBody::Raw(t) => Some(t.clone()),
+            OutBody::Graphql(g) => Some(crate::graphql::unfilled_text(g)),
             OutBody::Form(f) | OutBody::Multipart(f) => Some(
                 f.iter()
                     .map(|(k, v)| format!("{k}={v}"))

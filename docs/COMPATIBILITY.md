@@ -28,7 +28,7 @@ What Stormix 1.0 runs from Postman and Bruno collections, feature by feature. An
 | Multipart text fields | ✓ | ✓ | |
 | Multipart file fields | ✗ | ✗ | Left out, with a warning |
 | Binary body | ✗ | ✗ | Left out, with a warning |
-| GraphQL | ✓ | ✓ | Sent as JSON `{ query, variables }` |
+| GraphQL | ✓ | ✓ | Imported as a `graphql` body. Variables with bare `{{variables}}`, like `{ "id": {{id}} }`, are kept as text and filled in before parsing, as Postman and Bruno do. A response with `errors` fails the step |
 
 ## Auth
 

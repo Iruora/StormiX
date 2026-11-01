@@ -111,15 +111,37 @@ export type Assertion_Serialize =
 /**  The response body contains this text. */
 ({ body_contains: string }) & { header?: never; json?: never; max_duration_ms?: never; status?: never };
 
-export type Body = 
+export type Body = Body_Serialize | Body_Deserialize;
+
+export type Body_Deserialize = 
 /**  Sent as `application/json` unless a `Content-Type` header says otherwise. */
-({ json: unknown }) & { form?: never; multipart?: never; raw?: never } | 
+({ json: unknown }) & { form?: never; graphql?: never; multipart?: never; raw?: never } | 
 /**  Sent as-is, with the step's own `Content-Type` header. */
-({ raw: string }) & { form?: never; json?: never; multipart?: never } | 
+({ raw: string }) & { form?: never; graphql?: never; json?: never; multipart?: never } | 
 /**  Sent as `application/x-www-form-urlencoded`. */
-({ form: KeyValue[] }) & { json?: never; multipart?: never; raw?: never } | 
+({ form: KeyValue[] }) & { graphql?: never; json?: never; multipart?: never; raw?: never } | 
 /**  Sent as `multipart/form-data`, text fields only. */
-({ multipart: KeyValue[] }) & { form?: never; json?: never; raw?: never };
+({ multipart: KeyValue[] }) & { form?: never; graphql?: never; json?: never; raw?: never } | 
+/**
+ *  A GraphQL operation, sent as `application/json` `{ query, variables,
+ *  operationName }` unless a `Content-Type` header says otherwise.
+ */
+({ graphql: GraphqlBody_Deserialize }) & { form?: never; json?: never; multipart?: never; raw?: never };
+
+export type Body_Serialize = 
+/**  Sent as `application/json` unless a `Content-Type` header says otherwise. */
+({ json: unknown }) & { form?: never; graphql?: never; multipart?: never; raw?: never } | 
+/**  Sent as-is, with the step's own `Content-Type` header. */
+({ raw: string }) & { form?: never; graphql?: never; json?: never; multipart?: never } | 
+/**  Sent as `application/x-www-form-urlencoded`. */
+({ form: KeyValue[] }) & { graphql?: never; json?: never; multipart?: never; raw?: never } | 
+/**  Sent as `multipart/form-data`, text fields only. */
+({ multipart: KeyValue[] }) & { form?: never; graphql?: never; json?: never; raw?: never } | 
+/**
+ *  A GraphQL operation, sent as `application/json` `{ query, variables,
+ *  operationName }` unless a `Content-Type` header says otherwise.
+ */
+({ graphql: GraphqlBody_Serialize }) & { form?: never; json?: never; multipart?: never; raw?: never };
 
 /**  What the cache holds for one step, for the UI. */
 export type CachedStep = {
@@ -261,6 +283,60 @@ export type Flow_Serialize = {
 	 *  ready to be put back. Like code commented out, without losing it.
 	 */
 	set_aside?: Step_Serialize[],
+};
+
+/**
+ *  A GraphQL request. Unless `allow_errors` is set, a response with an
+ *  `errors` array fails the step.
+ */
+export type GraphqlBody = GraphqlBody_Serialize | GraphqlBody_Deserialize;
+
+/**
+ *  A GraphQL request. Unless `allow_errors` is set, a response with an
+ *  `errors` array fails the step.
+ */
+export type GraphqlBody_Deserialize = {
+	query: string,
+	/**
+	 *  The operation's variables, as an object. A `{{name}}` filling a whole
+	 *  top-level value is sent as the type the query declares for it, so
+	 *  `id: "{{id}}"` goes out as a number for `$id: Int!`.
+	 * 
+	 *  Can also be JSON text, as Postman and Bruno keep it, where variables
+	 *  are filled in before the text is parsed: `{ "id": {{id}} }`.
+	 */
+	variables?: unknown | null,
+	/**  Which operation to run when the query holds several. */
+	operation_name?: string | null,
+	/**
+	 *  Pass the step even when the response carries GraphQL `errors`, for
+	 *  steps that test error handling.
+	 */
+	allow_errors?: boolean,
+};
+
+/**
+ *  A GraphQL request. Unless `allow_errors` is set, a response with an
+ *  `errors` array fails the step.
+ */
+export type GraphqlBody_Serialize = {
+	query: string,
+	/**
+	 *  The operation's variables, as an object. A `{{name}}` filling a whole
+	 *  top-level value is sent as the type the query declares for it, so
+	 *  `id: "{{id}}"` goes out as a number for `$id: Int!`.
+	 * 
+	 *  Can also be JSON text, as Postman and Bruno keep it, where variables
+	 *  are filled in before the text is parsed: `{ "id": {{id}} }`.
+	 */
+	variables?: unknown,
+	/**  Which operation to run when the query holds several. */
+	operation_name?: string,
+	/**
+	 *  Pass the step even when the response carries GraphQL `errors`, for
+	 *  steps that test error handling.
+	 */
+	allow_errors?: boolean,
 };
 
 /**  Headers are a list, not a map: HTTP allows repeats and order can matter. */
@@ -507,14 +583,14 @@ export type Request_Deserialize = {
 	method: Method,
 	url: string,
 	headers?: Header[],
-	body?: Body | null,
+	body?: Body_Deserialize | null,
 };
 
 export type Request_Serialize = {
 	method: Method,
 	url: string,
 	headers?: Header[],
-	body?: Body,
+	body?: Body_Serialize,
 };
 
 export type ResponseRecord = ResponseRecord_Serialize | ResponseRecord_Deserialize;

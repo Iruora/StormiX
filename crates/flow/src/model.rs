@@ -130,6 +130,34 @@ pub enum Body {
     Form(Vec<KeyValue>),
     /// Sent as `multipart/form-data`, text fields only.
     Multipart(Vec<KeyValue>),
+    /// A GraphQL operation, sent as `application/json` `{ query, variables,
+    /// operationName }` unless a `Content-Type` header says otherwise.
+    Graphql(GraphqlBody),
+}
+
+/// A GraphQL request. Unless `allow_errors` is set, a response with an
+/// `errors` array fails the step.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(deny_unknown_fields)]
+pub struct GraphqlBody {
+    pub query: String,
+    /// The operation's variables, as an object. A `{{name}}` filling a whole
+    /// top-level value is sent as the type the query declares for it, so
+    /// `id: "{{id}}"` goes out as a number for `$id: Int!`.
+    ///
+    /// Can also be JSON text, as Postman and Bruno keep it, where variables
+    /// are filled in before the text is parsed: `{ "id": {{id}} }`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "specta", specta(type = Option<specta_typescript::Unknown>))]
+    pub variables: Option<serde_json::Value>,
+    /// Which operation to run when the query holds several.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_name: Option<String>,
+    /// Pass the step even when the response carries GraphQL `errors`, for
+    /// steps that test error handling.
+    #[serde(default, skip_serializing_if = "is_no")]
+    pub allow_errors: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -23,7 +23,8 @@
   ],
   "variable": [
     { "key": "base_url", "value": "http://127.0.0.1:3999" },
-    { "key": "user", "value": "demo" }
+    { "key": "user", "value": "demo" },
+    { "key": "user_id", "value": "7" }
   ],
   "item": [
     {
@@ -187,6 +188,33 @@
               ]
             },
             "url": "{{base_url}}/echo"
+          }
+        },
+        {
+          "name": "GraphQL user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"finds Ada by a numeric id\", () => {",
+                  "    pm.expect(pm.response.json().data.user.name).to.eql(\"Ada\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "graphql",
+              "graphql": {
+                "query": "query User($id: Int!) {\n  user(id: $id) { id name }\n}",
+                "variables": "{\n  \"id\": {{user_id}}\n}"
+              }
+            },
+            "url": "{{base_url}}/graphql"
           }
         }
       ]

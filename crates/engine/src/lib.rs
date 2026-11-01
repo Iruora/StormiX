@@ -7,6 +7,7 @@
 
 mod cache;
 mod checks;
+mod graphql;
 mod junit;
 mod load;
 mod result;

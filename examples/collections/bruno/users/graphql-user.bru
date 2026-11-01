@@ -1,0 +1,27 @@
+meta {
+  name: GraphQL user
+  type: graphql
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/graphql
+  body: graphql
+  auth: none
+}
+
+body:graphql {
+  query User($id: Int!) {
+    user(id: $id) { id name }
+  }
+}
+
+body:graphql:vars {
+  { "id": {{userId}} }
+}
+
+tests {
+  test("finds Ada by a numeric id", function () {
+    expect(res.body.data.user.name).to.equal("Ada");
+  });
+}
