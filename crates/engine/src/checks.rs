@@ -206,6 +206,39 @@ fn outcome(name: String, ok: bool, why: impl FnOnce() -> String) -> Check {
     }
 }
 
+/// GraphQL servers usually answer `200 OK` even when the operation failed,
+/// listing what went wrong in `errors`. A GraphQL step fails on that, on a
+/// 4xx or 5xx, and on a body that is not JSON.
+pub(crate) fn graphql_errors(res: &Response<'_>) -> Check {
+    let name = "no GraphQL errors".to_owned();
+    let json = match res.json() {
+        Ok(json) => json,
+        Err(why) => return failed(name, format!("status {}: {why}", res.status)),
+    };
+    match json.get("errors") {
+        Some(Value::Array(errors)) if !errors.is_empty() => {
+            let first = &errors[0];
+            let mut message = match first.get("message") {
+                Some(Value::String(text)) => text.clone(),
+                _ => first.to_string(),
+            };
+            if let Some(Value::Array(path)) = first.get("path") {
+                let path: Vec<String> = path
+                    .iter()
+                    .map(|p| p.as_str().map_or_else(|| p.to_string(), str::to_owned))
+                    .collect();
+                message.push_str(&format!(" (at {})", path.join(".")));
+            }
+            if errors.len() > 1 {
+                message.push_str(&format!(", and {} more", errors.len() - 1));
+            }
+            failed(name, message)
+        }
+        _ if res.status >= 400 => failed(name, format!("status {}", res.status)),
+        _ => passed(name),
+    }
+}
+
 fn passed(name: String) -> Check {
     Check {
         name,

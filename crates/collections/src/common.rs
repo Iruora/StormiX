@@ -2,7 +2,7 @@
 //! inherited headers and stitch scripts together.
 
 use base64::Engine as _;
-use stormix_flow::{Header, Method, Request};
+use stormix_flow::{graphql, Body, GraphqlBody, Header, Method, Request};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Auth {
@@ -158,6 +158,30 @@ pub fn path_variables(url: &str, vars: &[(String, String)]) -> String {
 }
 
 /// The `Content-Type` Postman and Bruno set for a raw body of this language.
+/// A GraphQL body from a collection. Variables are JSON text there, often
+/// with bare `{{variables}}` in it, as in `{ "id": {{id}} }`: that is kept as
+/// text and filled in before parsing when sent, rather than lost.
+pub fn graphql_body(
+    query: String,
+    variables: &str,
+    step: &str,
+    warnings: &mut Vec<String>,
+) -> Body {
+    if !variables.trim().is_empty() {
+        if let Err(why) = graphql::check_variables_text(variables) {
+            warnings.push(format!(
+                "`{step}`: {why}; the request will fail until they are fixed"
+            ));
+        }
+    }
+    Body::Graphql(GraphqlBody {
+        query,
+        variables: graphql::variables_from_text(variables),
+        operation_name: None,
+        allow_errors: false,
+    })
+}
+
 pub fn raw_content_type(language: &str) -> Option<&'static str> {
     Some(match language {
         "json" => "application/json",

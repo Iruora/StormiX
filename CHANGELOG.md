@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Flows
+
+- **GraphQL bodies.** A step can send `body: { graphql: { query, variables, operation_name } }`, sent as JSON with `Content-Type: application/json`. A templated variable takes the type the query declares, so `id: "{{user_id}}"` goes out as the number `7` for `$id: Int!` instead of the text `"7"` that GraphQL servers reject. Variables can also be JSON text with bare `{{variables}}` in it, filled in before it is parsed. See [GraphQL](docs/TEST_FILE.md#graphql).
+- A GraphQL step fails when the response has GraphQL `errors`, even with status 200, as well as on a 4xx or 5xx or a body that is not JSON, through a **no GraphQL errors** check that shows the first error's message. Load tests count these as errors. `allow_errors: true` turns the check off for a step that expects errors.
+- `stormix validate` and the editor report an empty GraphQL query and variables that are not a JSON object, and warn about undefined variables used in the query and variables.
+
+### Collections
+
+- GraphQL requests from Postman and Bruno are imported as GraphQL bodies instead of raw JSON. Variables written with bare `{{variables}}`, like `{ "id": {{userId}} }`, were not valid JSON and were silently sent as `null`; they are now kept and filled in when sent, and variables that would still not be JSON are reported when importing.
+
+### Desktop app
+
+- The Steps tab has a **graphql** body with fields for the query and variables, the operation name and **pass even with GraphQL errors**. Switching a JSON or raw body holding `{ "query": ... }` to **graphql** converts it, which also upgrades GraphQL requests imported by earlier versions. The YAML editor completes the `graphql` keys.
+
 ## 1.5.1 (2026-11-01)
 
 ### Desktop app

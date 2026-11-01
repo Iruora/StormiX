@@ -119,7 +119,7 @@ A step with `cache: true` is sent once; after that, runs and load test iteration
 | `method` | `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD` or `OPTIONS` |
 | `url` | The full URL; query strings go here too |
 | `headers` | A list of `{ name, value }`. A list rather than a map, because HTTP allows a header to repeat |
-| `body` | One of the four kinds below |
+| `body` | One of the five kinds below |
 
 | Body | Sent as |
 |---|---|
@@ -127,6 +127,35 @@ A step with `cache: true` is sent once; after that, runs and load test iteration
 | `raw: <text>` | As written, with the step's own `Content-Type` header |
 | `form: [{ key, value }]` | `application/x-www-form-urlencoded` |
 | `multipart: [{ key, value }]` | `multipart/form-data`, text fields only |
+| `graphql: { query, variables }` | `application/json` `{ query, variables, operationName }`. See [GraphQL](#graphql) |
+
+#### GraphQL
+
+```yaml
+- name: Get a user
+  request:
+    method: POST
+    url: "{{base_url}}/graphql"
+    body:
+      graphql:
+        query: |
+          query User($id: Int!) {
+            user(id: $id) { id name }
+          }
+        variables: { id: "{{user_id}}" }
+  extract:
+    name: { json: $.data.user.name }
+```
+
+| Field | |
+|---|---|
+| `query` | The GraphQL document |
+| `variables` | An object. Literal values keep their YAML type. A templated value such as `"{{user_id}}"` is sent as the type the query declares for that variable: a number for `Int` and `Float`, `true` or `false` for `Boolean`, an object or list for an input type or a list (from JSON text), and text for `String`, `ID`, enums and anything else. Only top-level variables have a declared type; `{{name}}` inside a nested object is sent as text |
+| | Can also be JSON text, as Postman and Bruno keep it: `variables: '{ "id": {{user_id}} }'`. Variables are filled in first, then the text is parsed, so a bare `{{name}}` is sent as whatever its value is. Text that is not JSON once filled in fails the step before it is sent |
+| `operation_name` | Which operation to run when the query holds several |
+| `allow_errors` | `true` passes the step even when the response has GraphQL `errors`. Defaults to `false` |
+
+GraphQL servers usually answer `200 OK` even when the operation failed, listing what went wrong in an `errors` array. So a GraphQL step gets a check of its own, **no GraphQL errors**, that fails when the response has a non-empty `errors` array, has a 4xx or 5xx status, or is not JSON. Its message is the first error's message and path. Like any failed check, it counts toward `errors` and `checks` in load tests. Set `allow_errors: true` for a step that expects errors, and check them with `json` assertions, like `json: { path: "$.errors[0].message", equals: Not found }`.
 
 ### `extract`
 

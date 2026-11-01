@@ -8,6 +8,7 @@
 //! optional load profile and the thresholds that decide pass or fail.
 
 mod duration;
+pub mod graphql;
 mod load;
 mod model;
 mod template;
@@ -18,8 +19,8 @@ mod validate;
 pub use duration::{Duration, DurationError};
 pub use load::{LoadProfile, Stage};
 pub use model::{
-    Assertion, Body, ExtractSource, Flow, Header, HeaderAssertion, JsonAssertion, KeyValue, Method,
-    Request, Scripts, Step,
+    Assertion, Body, ExtractSource, Flow, GraphqlBody, Header, HeaderAssertion, JsonAssertion,
+    KeyValue, Method, Request, Scripts, Step,
 };
 pub use template::{render, variable_refs, Rendered};
 pub use test_file::{ParseError, TestFile, CURRENT_VERSION};

@@ -67,6 +67,28 @@ async fn echo(headers: HeaderMap, body: String) -> Json<Value> {
     Json(json!({ "contentType": content_type, "body": body }))
 }
 
+/// A stand-in for a GraphQL server, strict about variable types as real ones
+/// are: `query ($id: Int!) { user(id: $id) { id name } }` only finds user 7
+/// when `id` is the number 7, not the string "7".
+async fn graphql(Json(body): Json<Value>) -> Json<Value> {
+    let query = body["query"].as_str().unwrap_or_default();
+    if !query.contains("user") {
+        return Json(json!({ "errors": [{ "message": "the demo only knows `user(id: Int!)`" }] }));
+    }
+    match &body["variables"]["id"] {
+        Value::Number(id) if id.as_u64() == Some(7) => {
+            Json(json!({ "data": { "user": { "id": 7, "name": "Ada" } } }))
+        }
+        Value::Number(_) => Json(json!({
+            "data": { "user": null },
+            "errors": [{ "message": "no such user", "path": ["user"] }],
+        })),
+        other => Json(json!({
+            "errors": [{ "message": format!("Variable \"$id\" got invalid value {other}; Int cannot represent non-integer value") }],
+        })),
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let app = Router::new()
@@ -75,7 +97,8 @@ async fn main() {
         .route("/me", get(me))
         .route("/users/{id}", get(user))
         .route("/admin", get(admin))
-        .route("/echo", post(echo));
+        .route("/echo", post(echo))
+        .route("/graphql", post(graphql));
     let listener = tokio::net::TcpListener::bind(ADDR).await.unwrap();
     println!("demo API listening on http://{ADDR}");
     axum::serve(listener, app).await.unwrap();

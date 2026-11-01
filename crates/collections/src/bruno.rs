@@ -445,12 +445,13 @@ impl Importer<'_> {
             }
             "graphql" => {
                 let query = text("body:graphql").unwrap_or_default();
-                let variables = text("body:graphql:vars")
-                    .and_then(|v| serde_json::from_str(&v).ok())
-                    .unwrap_or(serde_json::Value::Null);
-                let payload = serde_json::json!({ "query": query, "variables": variables });
-                common::default_header(request, "Content-Type", "application/json");
-                request.body = Some(Body::Raw(payload.to_string()));
+                let variables = text("body:graphql:vars").unwrap_or_default();
+                request.body = Some(common::graphql_body(
+                    query,
+                    &variables,
+                    step,
+                    &mut self.warnings,
+                ));
             }
             "none" => {}
             other => self.warnings.push(format!(

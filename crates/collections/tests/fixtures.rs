@@ -19,14 +19,30 @@ fn header<'a>(headers: &'a [Header], name: &str) -> Option<&'a str> {
         .map(|h| h.value.as_str())
 }
 
-const STEPS: [&str; 6] = [
+const STEPS: [&str; 7] = [
     "Health",
     "Auth / Log in",
     "Auth / Read the profile",
     "Users / Get a user",
     "Users / Admin with Basic auth",
     "Users / Echo a form",
+    "Users / GraphQL user",
 ];
+
+/// Both collections send `{ "id": {{user_id}} }`, which is only JSON once
+/// the bare variable is filled in, so it is kept as text.
+fn assert_graphql(body: &Option<Body>, var: &str) {
+    let Some(Body::Graphql(graphql)) = body else {
+        panic!("{body:?}")
+    };
+    assert!(graphql.query.contains("user(id: $id)"));
+    let text = graphql.variables.as_ref().and_then(|v| v.as_str()).unwrap();
+    assert_eq!(
+        text.split_whitespace().collect::<String>(),
+        format!("{{\"id\":{{{{{var}}}}}}}")
+    );
+    assert!(!graphql.allow_errors);
+}
 
 #[test]
 fn postman_collection() {
@@ -40,7 +56,7 @@ fn postman_collection() {
 
     let names: Vec<_> = flow.steps.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, STEPS);
-    let [health, login, profile, user, admin, echo] = &flow.steps[..] else {
+    let [health, login, profile, user, admin, echo, graphql] = &flow.steps[..] else {
         unreachable!()
     };
 
@@ -75,6 +91,7 @@ fn postman_collection() {
         panic!("{:?}", echo.request.body)
     };
     assert_eq!(fields.len(), 2);
+    assert_graphql(&graphql.request.body, "user_id");
 
     // Scripts set every variable the requests use that the collection does not.
     assert_eq!(imported.test.validate(), []);
@@ -91,7 +108,7 @@ fn bruno_import_reports_each_request_file() {
         ))
     })
     .unwrap();
-    assert_eq!(imported.test.flow.steps.len(), 6);
+    assert_eq!(imported.test.flow.steps.len(), 7);
     let files: Vec<_> = seen.iter().map(|s| s.2.as_str()).collect();
     assert_eq!(
         files,
@@ -101,13 +118,14 @@ fn bruno_import_reports_each_request_file() {
             "profile.bru",
             "admin.bru",
             "echo.bru",
-            "get-user.bru"
+            "get-user.bru",
+            "graphql-user.bru"
         ]
     );
     assert!(seen
         .iter()
         .enumerate()
-        .all(|(i, s)| s.0 == i + 1 && s.1 == 6));
+        .all(|(i, s)| s.0 == i + 1 && s.1 == 7));
 }
 
 #[test]
@@ -123,7 +141,7 @@ fn bruno_collection() {
 
     let names: Vec<_> = flow.steps.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, STEPS);
-    let [health, login, profile, user, admin, echo] = &flow.steps[..] else {
+    let [health, login, profile, user, admin, echo, graphql] = &flow.steps[..] else {
         unreachable!()
     };
     assert_eq!(
@@ -167,6 +185,7 @@ fn bruno_collection() {
         panic!("{:?}", echo.request.body)
     };
     assert_eq!(fields.len(), 2);
+    assert_graphql(&graphql.request.body, "userId");
 }
 
 #[test]
