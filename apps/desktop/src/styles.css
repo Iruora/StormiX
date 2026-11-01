@@ -152,3 +152,27 @@ body {
 .cm-content .var-missing * {
   color: var(--warn) !important;
 }
+
+/* The label of an icon-only sidebar button, shown beside it on hover or focus. */
+.nav-tip {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  z-index: 50;
+  transform: translate(-4px, -50%);
+  white-space: nowrap;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--surface);
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms, transform 120ms;
+}
+.group:hover > .nav-tip,
+.group:focus-visible > .nav-tip {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
