@@ -7,6 +7,8 @@
 //! engine, a memory cap and a time limit.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rquickjs::{Context, Runtime};
@@ -109,6 +111,44 @@ pub fn run_with(
     }
 }
 
+/// How long a script may spend in total waiting on `bru.sleep` and
+/// `sendRequest`, which do not count toward its time limit.
+pub const MAX_WAIT: Duration = Duration::from_secs(300);
+
+/// The script's time budget. Time spent waiting on `bru.sleep` and on
+/// requests it sends does not count toward `timeout`, so a retry loop with
+/// pauses works under the default; waiting is capped by [`MAX_WAIT`].
+#[derive(Clone)]
+struct Budget {
+    started: Instant,
+    timeout: Duration,
+    waited_us: Arc<AtomicU64>,
+}
+
+impl Budget {
+    fn waited(&self) -> Duration {
+        Duration::from_micros(self.waited_us.load(Ordering::Relaxed))
+    }
+    fn running(&self) -> Duration {
+        self.started.elapsed().saturating_sub(self.waited())
+    }
+    /// Time the script may still wait.
+    fn wait_left(&self) -> Duration {
+        MAX_WAIT.saturating_sub(self.waited())
+    }
+    fn spent(&self) -> bool {
+        self.running() > self.timeout || self.waited() >= MAX_WAIT
+    }
+    /// Runs `f` as waiting time.
+    fn waiting<T>(&self, f: impl FnOnce(Duration) -> T) -> T {
+        let started = Instant::now();
+        let out = f(self.wait_left());
+        let us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        self.waited_us.fetch_add(us, Ordering::Relaxed);
+        out
+    }
+}
+
 fn run_inner(
     source: &str,
     input: &ScriptInput<'_>,
@@ -117,19 +157,26 @@ fn run_inner(
 ) -> Result<ScriptOutput, String> {
     let runtime = Runtime::new().map_err(|e| format!("cannot start the script engine: {e}"))?;
     runtime.set_memory_limit(MEMORY_LIMIT);
-    let deadline = Instant::now() + timeout;
-    runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() > deadline)));
+    let budget = Budget {
+        started: Instant::now(),
+        timeout,
+        waited_us: Arc::new(AtomicU64::new(0)),
+    };
+    let watch = budget.clone();
+    runtime.set_interrupt_handler(Some(Box::new(move || watch.spent())));
     let context =
         Context::full(&runtime).map_err(|e| format!("cannot start the script engine: {e}"))?;
 
     let input_json = serde_json::to_string(input).expect("script input always serializes");
+    let sleeper = budget.clone();
     let started = context.with(|ctx| -> rquickjs::Result<()> {
         ctx.globals().set("__INPUT", input_json)?;
         // `bru.sleep` blocks this thread; scripts already run off the async
-        // runtime. It never sleeps past the deadline.
+        // runtime. Sleeping counts as waiting, not running.
         let sleep = rquickjs::Function::new(ctx.clone(), move |ms: f64| {
-            let left = deadline.saturating_duration_since(Instant::now());
-            std::thread::sleep(Duration::from_secs_f64(ms / 1000.0).min(left));
+            sleeper.waiting(|left| {
+                std::thread::sleep(Duration::from_secs_f64(ms.max(0.0) / 1000.0).min(left));
+            });
         })?;
         ctx.globals().set("__sleep", sleep)?;
         ctx.eval::<(), _>(PRELUDE)?;
@@ -142,10 +189,10 @@ fn run_inner(
     // the script sends wait in an outbox: they are sent here, outside the
     // engine, and their replies delivered before resuming.
     let result = started.and_then(|()| loop {
-        while runtime.is_job_pending() && Instant::now() <= deadline {
+        while runtime.is_job_pending() && !budget.spent() {
             let _ = runtime.execute_pending_job();
         }
-        if Instant::now() > deadline {
+        if budget.spent() {
             return Err(rquickjs::Error::Exception);
         }
         let outbox: String = context.with(|ctx| {
@@ -160,11 +207,10 @@ fn run_inner(
             });
         }
         for call in calls {
-            let left = deadline.saturating_duration_since(Instant::now());
-            let reply = match send {
+            let reply = budget.waiting(|left| match send {
                 Some(send) => send(&call.request, left),
                 None => Err("sending requests from scripts is not available here".into()),
-            };
+            });
             let reply = match reply {
                 Ok(response) => serde_json::json!({ "response": response }),
                 Err(error) => serde_json::json!({ "error": error }),
@@ -179,7 +225,11 @@ fn run_inner(
         Ok(json) => {
             serde_json::from_str(&json).map_err(|e| format!("unexpected script result: {e}"))
         }
-        Err(_) if Instant::now() > deadline => Err(format!(
+        Err(_) if budget.waited() >= MAX_WAIT => Err(format!(
+            "the script spent more than {} s waiting on bru.sleep and requests",
+            MAX_WAIT.as_secs()
+        )),
+        Err(_) if budget.spent() => Err(format!(
             "the script did not finish within {} ms",
             timeout.as_millis()
         )),

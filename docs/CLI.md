@@ -29,7 +29,7 @@ stormix import COLLECTION -o FILE   # turn a Postman or Bruno collection into a 
 | `--timeout 30s` | Time allowed for each request |
 | `--insecure` | Accept invalid or self-signed TLS certificates |
 | `--no-follow-redirects` | Report redirects instead of following them |
-| `--script-timeout 5s` | Time allowed for each pre-request or test script |
+| `--script-timeout 5s` | Running time allowed for each pre-request or test script. Waiting on `bru.sleep` and `sendRequest` does not count |
 | `--junit FILE` | Also write a JUnit XML report. `run` writes one test case per step; `load` writes one per threshold |
 | `--html FILE` | Also write a self-contained HTML report |
 | `--format text\|json` | What goes to standard output |
