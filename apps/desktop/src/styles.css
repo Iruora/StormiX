@@ -177,3 +177,32 @@ body {
   opacity: 1;
   transform: translate(0, -50%);
 }
+
+/* A progress bar whose end is not known: a segment sweeps across. */
+.progress-sweep {
+  position: absolute;
+  inset-block: 0;
+  width: 35%;
+  border-radius: inherit;
+  background: var(--accent);
+  animation: progress-sweep 1.2s ease-in-out infinite;
+}
+@keyframes progress-sweep {
+  from {
+    left: -35%;
+  }
+  to {
+    left: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress-sweep {
+    left: 0;
+    width: 100%;
+    opacity: 0.5;
+    animation: none;
+  }
+  .animate-spin {
+    animation-duration: 2.4s;
+  }
+}

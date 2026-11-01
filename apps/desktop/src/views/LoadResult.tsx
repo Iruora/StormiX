@@ -2,6 +2,7 @@ import { ArrowDown, ArrowUp, ChevronsUpDown, CircleCheck, CircleX, LoaderCircle,
 import { useMemo, useState } from "react";
 
 import type { LoadProgress, LoadReport, Second, StepResult, StepSummary, ThresholdResult } from "../bindings";
+import { ProgressBar } from "./Busy";
 import { DetailsButton, stepPassed } from "./RunResult";
 import { StepDetails } from "./StepDetails";
 
@@ -14,14 +15,13 @@ export function LoadLive({ points }: { points: LoadProgress[] }) {
     <section className="mt-4 rounded-lg border border-line bg-surface">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line px-4 py-3">
         <LoaderCircle size="1rem" className="animate-spin text-accent" />
-        <span className="font-semibold">Load test running</span>
-        <span className="ml-auto text-xs text-muted">
-          {elapsed}s of {total}s
+        <span className="font-semibold">{last ? "Load test running" : "Starting the load test"}</span>
+        <span className="ml-auto text-xs tabular-nums text-muted">
+          {last ? `${elapsed}s of ${total}s` : "Running setup steps and warming up"}
         </span>
       </div>
-      <div className="h-1 bg-surface-2">
-        <div className="h-1 bg-accent transition-all" style={{ width: total ? `${(elapsed / total) * 100}%` : "0%" }} />
-      </div>
+      {/* Until the first second is in, how long it takes is not known. */}
+      <ProgressBar className="rounded-none" value={last && total ? elapsed / total : null} />
       <div className="grid grid-cols-[repeat(auto-fit,minmax(5rem,1fr))] gap-3 px-4 py-3">
         <Stat label="req/s" value={last ? String(last.requests) : "–"} />
         <Stat label="p95" value={last ? formatMs(last.p95Ms ?? 0) : "–"} />

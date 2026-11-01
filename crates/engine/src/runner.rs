@@ -68,6 +68,15 @@ pub struct Runner {
     cache: Arc<ResponseCache>,
 }
 
+/// A step about to run, as [`Runner::run_with_progress`] reports it.
+#[derive(Debug, Clone, Copy)]
+pub struct StepStart<'a> {
+    /// From 0, among the steps that run.
+    pub index: usize,
+    pub total: usize,
+    pub name: &'a str,
+}
+
 impl Runner {
     pub fn new(options: RunOptions) -> Result<Self, RunnerError> {
         let client = build_client(&options)?;
@@ -126,6 +135,16 @@ impl Runner {
     /// Runs every enabled step once. `overrides` win over the flow's own
     /// variables. Disabled steps are left out of the result entirely.
     pub async fn run(&self, flow: &Flow, overrides: &Variables) -> FlowResult {
+        self.run_with_progress(flow, overrides, |_| {}).await
+    }
+
+    /// Like [`Runner::run`], calling `on_step` as each step starts.
+    pub async fn run_with_progress(
+        &self,
+        flow: &Flow,
+        overrides: &Variables,
+        mut on_step: impl FnMut(StepStart<'_>),
+    ) -> FlowResult {
         let mut vars = Variables::new();
         vars.extend(flow.variables.iter().map(|(k, v)| (k.as_str(), v.as_str())));
         vars.extend(overrides.entries());
@@ -133,11 +152,17 @@ impl Runner {
         let started = Instant::now();
         let mut steps = Vec::with_capacity(flow.steps.len());
         let mut stopped = false;
-        for step in flow.enabled_steps() {
+        let total = flow.enabled_steps().count();
+        for (index, step) in flow.enabled_steps().enumerate() {
             if stopped {
                 steps.push(skipped(step));
                 continue;
             }
+            on_step(StepStart {
+                index,
+                total,
+                name: &step.name,
+            });
             let result = self.run_step(&flow.name, step, &mut vars).await;
             stopped = self.options.bail && !result.passed();
             steps.push(result);
