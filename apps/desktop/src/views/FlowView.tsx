@@ -6,6 +6,8 @@ import {
   CircleX,
   Copy,
   CornerUpLeft,
+  Database,
+  Eraser,
   Flag,
   GripVertical,
   Play,
@@ -16,7 +18,8 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { FlowResult, Step, TestFile } from "../bindings";
+import type { CachedStep, FlowResult, Step, TestFile } from "../bindings";
+import { cachedTitle, storedAgo, useResponseCache } from "../lib/cache";
 import { methodTone } from "../lib/methods";
 import { useVariables, variablesSetBy, variablesUsedBy } from "../lib/variables";
 import { stepPassed } from "./RunResult";
@@ -169,6 +172,8 @@ export function FlowView({
   };
 
   const notes = useDependencyNotes(steps, aside);
+  const cache = useResponseCache(test.flow.name);
+  const cachedCount = steps.filter((s) => cache.steps.has(s.name)).length;
   const enabled = steps.filter(isOn).length;
   const disabled = steps.length - enabled;
   const results = useMemo(() => new Map(lastRun?.steps.map((s) => [s.name, s]) ?? []), [lastRun]);
@@ -198,6 +203,16 @@ export function FlowView({
               All steps
             </label>
           )}
+          {cachedCount > 0 && (
+            <button
+              type="button"
+              onClick={() => cache.clear(null)}
+              title="Forget every cached response in this flow, so the next run sends those requests again"
+              className="flex items-center gap-1 rounded border border-line px-1.5 py-0.5 hover:border-accent hover:text-accent"
+            >
+              <Eraser size={11} /> Clear cache ({cachedCount} step{cachedCount === 1 ? "" : "s"})
+            </button>
+          )}
           <span className="ml-auto text-subtle">Drag the grip to reorder or set aside. Click a step to edit it.</span>
         </div>
 
@@ -225,9 +240,12 @@ export function FlowView({
                 faded={isDragged({ list: "steps", index: i })}
                 result={isOn(step) ? results.get(step.name) : undefined}
                 notes={notes.get(step) ?? []}
+                cached={cache.steps.get(step.name)}
                 last={i === steps.length - 1}
                 onGrip={startDrag({ list: "steps", index: i })}
                 onToggle={() => update({ list: "steps", index: i }, { ...step, enabled: !isOn(step) })}
+                onCacheToggle={() => update({ list: "steps", index: i }, { ...step, cache: !step.cache })}
+                onClearCache={() => cache.clear(step.name)}
                 onMove={(to) => move({ list: "steps", index: i }, { list: "steps", index: to > i ? to + 1 : to })}
                 onDuplicate={() => duplicate({ list: "steps", index: i })}
                 onSetAside={() => move({ list: "steps", index: i }, { list: "aside", index: aside.length })}
@@ -345,9 +363,12 @@ function FlowNode({
   faded,
   result,
   notes,
+  cached,
   last,
   onGrip,
   onToggle,
+  onCacheToggle,
+  onClearCache,
   onMove,
   onDuplicate,
   onSetAside,
@@ -360,9 +381,12 @@ function FlowNode({
   faded: boolean;
   result: FlowResult["steps"][number] | undefined;
   notes: string[];
+  cached: CachedStep | undefined;
   last: boolean;
   onGrip: (e: React.PointerEvent) => void;
   onToggle: () => void;
+  onCacheToggle: () => void;
+  onClearCache: () => void;
   onMove: (to: number) => void;
   onDuplicate: () => void;
   onSetAside: () => void;
@@ -399,7 +423,7 @@ function FlowNode({
             type="button"
             onClick={onOpen}
             title="Edit this step"
-            className={`min-w-0 flex-1 text-left ${on ? "" : "text-muted"}`}
+            className={`min-w-16 flex-1 text-left ${on ? "" : "text-muted"}`}
           >
             <span className={`block truncate font-medium hover:text-accent ${on ? "" : "line-through decoration-subtle"}`}>
               {step.name || <i className="text-subtle">unnamed</i>}
@@ -412,9 +436,10 @@ function FlowNode({
               title="In the last run"
             >
               {stepPassed(result) ? <CircleCheck size={13} /> : <CircleX size={13} />}
-              {result.status ?? "—"} · {Math.round(result.durationMs ?? 0)} ms
+              {result.status ?? "—"} · {result.cached ? "cached" : `${Math.round(result.durationMs ?? 0)} ms`}
             </span>
           )}
+
           {!on && <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-subtle">skipped</span>}
           <div className="flex shrink-0 items-center opacity-60 group-hover:opacity-100">
             <IconButton label="Move up" disabled={index === 0} onClick={() => onMove(index - 1)}>
@@ -433,10 +458,26 @@ function FlowNode({
               <Trash2 size={13} />
             </IconButton>
           </div>
+          <CacheToggle on={!!step.cache} onClick={onCacheToggle} />
           <Toggle on={on} label={on ? "Turn this step off" : "Turn this step on"} onClick={onToggle} />
         </div>
-        {(sets.length > 0 || notes.length > 0) && (
+        {(sets.length > 0 || notes.length > 0 || cached) && (
           <div className="space-y-1 border-t border-line px-3 py-1.5 text-[11px]">
+            {cached && (
+              <div className="flex items-center gap-1.5 text-accent" title={cachedTitle(cached)}>
+                <Database size={11} className="shrink-0" />
+                {cached.responses === 1 ? "Response cached" : `${cached.responses} responses cached`} {storedAgo(cached)};
+                runs reuse it instead of sending
+                <button
+                  type="button"
+                  onClick={onClearCache}
+                  title="Clear this step's cache, so the next run sends the request again"
+                  className="flex items-center gap-0.5 rounded px-1 font-medium hover:bg-accent-soft"
+                >
+                  <Eraser size={11} /> Clear
+                </button>
+              </div>
+            )}
             {sets.length > 0 && (
               <div className="text-subtle">
                 sets{" "}
@@ -537,6 +578,28 @@ function Toggle({ on, label, onClick }: { on: boolean; label: string; onClick: (
       <span
         className={`absolute top-0.5 size-3 rounded-full bg-white shadow transition-all ${on ? "left-3.5" : "left-0.5"}`}
       />
+    </button>
+  );
+}
+
+/** Whether the step reuses its response; stays visible when on, so a cached step stands out. */
+export function CacheToggle({ on, onClick }: { on: boolean; onClick: () => void }) {
+  const label = on
+    ? "Caching: runs reuse this step's response. Click to send it every time."
+    : "Not cached: sent every time. Click to reuse its response in later runs.";
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label="Cache this step's response"
+      title={label}
+      onClick={onClick}
+      className={`shrink-0 rounded p-1 ${
+        on ? "bg-accent-soft text-accent" : "text-subtle opacity-60 hover:bg-surface-2 hover:text-ink group-hover:opacity-100"
+      }`}
+    >
+      <Database size={13} />
     </button>
   );
 }

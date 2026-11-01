@@ -25,7 +25,9 @@ pub enum StoreError {
     NotFound(u32),
 }
 
-/// What a run produced.
+/// What a run produced. One is held at a time, on its way to or from the
+/// database, so the size gap between the variants costs nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case", tag = "kind", content = "result")]

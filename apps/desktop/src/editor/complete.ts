@@ -14,6 +14,7 @@ type Key = { label: string; info: string; value?: string };
 const STEP_KEYS: Key[] = [
   { label: "name", info: "Shown in reports; unique names make comparisons clearer" },
   { label: "enabled", info: "false keeps the step in place but skips it in runs", value: "false" },
+  { label: "cache", info: "true reuses the step's response instead of sending it again, until cleared", value: "true" },
   { label: "request", info: "method, url, headers and body" },
   { label: "extract", info: "Variables to set from the response" },
   { label: "assert", info: "Checks on the response" },
@@ -113,6 +114,7 @@ const VALUES: Record<string, string[]> = {
   "flow/steps/[]/request/method": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
   "flow/steps/[]/assert/[]/json/exists": ["true", "false"],
   "flow/steps/[]/enabled": ["true", "false"],
+  "flow/steps/[]/cache": ["true", "false"],
   version: ["1"],
 };
 

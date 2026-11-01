@@ -207,3 +207,92 @@ load:
     assert_eq!(report.summary.iterations, 0);
     assert!(report.passed(), "no thresholds, so nothing to fail");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cached_steps_are_counted_apart_from_requests() {
+    let url = serve().await;
+    let test = test_file(
+        r#"
+flow:
+  name: cached
+  steps:
+    - name: setup
+      cache: true
+      request: { method: GET, url: "{{base}}/fast" }
+      assert: [{ status: 200 }]
+    - name: fast
+      request: { method: GET, url: "{{base}}/fast" }
+load:
+  virtual_users: { count: 1, duration: 1s }
+"#,
+    );
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(&url),
+        test.load.as_ref().unwrap(),
+        &[],
+        &LoadOptions::default(),
+        |_| {},
+    )
+    .await;
+
+    let s = &report.summary;
+    assert!(s.iterations > 2, "{s:?}");
+    // The setup step ran once before the load, so no iteration sent it and
+    // it is not in the request count or the latency figures.
+    assert_eq!(report.setup.len(), 1);
+    assert!(report.setup[0].passed() && !report.setup[0].cached);
+    assert_eq!(s.cached_responses, s.iterations);
+    assert_eq!(s.requests, s.iterations);
+    let setup = &s.steps[0];
+    assert_eq!(
+        (setup.name.as_str(), setup.requests, setup.cached),
+        ("setup", 0, s.iterations)
+    );
+    assert_eq!(s.failed_iterations, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_open_model_sends_a_cached_prerequisite_once() {
+    let url = serve().await;
+    let test = test_file(
+        r#"
+flow:
+  name: login first
+  steps:
+    - name: login
+      cache: true
+      request: { method: GET, url: "{{base}}/slow" }
+      assert: [{ status: 200 }]
+    - name: fast
+      request: { method: GET, url: "{{base}}/fast" }
+load:
+  constant_rate: { rate: 50, duration: 1s }
+"#,
+    );
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(&url),
+        test.load.as_ref().unwrap(),
+        &[],
+        &LoadOptions::default(),
+        |_| {},
+    )
+    .await;
+
+    // Without the setup pass, the iterations started during the first slow
+    // login would each have sent one of their own.
+    let s = &report.summary;
+    assert_eq!(report.setup.len(), 1);
+    assert_eq!(s.iterations, 50);
+    assert_eq!(s.cached_responses, 50);
+    assert_eq!(s.requests, 50);
+    assert!(s
+        .steps
+        .iter()
+        .all(|st| st.name != "login" || st.requests == 0));
+}

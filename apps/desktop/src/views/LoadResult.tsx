@@ -2,7 +2,7 @@ import { ArrowDown, ArrowUp, ChevronsUpDown, CircleCheck, CircleX, LoaderCircle,
 import { useMemo, useState } from "react";
 
 import type { LoadProgress, LoadReport, Second, StepResult, StepSummary, ThresholdResult } from "../bindings";
-import { DetailsButton } from "./RunResult";
+import { DetailsButton, stepPassed } from "./RunResult";
 import { StepDetails } from "./StepDetails";
 
 /** Live figures while a load test runs: progress, the current second and a throughput chart. */
@@ -56,6 +56,22 @@ export function LoadResult({ report }: { report: LoadReport }) {
         </span>
       </div>
 
+      {(report.setup ?? []).length > 0 && (
+        <div className="border-b border-line px-4 py-2 text-xs">
+          <span className="text-subtle">Set up once before the load, not measured:</span>
+          {(report.setup ?? []).map((st, i) => (
+            <span key={i} className={`ml-2 inline-flex items-center gap-1 ${stepPassed(st) ? "text-muted" : "text-bad"}`}>
+              {stepPassed(st) ? <CircleCheck size={12} className="text-ok" /> : <CircleX size={12} />}
+              {st.name}
+              <span className="mono">
+                {st.error ?? `${st.status ?? "—"} · ${st.cached ? "cached" : formatMs(st.durationMs ?? 0)}`}
+              </span>
+              {!stepPassed(st) && <DetailsButton failed onClick={() => setOpen(st)} />}
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="grid grid-cols-4 gap-3 px-4 py-3">
         <Stat label="requests" value={String(s.requests)} />
         <Stat label="req/s" value={(s.rps ?? 0).toFixed(1)} />
@@ -98,6 +114,12 @@ export function LoadResult({ report }: { report: LoadReport }) {
               );
             })}
           </ul>
+        </div>
+      )}
+      {!!s.cachedResponses && (
+        <div className="border-t border-line px-4 py-2 text-xs text-muted">
+          {s.cachedResponses} responses came from the cache, for steps marked cached. They were not sent, so they are
+          not in the request count or the latency figures.
         </div>
       )}
       {(s.droppedIterations > 0 || s.interruptedIterations > 0) && (
@@ -231,15 +253,21 @@ function StepTable({ steps }: { steps: StepSummary[] }) {
                 <td className="max-w-0 truncate px-4 py-1.5 font-sans text-[13px]" title={step.name}>
                   {step.name}
                 </td>
-                <td className="px-2 py-1.5 text-right">{step.requests}</td>
+                <td
+                  className="px-2 py-1.5 text-right"
+                  title={step.cached ? `Plus ${step.cached} responses reused from the cache, not sent` : undefined}
+                >
+                  {step.requests}
+                  {!!step.cached && <span className="ml-1 text-accent">+{step.cached} cached</span>}
+                </td>
                 <td
                   className={`px-2 py-1.5 text-right ${step.failed > 0 ? "text-bad" : ""}`}
                   title={step.requests ? `${((step.failed / step.requests) * 100).toFixed(2)}% of requests` : undefined}
                 >
                   {step.failed}
                 </td>
-                <td className="px-2 py-1.5 text-right">{formatMs(step.latency.p50 ?? 0)}</td>
-                <td className="px-4 py-1.5 text-right">{formatMs(step.latency.p95 ?? 0)}</td>
+                <td className="px-2 py-1.5 text-right">{step.requests ? formatMs(step.latency.p50 ?? 0) : "–"}</td>
+                <td className="px-4 py-1.5 text-right">{step.requests ? formatMs(step.latency.p95 ?? 0) : "–"}</td>
               </tr>
             ))}
             {rows.length === 0 && (

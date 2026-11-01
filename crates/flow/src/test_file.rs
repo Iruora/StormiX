@@ -141,6 +141,23 @@ thresholds:
     }
 
     #[test]
+    fn caching_is_off_unless_a_step_asks_for_it() {
+        let yaml = LOGIN.replace(
+            "    - name: Profile\n",
+            "    - name: Profile\n      cache: true\n",
+        );
+        let file = TestFile::from_yaml(&yaml).unwrap();
+        assert!(!file.flow.steps[0].cache);
+        assert!(file.flow.steps[1].cache);
+        // Files that never mention it are written back without it.
+        let plain = TestFile::from_yaml(LOGIN).unwrap().to_yaml();
+        assert!(!plain.contains("cache:"), "{plain}");
+        let written = file.to_yaml();
+        assert_eq!(written.matches("cache: true").count(), 1, "{written}");
+        assert_eq!(TestFile::from_yaml(&written).unwrap(), file);
+    }
+
+    #[test]
     fn set_aside_steps_round_trip() {
         let mut file = TestFile::from_yaml(LOGIN).unwrap();
         let parked = file.flow.steps.pop().unwrap();

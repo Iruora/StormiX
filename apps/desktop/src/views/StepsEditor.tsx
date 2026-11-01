@@ -1,7 +1,8 @@
-import { ArrowDown, ArrowUp, Copy, Plus, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, Eraser, Plus, Trash2, X } from "lucide-react";
 import { useRef, useState } from "react";
 
-import type { Assertion, Body, Header, KeyValue, LoadProfile, Method, Step, TestFile } from "../bindings";
+import type { Assertion, Body, CachedStep, Header, KeyValue, LoadProfile, Method, Step, TestFile } from "../bindings";
+import { cachedTitle, useResponseCache } from "../lib/cache";
 import { methodText, methodTone } from "../lib/methods";
 import { VarField } from "./VarField";
 
@@ -16,6 +17,7 @@ const input =
  */
 export function StepsEditor({ test, onChange }: { test: TestFile; onChange: (next: TestFile) => void }) {
   const steps = test.flow.steps;
+  const cache = useResponseCache(test.flow.name);
   const setSteps = (next: Step[]) => onChange({ ...test, flow: { ...test.flow, steps: next } });
   const move = (from: number, to: number) => {
     const next = [...steps];
@@ -49,6 +51,8 @@ export function StepsEditor({ test, onChange }: { test: TestFile; onChange: (nex
             index={i}
             step={step}
             last={i === steps.length - 1}
+            cached={cache.steps.get(step.name)}
+            onClearCache={() => cache.clear(step.name)}
             onChange={(s) => setSteps(steps.map((x, j) => (j === i ? s : x)))}
             onMove={(to) => move(i, to)}
             onDuplicate={() => setSteps([...steps.slice(0, i + 1), { ...step, name: `${step.name} (copy)` }, ...steps.slice(i + 1)])}
@@ -82,6 +86,8 @@ function StepCard({
   index,
   step,
   last,
+  cached,
+  onClearCache,
   onChange,
   onMove,
   onDuplicate,
@@ -90,6 +96,8 @@ function StepCard({
   index: number;
   step: Step;
   last: boolean;
+  cached: CachedStep | undefined;
+  onClearCache: () => void;
   onChange: (next: Step) => void;
   onMove: (to: number) => void;
   onDuplicate: () => void;
@@ -133,6 +141,29 @@ function StepCard({
           />
           run
         </label>
+        <label
+          className="flex items-center gap-1 text-xs text-subtle"
+          title="Reuse this step's response in later runs and load test iterations instead of sending it again"
+        >
+          <input
+            type="checkbox"
+            aria-label="Cache this step's response"
+            checked={!!step.cache}
+            onChange={() => onChange({ ...step, cache: !step.cache })}
+            className="accent-[var(--accent)]"
+          />
+          cache
+        </label>
+        {cached && (
+          <button
+            type="button"
+            onClick={onClearCache}
+            title={`${cachedTitle(cached)} Click to clear it.`}
+            className="flex items-center gap-1 rounded bg-accent-soft px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent hover:text-white"
+          >
+            <Eraser size={11} /> clear cached
+          </button>
+        )}
         <IconButton label="Move up" disabled={index === 0} onClick={() => onMove(index - 1)}>
           <ArrowUp size={14} />
         </IconButton>

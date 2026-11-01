@@ -29,6 +29,7 @@ fn step(name: &str, status: u16, checks: &[(&str, bool)]) -> StepResult {
         logs: Vec::new(),
         error: None,
         skipped: false,
+        cached: false,
         exchange: None,
     }
 }
@@ -149,6 +150,7 @@ fn load(latency_ms: f64, failed: usize, seconds: u64) -> RunData {
         summary: recorder.summary(Duration::from_secs(seconds)),
         thresholds: Vec::new(),
         samples: Vec::new(),
+        setup: Vec::new(),
     })
 }
 

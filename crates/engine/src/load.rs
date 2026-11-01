@@ -60,6 +60,12 @@ pub struct LoadReport {
     /// saved before 1.1.
     #[serde(default)]
     pub samples: Vec<StepResult>,
+    /// Steps run once before the load started, to fill the cache: every
+    /// step up to the last one marked `cache: true`. Prerequisites like a
+    /// login, so they are not in the summary or the thresholds. Empty when
+    /// no step is cached.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub setup: Vec<StepResult>,
 }
 
 /// Enough to show what each failing step did without keeping thousands.
@@ -83,6 +89,10 @@ pub async fn run_load(
     options: &LoadOptions,
     mut on_second: impl FnMut(&Progress<'_>),
 ) -> LoadReport {
+    let setup = match setup_flow(flow) {
+        Some(prefix) => runner.run(&prefix, overrides).await.steps,
+        None => Vec::new(),
+    };
     let shared = Arc::new(Shared {
         runner: runner.keeping(Exchanges::FailedOnly),
         flow: flow.clone(),
@@ -134,7 +144,21 @@ pub async fn run_load(
         thresholds: check_thresholds(thresholds, &summary, &recorder),
         summary,
         samples,
+        setup,
     }
+}
+
+/// The steps to run once before the load, so cached steps are sent once
+/// and iterations only reuse them: the enabled steps up to and including
+/// the last cached one, since a cached step may need variables from the
+/// steps before it. `None` when no enabled step is cached.
+fn setup_flow(flow: &Flow) -> Option<Flow> {
+    let enabled: Vec<_> = flow.enabled_steps().cloned().collect();
+    let last = enabled.iter().rposition(|s| s.cache)?;
+    let mut prefix = flow.clone();
+    prefix.steps = enabled.into_iter().take(last + 1).collect();
+    prefix.set_aside.clear();
+    Some(prefix)
 }
 
 struct Shared {
@@ -249,6 +273,10 @@ async fn drive(
 
 fn record(recorder: &mut Recorder, samples: &mut Vec<StepResult>, result: FlowResult) {
     for step in result.steps.iter().filter(|s| !s.skipped) {
+        if step.cached {
+            recorder.cached(&step.name);
+            continue;
+        }
         let failed: Vec<&str> = step
             .checks
             .iter()

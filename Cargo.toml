@@ -29,6 +29,7 @@ stormix-store = { path = "crates/store" }
 
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 base64 = "0.22"
+bytes = "1"
 clap = { version = "4", features = ["derive"] }
 fastrand = "2"
 hdrhistogram = { version = "7", default-features = false }

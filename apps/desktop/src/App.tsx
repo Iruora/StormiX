@@ -32,6 +32,7 @@ import {
   type TestFile_Deserialize,
 } from "./bindings";
 import { YamlEditor } from "./editor/YamlEditor";
+import { CACHE_KEY } from "./lib/cache";
 import { describeLoad } from "./lib/describe";
 import { methodText } from "./lib/methods";
 import { VariablesContext, variableTable } from "./lib/variables";
@@ -173,7 +174,10 @@ function TestFileView() {
     },
     // Kept past edits, so hovering a variable a step extracts shows its last value.
     onSuccess: (data) => setLastRun(data),
-    onSettled: () => client.invalidateQueries({ queryKey: RUNS_KEY }),
+    onSettled: () => {
+      client.invalidateQueries({ queryKey: RUNS_KEY });
+      client.invalidateQueries({ queryKey: CACHE_KEY });
+    },
   });
   const [points, setPoints] = useState<LoadProgress[]>([]);
   const load = useMutation({
@@ -188,14 +192,17 @@ function TestFileView() {
         unlisten();
       }
     },
-    onSettled: () => client.invalidateQueries({ queryKey: RUNS_KEY }),
+    onSettled: () => {
+      client.invalidateQueries({ queryKey: RUNS_KEY });
+      client.invalidateQueries({ queryKey: CACHE_KEY });
+    },
   });
   const busy = run.isPending || load.isPending;
   const [setupOpen, setSetupOpen] = useState(false);
   // Steps left out of the last load test, by name, offered again next time.
   const [excluded, setExcluded] = useState<string[]>([]);
   /** Saves the setup's load profile and thresholds into the file, then runs the chosen steps. */
-  const startLoad = async ({ included, load: profile, thresholds }: LoadSetupChoice) => {
+  const startLoad = async ({ included, cache, load: profile, thresholds }: LoadSetupChoice) => {
     const test = result?.test;
     if (!test) return;
     setSetupOpen(false);
@@ -203,8 +210,16 @@ function TestFileView() {
     setExcluded(
       test.flow.steps.filter((s, i) => s.enabled !== false && !included.includes(i)).map((s) => s.name),
     );
-    const configured = { ...test, load: profile, thresholds };
-    if (JSON.stringify([test.load, test.thresholds ?? []]) !== JSON.stringify([profile, thresholds])) {
+    const cacheChanged = test.flow.steps.some((s, i) => !!s.cache !== cache[i]);
+    const configured = {
+      ...test,
+      load: profile,
+      thresholds,
+      flow: cacheChanged
+        ? { ...test.flow, steps: test.flow.steps.map((s, i) => ({ ...s, cache: cache[i] })) }
+        : test.flow,
+    };
+    if (cacheChanged || JSON.stringify([test.load, test.thresholds ?? []]) !== JSON.stringify([profile, thresholds])) {
       await editSteps(configured);
     }
     const steps = configured.flow.steps.filter((_, i) => included.includes(i));
