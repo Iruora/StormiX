@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Desktop app
+
+- **Load test** opens a setup dialog first. It lists the flow's endpoints, all selected, with a checkbox each and one to select or clear them all; it warns when a selected step uses a variable only a left-out step extracts. The load profile and thresholds are edited there too and saved into the test file. **Run** closes the dialog and starts the test with the selected steps; **Cancel** closes it. A file without a `load` section can now be load tested: the dialog starts from 10 iterations/s for 30 s.
+- The per-step table of a load test result sorts by any column (click a header; again to flip, a third time for flow order) and filters by step name, failing steps only, and a minimum p95.
+
 ## 1.2.0 (2026-11-01)
 
 ### Desktop app
