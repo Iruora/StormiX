@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### A tidier header
+
+- **File menu.** New from example, Open, Save, Save as, the Postman, Bruno and OpenCollection imports and Export to Bruno are now in one **File** menu at the left of the header, instead of buttons spread over the header and the tab row. Ctrl O opens, Ctrl S saves and Ctrl Shift S saves as, from anywhere in the window (⌘ on macOS).
+- **Environment menu.** One button shows the environment in use and how many of its variables you changed, and turns amber while a secret has no value. It opens the list of environments, **Variables**, **Secrets**, **Import environment** and **Remove**, which used to be five joined buttons.
+- **Search every action with Ctrl K** (⌘ K): type a few letters of an action, an environment, a proxy mode, a step or a workspace, then Enter. The **Search** button in the header opens it too.
+- **Settings** at the bottom of the sidebar holds the proxy for requests and the keyboard shortcuts.
+- The file name and its saved state moved up next to the workspace name; the tab row now only switches between Steps, Flow and YAML.
+
 ## 1.8.2 (2026-11-02)
 
 - **Proxy button in the header**, like Bruno's proxy preference: it shows the mode in use (**System proxy**, **No proxy** or **Proxy**) and changes it before any run, without opening a step's Details.

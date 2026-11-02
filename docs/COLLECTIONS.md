@@ -1,6 +1,6 @@
 # Collections
 
-`stormix run` takes a Postman collection or a Bruno collection as it is, scripts included. Bruno collections can be in either of Bruno's formats: `.bru` files, or [OpenCollection](https://www.opencollection.com) YAML, the format Bruno saves in since v3. `stormix import` converts one into a Stormix test file when you would rather keep YAML in the repository, and `stormix export` goes the other way, writing a test file as an OpenCollection that Bruno opens. The desktop app imports all of them from the **Import** buttons on the Test file screen, and writes the open test file for Bruno with **Export to Bruno**.
+`stormix run` takes a Postman collection or a Bruno collection as it is, scripts included. Bruno collections can be in either of Bruno's formats: `.bru` files, or [OpenCollection](https://www.opencollection.com) YAML, the format Bruno saves in since v3. `stormix import` converts one into a Stormix test file when you would rather keep YAML in the repository, and `stormix export` goes the other way, writing a test file as an OpenCollection that Bruno opens. The desktop app imports all of them from the **File** menu (**Import a collection**), and writes the open test file for Bruno with **File › Export to Bruno**.
 
 ```sh
 stormix run my-api.postman_collection.json --env staging.postman_environment.json
@@ -20,7 +20,7 @@ It imports exactly like the same collection saved as `.bru` files: collection an
 
 ### Exporting to Bruno
 
-`stormix export FILE -o DIR` writes `FILE` (a test file, or any collection Stormix reads) as an OpenCollection folder, with the environments next to the test file in `environments/`. `-o api.yml` writes one bundled file instead. In the desktop app, **Export to Bruno** writes the open test file and its environments to a folder you choose. Then open the folder in Bruno.
+`stormix export FILE -o DIR` writes `FILE` (a test file, or any collection Stormix reads) as an OpenCollection folder, with the environments next to the test file in `environments/`. `-o api.yml` writes one bundled file instead. In the desktop app, **File › Export to Bruno** writes the open test file and its environments to a folder you choose. Then open the folder in Bruno.
 
 - Steps named `Folder / Request` go into folders.
 - `assert` checks become Bruno assertions: `status` is `res.status eq`, `max_duration_ms` is `res.responseTime lte`, `header` checks read `res.headers["name"]`, and `json` checks read the path under `res.body`. `body_contains` becomes a `test` in the tests script.
@@ -39,7 +39,7 @@ base_url: https://staging.example.com
 $secrets: [token]
 ```
 
-In the desktop app, **Import env** adds an environment from any of these files, opening a test file also loads the environments next to it, and **Secrets** asks for the values of the chosen environment's secrets. Those values stay in memory and are never written to a file. Environments stay in the list when you open another file, until you remove them.
+In the desktop app, the environment menu in the header picks the environment and has **Import environment** to add one from any of these files. Opening a test file also loads the environments next to it, and **Secrets** in the same menu asks for the values of the chosen environment's secrets. Those values stay in memory and are never written to a file. Environments stay in the list when you open another file, until you remove them.
 
 Folders are flattened in run order, and each step is named after its folder path, such as `Users / Create user`. Anything that does not carry over is printed as a warning; nothing is dropped silently.
 

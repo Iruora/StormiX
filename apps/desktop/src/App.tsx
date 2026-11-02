@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
+  Check,
   ChevronDown,
   CircleAlert,
   CircleCheck,
@@ -13,12 +14,16 @@ import {
   FolderOutput,
   Gauge,
   History,
+  KeyRound,
   Layers,
   LoaderCircle,
+  Menu as MenuIcon,
   PanelRightClose,
   PanelRightOpen,
   Play,
   Save,
+  Search,
+  Settings,
   SlidersHorizontal,
   TriangleAlert,
   X,
@@ -44,28 +49,30 @@ import { describeLoad } from "./lib/describe";
 import { methodText } from "./lib/methods";
 import { VariablesContext, variableTable } from "./lib/variables";
 import { newWorkspace, WORKSPACES_KEY, workspaceTitle } from "./lib/workspace";
-import { type Activity, ActivityStrip, BusyIcon, Loading } from "./views/Busy";
+import { type Activity, ActivityStrip, Loading } from "./views/Busy";
 import { LoadLive, LoadResult } from "./views/LoadResult";
 import { LoadSetup, type LoadSetupChoice } from "./views/LoadSetup";
 import { RunLive, RunResult, stepPassed } from "./views/RunResult";
 import type { Diagnose } from "./views/StepDetails";
-import { useRestoreProxy } from "./lib/proxy";
+import { useProxy, useRestoreProxy } from "./lib/proxy";
 import { RUNS_KEY, RunsView } from "./views/Runs";
 import { SplitView, usePanel } from "./views/SidePanel";
 import { applyOverrides, EnvEditor, type EnvOverrides } from "./views/EnvEditor";
-import { EnvSecrets } from "./views/EnvSecrets";
 import { FlowView } from "./views/FlowView";
 import { StepsEditor } from "./views/StepsEditor";
 import { UpdateBanner } from "./views/UpdateBanner";
 import { WorkspacesView } from "./views/Workspaces";
 import { ProxyButton } from "./views/ProxySetting";
+import { type Command, CommandPalette } from "./views/CommandPalette";
+import { Menu, MenuItem, MenuLabel, MenuSeparator, shortcut } from "./views/Menu";
+import { SettingsView } from "./views/Settings";
 
 export function App() {
   const info = useQuery({ queryKey: ["app-info"], queryFn: commands.getAppInfo });
   useRestoreProxy();
   const client = useQueryClient();
   const list = useQuery({ queryKey: WORKSPACES_KEY, queryFn: commands.listWorkspaces });
-  const [view, setView] = useState<"file" | "runs" | "workspaces">("file");
+  const [view, setView] = useState<"file" | "runs" | "workspaces" | "settings">("file");
   // The workspace open in the editor, as it was when opened. The editor
   // reports its changes through `onSnapshot`; they are saved shortly after.
   const [active, setActive] = useState<Workspace | null>(null);
@@ -125,7 +132,7 @@ export function App() {
   };
   const showView = (next: typeof view) => {
     setView(next);
-    if (latest.current && next !== "workspaces" && latest.current.view !== next) {
+    if (latest.current && (next === "file" || next === "runs") && latest.current.view !== next) {
       persist({ ...latest.current, view: next });
     }
   };
@@ -168,6 +175,15 @@ export function App() {
     return [{ ...active, name: activeName }, ...saved];
   }, [list.data, active, activeName]);
 
+  const appCommands: Command[] = [
+    { id: "go-runs", group: "Go to", label: "Runs", keywords: "history", run: () => showView("runs") },
+    { id: "go-workspaces", group: "Go to", label: "Workspaces", run: () => showView("workspaces") },
+    { id: "go-settings", group: "Go to", label: "Settings", keywords: "proxy preferences", run: () => showView("settings") },
+    ...items
+      .filter((w) => w.id !== active?.id)
+      .map((w) => ({ id: `ws-${w.id}`, group: "Switch workspace", label: w.name, run: () => openWorkspace(w) })),
+  ];
+
   return (
     <div className="flex h-full">
       <nav className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-line bg-surface py-3">
@@ -185,7 +201,14 @@ export function App() {
           active={view === "workspaces"}
           onClick={() => showView("workspaces")}
         />
-        <div className="mt-auto text-[0.625rem] text-subtle">{info.data ? `v${info.data.version}` : ""}</div>
+        <div className="mt-auto" />
+        <NavItem
+          icon={<Settings size="1.125rem" />}
+          label="Settings"
+          active={view === "settings"}
+          onClick={() => showView("settings")}
+        />
+        <div className="mt-1 text-[0.625rem] text-subtle">{info.data ? `v${info.data.version}` : ""}</div>
       </nav>
       <main className="flex min-w-0 flex-1 flex-col">
         <UpdateBanner />
@@ -200,12 +223,20 @@ export function App() {
               onSnapshot={onSnapshot}
               secretValues={secretValues}
               setSecretValues={setSecretValues}
+              visible={view === "file"}
+              appCommands={appCommands}
+              onShowFile={() => showView("file")}
             />
           )}
         </div>
         {view === "runs" && (
           <div className="min-h-0 flex-1">
             <RunsView />
+          </div>
+        )}
+        {view === "settings" && (
+          <div className="min-h-0 flex-1">
+            <SettingsView version={info.data?.version ?? null} />
           </div>
         )}
         {view === "workspaces" && (
@@ -275,6 +306,9 @@ function TestFileView({
   onSnapshot,
   secretValues,
   setSecretValues,
+  visible,
+  appCommands,
+  onShowFile,
 }: {
   /** What to show at first; the view reports its changes to `onSnapshot`. */
   workspace: Workspace;
@@ -283,6 +317,12 @@ function TestFileView({
   onSnapshot: (snap: Snapshot) => void;
   secretValues: Record<string, string>;
   setSecretValues: Dispatch<SetStateAction<Record<string, string>>>;
+  /** Whether this page is the one shown; its shortcuts only work then. */
+  visible: boolean;
+  /** Going to the app's other pages, for the Ctrl K search. */
+  appCommands: Command[];
+  /** Brings this page to the front. */
+  onShowFile: () => void;
 }) {
   const example = useQuery({ queryKey: ["example"], queryFn: commands.exampleTestFile });
   const [text, setText] = useState<string | null>(ws.text);
@@ -692,6 +732,132 @@ function TestFileView({
   });
   const fileBusy = file.isPending || importFrom.isPending || importEnv.isPending || exportBruno.isPending;
 
+  const newFromExample = () => {
+    setImported(null);
+    setPath(null);
+    edit(null);
+  };
+  const runOnce = () => {
+    if (!canRun || busy || fileBusy) return;
+    load.reset();
+    panel.setOpen(true);
+    run.mutate(source);
+  };
+  const chooseEnv = (name: string) => {
+    setEnvName(name);
+    run.reset();
+  };
+  /** Shows the Steps tab and scrolls to step `i` once it has rendered. */
+  const openStep = (i: number) => {
+    setTab("steps");
+    requestAnimationFrame(() =>
+      document.getElementById(`step-${i}`)?.scrollIntoView({ block: "start", behavior: "smooth" }),
+    );
+  };
+  const fileLabel = path
+    ? path.split(/[\\/]/).pop()
+    : imported
+      ? "Imported, not saved"
+      : text == null
+        ? "Unsaved example"
+        : "Not saved to a file";
+
+  // Every action, for the Ctrl K search.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const proxy = useProxy();
+  const paletteCommands = (): Command[] => {
+    const local: Command[] = [
+      { id: "new", group: "File", label: "New from example", disabled: fileBusy, run: newFromExample },
+      { id: "open", group: "File", label: "Open…", hint: shortcut("O"), disabled: fileBusy, run: () => file.mutate("open") },
+      { id: "save", group: "File", label: "Save", hint: shortcut("S"), disabled: fileBusy, run: () => file.mutate("save") },
+      { id: "save-as", group: "File", label: "Save as…", hint: shortcut("S", true), disabled: fileBusy, run: () => file.mutate("saveAs") },
+      { id: "import-postman", group: "File", label: "Import a Postman collection…", disabled: fileBusy, run: () => importFrom.mutate("postman") },
+      { id: "import-bruno", group: "File", label: "Import a Bruno folder…", disabled: fileBusy, run: () => importFrom.mutate("bruno") },
+      {
+        id: "import-oc",
+        group: "File",
+        label: "Import an OpenCollection file…",
+        disabled: fileBusy,
+        run: () => importFrom.mutate("opencollection"),
+      },
+      { id: "export-bruno", group: "File", label: "Export to Bruno…", disabled: fileBusy, run: () => exportBruno.mutate() },
+      { id: "run", group: "Run", label: "Run once", disabled: !canRun || busy || fileBusy, run: runOnce },
+      { id: "load", group: "Run", label: "Load test…", disabled: !canRun || busy || fileBusy, run: () => setSetupOpen(true) },
+      ...envNames.map((name) => ({
+        id: `env-${name}`,
+        group: "Environment",
+        label: `Use the ${name} environment`,
+        hint: envName === name ? "in use" : undefined,
+        run: () => chooseEnv(name),
+      })),
+      ...(envNames.length > 0
+        ? [{ id: "env-none", group: "Environment", label: "Use no environment", hint: envName === "" ? "in use" : undefined, run: () => chooseEnv("") }]
+        : []),
+      ...(env
+        ? [{ id: "env-edit", group: "Environment", label: "Variables and secrets…", run: () => setEnvEditorOpen(true) }]
+        : []),
+      { id: "env-import", group: "Environment", label: "Import an environment…", disabled: fileBusy, run: () => importEnv.mutate() },
+      {
+        id: "proxy-system",
+        group: "Proxy",
+        label: "Use the system proxy",
+        hint: proxy.current === "system" ? "in use" : undefined,
+        run: () => proxy.change.mutate("system"),
+      },
+      {
+        id: "proxy-none",
+        group: "Proxy",
+        label: "Use no proxy",
+        keywords: "direct off",
+        hint: proxy.current === "none" ? "in use" : undefined,
+        run: () => proxy.change.mutate("none"),
+      },
+      { id: "tab-steps", group: "View", label: "Show the steps", run: () => setTab("steps") },
+      { id: "tab-flow", group: "View", label: "Show the flow", run: () => setTab("flow") },
+      { id: "tab-yaml", group: "View", label: "Show the YAML", run: () => setTab("yaml") },
+      {
+        id: "panel",
+        group: "View",
+        label: panel.open ? "Hide the results panel" : "Show the results panel",
+        run: () => panel.setOpen(!panel.open),
+      },
+      ...(shown?.flow.steps ?? []).map((step, i) => ({
+        id: `step-${i}`,
+        group: "Go to step",
+        label: step.name,
+        keywords: `${step.request.method} ${step.request.url}`,
+        hint: step.request.method,
+        run: () => openStep(i),
+      })),
+    ];
+    // These are about the test file, so they show it first.
+    return [...local.map((c) => ({ ...c, run: () => (onShowFile(), c.run()) })), ...appCommands];
+  };
+  // Shortcuts that work anywhere in the window, unless a focused editor took the key.
+  const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
+  onKey.current = (e) => {
+    if (e.defaultPrevented || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+    const key = e.key.toLowerCase();
+    if (key === "k") {
+      e.preventDefault();
+      setPaletteOpen((o) => !o);
+      return;
+    }
+    if (!visible || fileBusy) return;
+    if (key === "o" && !e.shiftKey) {
+      e.preventDefault();
+      file.mutate("open");
+    } else if (key === "s") {
+      e.preventDefault();
+      file.mutate(e.shiftKey ? "saveAs" : "save");
+    }
+  };
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => onKey.current(e);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
+
   const editorPane = (
     <>
       <div className="flex flex-wrap items-center gap-1 whitespace-nowrap border-b border-line bg-surface px-3 py-1.5">
@@ -707,45 +873,7 @@ function TestFileView({
             {t === "steps" ? "Steps" : t === "flow" ? "Flow" : "YAML"}
           </button>
         ))}
-        <span className="mono ml-3 min-w-0 flex-1 basis-24 truncate text-xs text-muted" title={path ?? undefined}>
-          {path
-            ? path.split(/[\\/]/).pop()
-            : imported
-              ? "Imported, not saved"
-              : text == null
-                ? "Unsaved example"
-                : "Not saved to a file"}
-          {dirty && <span className="text-warn"> ●</span>}
-          {justSaved && !dirty && (
-            <span className="ml-1.5 inline-flex items-center gap-1 font-sans text-ok">
-              <CircleCheck size="0.75rem" />
-              Saved
-            </span>
-          )}
-        </span>
-        <FileButton
-          label="Open"
-          icon={<FolderOpen size="0.8125rem" />}
-          busy={file.isPending && file.variables === "open"}
-          disabled={fileBusy}
-          onClick={() => file.mutate("open")}
-        />
-        <FileButton
-          label="Save"
-          icon={<Save size="0.8125rem" />}
-          busy={file.isPending && file.variables !== "open"}
-          disabled={fileBusy}
-          onClick={() => file.mutate("save")}
-        />
-        <FileButton label="Save as" disabled={fileBusy} onClick={() => file.mutate("saveAs")} />
-        <FileButton
-          label="Export to Bruno"
-          title="Write this test file as an OpenCollection folder, the YAML format Bruno opens"
-          icon={<FolderOutput size="0.8125rem" />}
-          busy={exportBruno.isPending}
-          disabled={fileBusy}
-          onClick={() => exportBruno.mutate()}
-        />
+        <span className="flex-1" />
         <PanelToggle
           open={panel.open}
           onClick={() => panel.setOpen(!panel.open)}
@@ -796,13 +924,7 @@ function TestFileView({
               test={shown}
               onChange={editSteps}
               lastRun={run.data ?? null}
-              onOpenStep={(i) => {
-                setTab("steps");
-                // Once the Steps tab has rendered, bring that step into view.
-                requestAnimationFrame(() =>
-                  document.getElementById(`step-${i}`)?.scrollIntoView({ block: "start", behavior: "smooth" }),
-                );
-              }}
+              onOpenStep={openStep}
             />
           </VariablesContext.Provider>
         </div>
@@ -934,6 +1056,7 @@ function TestFileView({
     });
   };
   const changedCount = Object.keys(overrides[envName] ?? {}).length;
+  const missingSecrets = env ? env.secrets.filter((n) => !secretValues[n]).length : 0;
   // Where an environment without a file of its own would be saved.
   const besidePath = useQuery({
     queryKey: ["env-path", path, envName],
@@ -962,151 +1085,174 @@ function TestFileView({
   return (
     <div className="flex h-full flex-col">
       {/* Wraps onto more lines when the window is narrow or the text is large. */}
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 whitespace-nowrap border-b border-line bg-surface px-5 py-3">
-        <div className="flex min-w-0 flex-1 basis-48 items-baseline gap-3">
-          <h1 className="shrink-0 text-[0.9375rem] font-semibold">Test file</h1>
+      <header className="flex flex-wrap items-center gap-x-2 gap-y-2 whitespace-nowrap border-b border-line bg-surface px-4 py-2.5">
+        <div className="flex min-w-0 flex-1 basis-72 items-center gap-2">
+          <Menu label="File" icon={<MenuIcon size="0.8125rem" />} width="w-72">
+            {(close) => (
+              <>
+                <MenuItem icon={<FilePlus size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), newFromExample())}>
+                  New from example
+                </MenuItem>
+                <MenuItem
+                  icon={<FolderOpen size="0.8125rem" />}
+                  hint={shortcut("O")}
+                  disabled={fileBusy}
+                  onClick={() => (close(), file.mutate("open"))}
+                >
+                  Open…
+                </MenuItem>
+                <MenuItem
+                  icon={<Save size="0.8125rem" />}
+                  hint={shortcut("S")}
+                  disabled={fileBusy}
+                  onClick={() => (close(), file.mutate("save"))}
+                >
+                  Save
+                </MenuItem>
+                <MenuItem icon={null} hint={shortcut("S", true)} disabled={fileBusy} onClick={() => (close(), file.mutate("saveAs"))}>
+                  Save as…
+                </MenuItem>
+                <MenuSeparator />
+                <MenuLabel>Import a collection</MenuLabel>
+                <MenuItem icon={<FileJson size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), importFrom.mutate("postman"))}>
+                  Postman collection…
+                </MenuItem>
+                <MenuItem icon={<FolderOpen size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), importFrom.mutate("bruno"))}>
+                  Bruno folder…
+                </MenuItem>
+                <MenuItem
+                  icon={<FileCode size="0.8125rem" />}
+                  disabled={fileBusy}
+                  onClick={() => (close(), importFrom.mutate("opencollection"))}
+                >
+                  OpenCollection file…
+                </MenuItem>
+                <MenuSeparator />
+                <MenuItem icon={<FolderOutput size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), exportBruno.mutate())}>
+                  Export to Bruno…
+                </MenuItem>
+              </>
+            )}
+          </Menu>
           <button
             type="button"
             onClick={onWorkspaces}
             title="This workspace is saved as you work. Open the list to switch or rename."
-            className="flex min-w-0 items-center gap-1 self-center rounded-md border border-line px-2 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-ink"
+            className="flex min-w-0 shrink items-center gap-1 rounded-md px-1.5 py-1 text-[0.8125rem] font-semibold hover:bg-surface-2"
           >
-            <Layers size="0.75rem" className="shrink-0" />
+            <Layers size="0.8125rem" className="shrink-0 text-muted" />
             <span className="truncate">{workspaceName}</span>
-            <ChevronDown size="0.75rem" className="shrink-0" />
+            <ChevronDown size="0.75rem" className="shrink-0 text-muted" />
           </button>
+          <span className="mono min-w-0 shrink truncate text-xs text-muted" title={path ?? undefined}>
+            {fileLabel}
+            {dirty && <span className="text-warn" title="Not saved yet"> ●</span>}
+          </span>
+          {justSaved && !dirty && (
+            <span className="inline-flex shrink-0 items-center gap-1 text-xs text-ok">
+              <CircleCheck size="0.75rem" />
+              Saved
+            </span>
+          )}
         </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <span className="text-xs text-muted">Import</span>
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            disabled={fileBusy}
-            aria-busy={importFrom.isPending && importFrom.variables === "postman"}
-            onClick={() => importFrom.mutate("postman")}
-            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100 disabled:hover:bg-transparent"
+            onClick={() => setPaletteOpen(true)}
+            title="Search every action, environment and step"
+            className="flex items-center gap-2 rounded-md border border-line px-2.5 py-1 text-xs text-subtle hover:bg-surface-2 hover:text-ink"
           >
-            <BusyIcon busy={importFrom.isPending && importFrom.variables === "postman"} icon={<FileJson size="0.8125rem" />} />
-            Postman
+            <Search size="0.8125rem" />
+            Search
+            <kbd className="font-sans text-[0.6875rem]">{shortcut("K")}</kbd>
           </button>
-          <button
-            type="button"
-            disabled={fileBusy}
-            aria-busy={importFrom.isPending && importFrom.variables === "bruno"}
-            onClick={() => importFrom.mutate("bruno")}
-            title="A Bruno collection folder, in .bru files or OpenCollection YAML"
-            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100 disabled:hover:bg-transparent"
+          <Menu
+            label={
+              <>
+                <span className="max-w-40 truncate">{env ? envName : "No environment"}</span>
+                {changedCount > 0 && <span className="font-semibold text-warn">· {changedCount} changed</span>}
+              </>
+            }
+            icon={importEnv.isPending ? <LoaderCircle size="0.8125rem" className="animate-spin" /> : <SlidersHorizontal size="0.8125rem" />}
+            tone={missingSecrets > 0 ? "warn" : "muted"}
+            title={
+              missingSecrets > 0
+                ? `${count(missingSecrets, "secret")} without a value yet`
+                : "Choose the environment, and see or change its variables"
+            }
+            align="right"
           >
-            <BusyIcon busy={importFrom.isPending && importFrom.variables === "bruno"} icon={<FolderOpen size="0.8125rem" />} />
-            Bruno
-          </button>
-          <button
-            type="button"
-            disabled={fileBusy}
-            aria-busy={importFrom.isPending && importFrom.variables === "opencollection"}
-            onClick={() => importFrom.mutate("opencollection")}
-            title="An OpenCollection file: a collection's opencollection.yml, or a bundled .yml holding the whole collection"
-            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100 disabled:hover:bg-transparent"
-          >
-            <BusyIcon
-              busy={importFrom.isPending && importFrom.variables === "opencollection"}
-              icon={<FileCode size="0.8125rem" />}
-            />
-            OpenCollection
-          </button>
-          <div className="flex items-center rounded-md border border-line">
-            {envNames.length > 0 && (
-              <select
-                aria-label="Environment"
-                value={envName}
-                onChange={(e) => {
-                  setEnvName(e.target.value);
-                  run.reset();
-                }}
-                className="max-w-40 rounded-l-md border-r border-line bg-surface px-2 py-1 text-xs"
-              >
-                <option value="">No environment</option>
-                {envNames.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            )}
-            {env && (
-              <button
-                type="button"
-                onClick={() => setEnvEditorOpen(true)}
-                title={
-                  changedCount
-                    ? `${changedCount} variable${changedCount === 1 ? "" : "s"} changed for this session only`
-                    : "See and change this environment's variables"
-                }
-                className={`flex items-center gap-1.5 border-r border-line px-2 py-1 text-xs hover:bg-surface-2 ${
-                  changedCount ? "text-warn" : "text-muted"
-                }`}
-              >
-                <SlidersHorizontal size="0.8125rem" />
-                Variables
-                {changedCount > 0 && (
-                  <span className="rounded-full bg-warn-soft px-1.5 text-[0.6875rem] font-semibold">{changedCount}</span>
+            {(close) => (
+              <>
+                {envNames.length > 0 && (
+                  <>
+                    <MenuLabel>Environment</MenuLabel>
+                    <MenuItem
+                      icon={envName === "" ? <Check size="0.8125rem" /> : null}
+                      checked={envName === ""}
+                      onClick={() => (close(), chooseEnv(""))}
+                    >
+                      No environment
+                    </MenuItem>
+                    {envNames.map((name) => (
+                      <MenuItem
+                        key={name}
+                        icon={envName === name ? <Check size="0.8125rem" /> : null}
+                        checked={envName === name}
+                        onClick={() => (close(), chooseEnv(name))}
+                      >
+                        {name}
+                      </MenuItem>
+                    ))}
+                    <MenuSeparator />
+                  </>
                 )}
-              </button>
+                {env && (
+                  <>
+                    <MenuItem
+                      icon={<SlidersHorizontal size="0.8125rem" />}
+                      hint={
+                        changedCount > 0 ? (
+                          <span className="rounded-full bg-warn-soft px-1.5 font-semibold text-warn">{changedCount} changed</span>
+                        ) : undefined
+                      }
+                      onClick={() => (close(), setEnvEditorOpen(true))}
+                    >
+                      Variables…
+                    </MenuItem>
+                    {env.secrets.length > 0 && (
+                      <MenuItem
+                        icon={<KeyRound size="0.8125rem" />}
+                        hint={
+                          <span className={missingSecrets > 0 ? "text-warn" : undefined}>
+                            {env.secrets.length - missingSecrets} of {env.secrets.length} set
+                          </span>
+                        }
+                        onClick={() => (close(), setEnvEditorOpen(true))}
+                      >
+                        Secrets…
+                      </MenuItem>
+                    )}
+                    <MenuSeparator />
+                  </>
+                )}
+                <MenuItem icon={<FileUp size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), importEnv.mutate())}>
+                  Import environment…
+                </MenuItem>
+                {env && (
+                  <MenuItem icon={<X size="0.8125rem" />} tone="bad" onClick={() => (close(), removeEnv(envName))}>
+                    Remove {envName} from the list
+                  </MenuItem>
+                )}
+              </>
             )}
-            {env && env.secrets.length > 0 && (
-              <EnvSecrets
-                names={env.secrets}
-                values={secretValues}
-                onChange={(name, value) => {
-                  setSecretValues((v) => ({ ...v, [name]: value }));
-                  run.reset();
-                }}
-              />
-            )}
-            {env && (
-              <button
-                type="button"
-                aria-label={`Remove the ${envName} environment`}
-                title="Remove this environment from the list"
-                onClick={() => removeEnv(envName)}
-                className="border-r border-line px-1.5 py-1 text-muted hover:bg-surface-2 hover:text-ink"
-              >
-                <X size="0.8125rem" />
-              </button>
-            )}
-            <button
-              type="button"
-              disabled={fileBusy}
-              aria-busy={importEnv.isPending}
-              onClick={() => importEnv.mutate()}
-              title="Import an environment file: YAML or JSON variables, a Postman environment export or a Bruno environment (.bru or OpenCollection .yml)"
-              className="flex items-center gap-1.5 rounded-r-md px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100"
-            >
-              <BusyIcon busy={importEnv.isPending} icon={<FileUp size="0.8125rem" />} />
-              {envNames.length > 0 ? "Env" : "Import env"}
-            </button>
-          </div>
+          </Menu>
           <ProxyButton />
-          <button
-            type="button"
-            disabled={fileBusy}
-            onClick={() => {
-              setImported(null);
-              setPath(null);
-              edit(null);
-            }}
-            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100"
-          >
-            <FilePlus size="0.8125rem" />
-            New from example
-          </button>
+          <span className="mx-0.5 h-5 w-px bg-line" aria-hidden />
           <button
             type="button"
             disabled={!canRun || busy || fileBusy}
-            onClick={() => {
-              load.reset();
-              panel.setOpen(true);
-              run.mutate(source);
-            }}
+            onClick={runOnce}
             aria-busy={run.isPending}
             className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 aria-busy:opacity-100"
           >
@@ -1145,6 +1291,7 @@ function TestFileView({
           onClose={() => setEnvEditorOpen(false)}
         />
       )}
+      {paletteOpen && <CommandPalette commands={paletteCommands()} onClose={() => setPaletteOpen(false)} />}
       {setupOpen && result?.test && (
         <LoadSetup
           test={result.test}
@@ -1174,36 +1321,6 @@ function PanelToggle({ open, onClick, alert }: { open: boolean; onClick: () => v
       {!open && alert && (
         <span className={`absolute right-0.5 top-0.5 size-1.5 rounded-full ${alert === "bad" ? "bg-bad" : "bg-warn"}`} />
       )}
-    </button>
-  );
-}
-
-function FileButton({
-  label,
-  title,
-  icon,
-  busy,
-  disabled,
-  onClick,
-}: {
-  label: string;
-  title?: string;
-  icon?: ReactNode;
-  busy?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      disabled={disabled}
-      aria-busy={busy}
-      className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-ink disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100 disabled:hover:bg-transparent disabled:hover:text-muted"
-    >
-      <BusyIcon busy={busy} icon={icon} />
-      {label}
     </button>
   );
 }
