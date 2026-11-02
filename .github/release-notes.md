@@ -1,7 +1,6 @@
-Stormix 1.8.1 lets you choose the proxy requests go through.
+Stormix 1.8.2 adds a proxy button to the header.
 
-- **Choose the proxy:** System (the default), **No proxy** or one given proxy, under **Proxy for requests** in a step's Details (**Connection** tab), and `--proxy system|none|URL` on the command line. A corporate proxy taken from `HTTPS_PROXY` could block a request that Bruno, with its proxy off, gets through.
-- **Diagnose** retries a request that failed through a proxy without it, and says when the proxy is what refuses it, with a **Use no proxy** button. FortiGate and FortiProxy block pages are recognised.
+- **Proxy button**, like Bruno's proxy preference: it shows the mode in use (**System proxy**, **No proxy** or **Proxy** with an address) and changes it before any run. The choice is kept when Stormix restarts, and is still under **Proxy for requests** in a step's Details (**Connection** tab).
 
 If you are on 1.1 or later, the app offers this update by itself. On 1.0, download it once from the table below.
 
