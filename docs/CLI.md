@@ -30,6 +30,7 @@ stormix import COLLECTION -o FILE   # turn a Postman or Bruno collection into a 
 | `--insecure` | Accept invalid or self-signed TLS certificates |
 | `--no-follow-redirects` | Report redirects instead of following them |
 | `--script-timeout 5s` | Running time allowed for each pre-request or test script. Waiting on `bru.sleep` and `sendRequest` does not count |
+| `--trace [request\|flow\|off]` | Send a W3C `traceparent` header with every request, for Dynatrace and other APM tools, and report each request's trace ID. `request` (the default with no value) gives each request its own trace, `flow` one trace per flow run; `off` sends none even if the file sets `trace` |
 | `--junit FILE` | Also write a JUnit XML report. `run` writes one test case per step; `load` writes one per threshold |
 | `--html FILE` | Also write a self-contained HTML report |
 | `--format text\|json` | What goes to standard output |

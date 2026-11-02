@@ -66,7 +66,28 @@ pub struct LoadReport {
     /// no step is cached.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub setup: Vec<StepResult>,
+    /// The slowest requests of each step that went out with a trace ID,
+    /// slowest first, to look up in Dynatrace or another APM tool. Empty
+    /// when the flow has no `trace`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slowest: Vec<SlowRequest>,
 }
+
+/// One traced request from a load test.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct SlowRequest {
+    pub step: String,
+    pub trace_id: String,
+    pub span_id: String,
+    pub duration_ms: f64,
+    pub status: Option<u16>,
+    pub passed: bool,
+}
+
+/// How many of each step's slowest traced requests a report keeps.
+const SLOWEST_PER_STEP: usize = 5;
 
 /// Enough to show what each failing step did without keeping thousands.
 const MAX_SAMPLES: usize = 20;
@@ -112,13 +133,14 @@ pub async fn run_load(
 
     let mut recorder = Recorder::new();
     let mut samples = Vec::new();
+    let mut slowest = Slowest::default();
     let mut tick = tokio::time::interval_at(
         tokio::time::Instant::from_std(started) + Duration::from_secs(1),
         Duration::from_secs(1),
     );
     let outcome = loop {
         tokio::select! {
-            Some(result) = rx.recv() => record(&mut recorder, &mut samples, result),
+            Some(result) = rx.recv() => record(&mut recorder, &mut samples, &mut slowest, result),
             _ = tick.tick() => {
                 let elapsed = started.elapsed();
                 let target = target(profile, elapsed.min(total));
@@ -131,7 +153,7 @@ pub async fn run_load(
     };
     let elapsed = started.elapsed();
     while let Ok(result) = rx.try_recv() {
-        record(&mut recorder, &mut samples, result);
+        record(&mut recorder, &mut samples, &mut slowest, result);
     }
     // The last, partial second, so its requests reach the timeline too.
     recorder.close_second(0);
@@ -145,6 +167,56 @@ pub async fn run_load(
         summary,
         samples,
         setup,
+        slowest: slowest.into_list(),
+    }
+}
+
+/// Each step's slowest traced requests so far.
+#[derive(Default)]
+struct Slowest {
+    /// In the order steps first appear; each list slowest first.
+    by_step: Vec<(String, Vec<SlowRequest>)>,
+}
+
+impl Slowest {
+    fn offer(&mut self, step: &StepResult) {
+        let (Some(trace_id), Some(span_id)) = (&step.trace_id, &step.span_id) else {
+            return;
+        };
+        let list = match self.by_step.iter().position(|(name, _)| *name == step.name) {
+            Some(i) => &mut self.by_step[i].1,
+            None => {
+                self.by_step.push((step.name.clone(), Vec::new()));
+                &mut self.by_step.last_mut().expect("just pushed").1
+            }
+        };
+        if list.len() == SLOWEST_PER_STEP
+            && list
+                .last()
+                .is_some_and(|l| l.duration_ms >= step.duration_ms)
+        {
+            return;
+        }
+        let at = list.partition_point(|l| l.duration_ms >= step.duration_ms);
+        list.insert(
+            at,
+            SlowRequest {
+                step: step.name.clone(),
+                trace_id: trace_id.clone(),
+                span_id: span_id.clone(),
+                duration_ms: step.duration_ms,
+                status: step.status,
+                passed: step.passed() && step.status.is_none_or(|s| s < 400),
+            },
+        );
+        list.truncate(SLOWEST_PER_STEP);
+    }
+
+    /// Every step's, slowest first overall.
+    fn into_list(self) -> Vec<SlowRequest> {
+        let mut all: Vec<SlowRequest> = self.by_step.into_iter().flat_map(|(_, l)| l).collect();
+        all.sort_by(|a, b| b.duration_ms.total_cmp(&a.duration_ms));
+        all
     }
 }
 
@@ -271,12 +343,18 @@ async fn drive(
     }
 }
 
-fn record(recorder: &mut Recorder, samples: &mut Vec<StepResult>, result: FlowResult) {
+fn record(
+    recorder: &mut Recorder,
+    samples: &mut Vec<StepResult>,
+    slowest: &mut Slowest,
+    result: FlowResult,
+) {
     for step in result.steps.iter().filter(|s| !s.skipped) {
         if step.cached {
             recorder.cached(&step.name);
             continue;
         }
+        slowest.offer(step);
         let failed: Vec<&str> = step
             .checks
             .iter()

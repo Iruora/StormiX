@@ -145,6 +145,7 @@ pub fn from_dir_with_progress(
                 variables,
                 steps: importer.steps,
                 set_aside: Vec::new(),
+                trace: None,
             },
             load: None,
             thresholds: Vec::new(),

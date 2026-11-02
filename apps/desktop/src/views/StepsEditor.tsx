@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import type { Assertion, Body, CachedStep, GraphqlBody, Header, KeyValue, LoadProfile, Method, Step, TestFile } from "../bindings";
 import { cachedTitle, useResponseCache } from "../lib/cache";
 import { methodText, methodTone } from "../lib/methods";
+import { TraceSetting } from "./TraceSetting";
 import { VarField } from "./VarField";
 
 const METHODS: Method[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
@@ -37,6 +38,11 @@ export function StepsEditor({ test, onChange }: { test: TestFile; onChange: (nex
           className={`${input} mt-1 w-full font-semibold`}
         />
       </label>
+      <TraceSetting
+        compact
+        value={test.flow.trace ?? null}
+        onChange={(trace) => onChange({ ...test, flow: { ...test.flow, trace } })}
+      />
 
       {(test.flow.set_aside?.length ?? 0) > 0 && (
         <p className="text-xs text-subtle">

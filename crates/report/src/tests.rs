@@ -26,6 +26,8 @@ fn step(name: &str, status: u16, passed: bool) -> StepResult {
         error: None,
         skipped: false,
         cached: false,
+        trace_id: None,
+        span_id: None,
         exchange: None,
     }
 }
@@ -76,6 +78,7 @@ fn load_report_has_thresholds_timeline_and_steps() {
         }],
         samples: Vec::new(),
         setup: Vec::new(),
+        slowest: Vec::new(),
     };
     let html = load_report(&report);
     assert!(html.contains("Thresholds failed"));

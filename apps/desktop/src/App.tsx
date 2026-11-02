@@ -404,7 +404,7 @@ function TestFileView({
   // Steps left out of the last load test, by name, offered again next time.
   const [excluded, setExcluded] = useState<string[]>(ws.excluded);
   /** Saves the setup's load profile and thresholds into the file, then runs the chosen steps. */
-  const startLoad = async ({ included, cache, load: profile, thresholds }: LoadSetupChoice) => {
+  const startLoad = async ({ included, cache, load: profile, thresholds, trace }: LoadSetupChoice) => {
     const test = result?.test;
     if (!test) return;
     setSetupOpen(false);
@@ -413,15 +413,18 @@ function TestFileView({
       test.flow.steps.filter((s, i) => s.enabled !== false && !included.includes(i)).map((s) => s.name),
     );
     const cacheChanged = test.flow.steps.some((s, i) => !!s.cache !== cache[i]);
+    const traceChanged = (test.flow.trace ?? null) !== trace;
     const configured = {
       ...test,
       load: profile,
       thresholds,
-      flow: cacheChanged
-        ? { ...test.flow, steps: test.flow.steps.map((s, i) => ({ ...s, cache: cache[i] })) }
-        : test.flow,
+      flow: {
+        ...test.flow,
+        trace,
+        steps: cacheChanged ? test.flow.steps.map((s, i) => ({ ...s, cache: cache[i] })) : test.flow.steps,
+      },
     };
-    if (cacheChanged || JSON.stringify([test.load, test.thresholds ?? []]) !== JSON.stringify([profile, thresholds])) {
+    if (cacheChanged || traceChanged || JSON.stringify([test.load, test.thresholds ?? []]) !== JSON.stringify([profile, thresholds])) {
       await editSteps(configured);
     }
     const steps = configured.flow.steps.filter((_, i) => included.includes(i));

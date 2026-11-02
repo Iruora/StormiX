@@ -4,9 +4,9 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::Args;
+use clap::{Args, ValueEnum};
 use stormix_engine::{junit_report, Exchanges, FlowResult, RunOptions, Runner, Variables};
-use stormix_flow::{Duration, Severity, TestFile};
+use stormix_flow::{Duration, Severity, TestFile, TraceMode};
 
 use crate::vars::{parse_var, read_env};
 use crate::{print_warnings, source, Format};
@@ -37,6 +37,20 @@ pub struct Target {
     /// Time allowed for each pre-request or test script.
     #[arg(long, default_value = "5s")]
     script_timeout: Duration,
+    /// Send a W3C `traceparent` header with every request, for Dynatrace
+    /// or another APM tool, and report each request's trace ID. `request`
+    /// (the default) gives each request its own trace; `flow` makes each
+    /// run of the flow one trace. Overrides the file's `trace`.
+    #[arg(long, value_enum, value_name = "MODE", num_args = 0..=1, default_missing_value = "request")]
+    trace: Option<TraceArg>,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum TraceArg {
+    Request,
+    Flow,
+    /// Send no traceparent, even if the file asks for one.
+    Off,
 }
 
 #[derive(Args)]
@@ -77,6 +91,12 @@ impl Target {
         let mut source = source::load(&self.file)?;
         print_warnings(&source.warnings);
         adjust(&mut source.test)?;
+        match self.trace {
+            Some(TraceArg::Request) => source.test.flow.trace = Some(TraceMode::Request),
+            Some(TraceArg::Flow) => source.test.flow.trace = Some(TraceMode::Flow),
+            Some(TraceArg::Off) => source.test.flow.trace = None,
+            None => {}
+        }
         let errors: Vec<_> = source
             .test
             .validate()
@@ -235,6 +255,10 @@ fn render_text(result: &FlowResult, verbose: bool) -> String {
         if let Some(error) = &step.error {
             let _ = writeln!(out, "      ✗ {} {}: {error}", step.method, step.url);
         }
+        // What to search for in the APM tool, most wanted when it failed.
+        if let Some(trace_id) = step.trace_id.as_ref().filter(|_| verbose || !step.passed()) {
+            let _ = writeln!(out, "      # trace {trace_id}");
+        }
         for check in &step.checks {
             match (&check.message, check.passed) {
                 (Some(why), false) => {
@@ -323,6 +347,8 @@ mod tests {
             error: None,
             skipped: false,
             cached: false,
+            trace_id: None,
+            span_id: None,
             exchange: None,
         }
     }
@@ -331,6 +357,7 @@ mod tests {
         let mut login = step("Log in");
         login.extracted.insert("token".into(), "abc".into());
         let mut profile = step("Profile");
+        profile.trace_id = Some("4bf92f3577b34da6a3ce929d0e0e4736".into());
         profile.status = Some(401);
         profile.checks = vec![check("status is 200", Some("got 401"))];
         profile.warnings = vec!["`{{x}}` has no value".into()];
@@ -356,6 +383,7 @@ Login flow
 
   ✓ Log in   GET     200     42 ms
   ✗ Profile  GET     401     42 ms
+      # trace 4bf92f3577b34da6a3ce929d0e0e4736
       ✗ status is 200: got 401
       ! `{{x}}` has no value
   ✗ Down     GET     ---     42 ms

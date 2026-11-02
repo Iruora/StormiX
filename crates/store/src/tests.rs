@@ -30,6 +30,8 @@ fn step(name: &str, status: u16, checks: &[(&str, bool)]) -> StepResult {
         error: None,
         skipped: false,
         cached: false,
+        trace_id: None,
+        span_id: None,
         exchange: None,
     }
 }
@@ -151,6 +153,7 @@ fn load(latency_ms: f64, failed: usize, seconds: u64) -> RunData {
         thresholds: Vec::new(),
         samples: Vec::new(),
         setup: Vec::new(),
+        slowest: Vec::new(),
     })
 }
 

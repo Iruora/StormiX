@@ -381,6 +381,38 @@ fn render_text(report: &LoadReport, title: Option<String>) -> String {
         }
     }
 
+    if !report.slowest.is_empty() {
+        let _ = writeln!(
+            out,
+            "\n  slowest traced requests (look these up in your APM tool)"
+        );
+        let width = report
+            .slowest
+            .iter()
+            .map(|r| r.step.chars().count())
+            .max()
+            .unwrap_or(0)
+            .clamp(4, 40);
+        for r in report.slowest.iter().take(10) {
+            let name: String = r.step.chars().take(width).collect();
+            let status = r.status.map_or("---".to_owned(), |s| s.to_string());
+            let mark = if r.passed { " " } else { "✗" };
+            let _ = writeln!(
+                out,
+                "    {mark} {name:<width$}  {:>9}  {status}  {}",
+                ms(r.duration_ms),
+                r.trace_id
+            );
+        }
+        if report.slowest.len() > 10 {
+            let _ = writeln!(
+                out,
+                "    and {} more in the JSON and HTML reports",
+                report.slowest.len() - 10
+            );
+        }
+    }
+
     if report.thresholds.is_empty() {
         let _ = writeln!(
             out,

@@ -1,11 +1,12 @@
 import { Database, Eraser, Gauge, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { LoadProfile, Step, TestFile } from "../bindings";
+import type { LoadProfile, Step, TestFile, TraceMode } from "../bindings";
 import { cachedTitle, useResponseCache } from "../lib/cache";
 import { describeLoad } from "../lib/describe";
 import { methodText } from "../lib/methods";
 import { DEFAULT_LOAD, LoadEditor, ThresholdsEditor } from "./StepsEditor";
+import { TraceSetting } from "./TraceSetting";
 
 /** What the setup dialog hands back when Run is pressed. */
 export type LoadSetupChoice = {
@@ -15,6 +16,8 @@ export type LoadSetupChoice = {
   cache: boolean[];
   load: LoadProfile;
   thresholds: string[];
+  /** The flow's `trace` setting; saved into the file. */
+  trace: TraceMode | null;
 };
 
 /**
@@ -45,6 +48,7 @@ export function LoadSetup({
   const keptCount = steps.filter((s, i) => on[i] && kept.steps.has(s.name)).length;
   const [load, setLoad] = useState<LoadProfile>(test.load ?? DEFAULT_LOAD);
   const [thresholds, setThresholds] = useState<string[]>(test.thresholds ?? []);
+  const [trace, setTrace] = useState<TraceMode | null>(test.flow.trace ?? null);
   const selected = checked.filter(Boolean).length;
   const all = selected === offered;
   const toggleAll = useRef<HTMLInputElement>(null);
@@ -59,7 +63,7 @@ export function LoadSetup({
   }, [onCancel]);
 
   const broken = useMemo(() => missingVariables(steps, checked), [steps, checked]);
-  const run = () => onRun({ included: checked.flatMap((on, i) => (on ? [i] : [])), cache, load, thresholds });
+  const run = () => onRun({ included: checked.flatMap((on, i) => (on ? [i] : [])), cache, load, thresholds, trace });
 
   return (
     <div
@@ -180,8 +184,9 @@ export function LoadSetup({
 
           <LoadEditor load={load} required onChange={(next) => next && setLoad(next)} />
           <ThresholdsEditor thresholds={thresholds} onChange={setThresholds} />
+          <TraceSetting value={trace} onChange={setTrace} />
           <p className="text-xs text-subtle">
-            The load profile, thresholds and cache settings are saved into the test file. The endpoint choice only
+            The load profile, thresholds, tracing and cache settings are saved into the test file. The endpoint choice only
             applies to this run. A cached endpoint runs once before the load starts and every iteration reuses its
             response, so prerequisites like a login stay out of the metrics.
           </p>

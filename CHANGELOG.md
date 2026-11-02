@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Flows
+
+- **Trace requests in Dynatrace and other APM tools.** With `trace: request` (or `trace: flow`) on a flow, every request carries a W3C `traceparent` header, and every result records its trace ID, so a slow or failed request can be found in Dynatrace, Datadog, Jaeger or any tool that reads W3C trace context and followed through each service it reached. `request` gives each request its own trace; `flow` makes each run of the flow, or each load test iteration, one trace with a span per request. A step's own `traceparent` header is kept. Load test reports list the slowest traced requests of each step. `stormix run` and `stormix load` take `--trace`. See [Tracing requests](docs/TEST_FILE.md#tracing-requests).
+
+### Desktop app
+
+- **Trace requests** in the Steps tab and the load test setup turns tracing on for each request or each flow run. Details shows the request's trace ID with **Copy trace ID**, and load test results list the slowest traced requests with a copy button for each. The YAML editor completes `trace`.
+
 ## 1.6.0 (2026-11-01)
 
 ### Flows

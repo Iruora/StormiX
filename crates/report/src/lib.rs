@@ -68,6 +68,13 @@ fn step_html(out: &mut String, step: &StepResult) {
         method = esc(&step.method),
         url = esc(&step.url),
     );
+    if let Some(trace_id) = &step.trace_id {
+        let _ = write!(
+            out,
+            r#"<div class="url mono">trace <span class="trace">{}</span></div>"#,
+            esc(trace_id)
+        );
+    }
     if let Some(error) = &step.error {
         let _ = write!(out, r#"<div class="error">{}</div>"#, esc(error));
     }
@@ -209,6 +216,24 @@ pub fn load_report(report: &LoadReport) -> String {
         }
         body.push_str("</ul></section>");
     }
+
+    if !report.slowest.is_empty() {
+        body.push_str(
+            r#"<section><h2>Slowest traced requests</h2><p class="muted">Search for a trace ID in Dynatrace or another APM tool to see where the time went.</p><table><thead><tr><th>Step</th><th>Time</th><th>Status</th><th>Trace ID</th></tr></thead><tbody>"#,
+        );
+        for r in &report.slowest {
+            let _ = write!(
+                body,
+                r#"<tr><td>{}</td><td>{}</td><td class="{}">{}</td><td class="trace">{}</td></tr>"#,
+                esc(&r.step),
+                ms(r.duration_ms),
+                if r.passed { "" } else { "bad" },
+                r.status.map_or("—".to_owned(), |s| s.to_string()),
+                esc(&r.trace_id),
+            );
+        }
+        body.push_str("</tbody></table></section>");
+    }
     page(&format!("{} · Stormix load test", report.name), &body)
 }
 
@@ -332,6 +357,7 @@ td{text-align:right;padding:6px 8px;border-top:1px solid var(--line);white-space
 svg{width:100%;height:160px;display:block}svg .req{fill:var(--accent);opacity:.55}svg .fail{fill:var(--bad)}svg .p95{fill:none;stroke:var(--warn);stroke-width:2;vector-effect:non-scaling-stroke}
 .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-bottom:6px}.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 .sw.req{background:var(--accent);opacity:.55}.sw.fail{background:var(--bad)}.sw.p95{height:2px;background:var(--warn);vertical-align:3px}
+.trace{user-select:all}
 .axis{display:flex;justify-content:space-between;color:var(--muted);font-size:11px}
 footer{color:var(--muted);font-size:12px;text-align:center;margin-top:24px}
 "#;
