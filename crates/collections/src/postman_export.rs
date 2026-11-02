@@ -487,7 +487,10 @@ flow:
     #[test]
     fn expected_values_fill_in_variables() {
         assert_eq!(text_value("ok"), "\"ok\"");
-        assert_eq!(text_value("{{user}}"), "pm.variables.replaceIn(\"{{user}}\")");
+        assert_eq!(
+            text_value("{{user}}"),
+            "pm.variables.replaceIn(\"{{user}}\")"
+        );
         assert_eq!(json_value(&json!(3)), "3");
         assert_eq!(
             json_value(&json!({ "id": "{{id}}" })),
