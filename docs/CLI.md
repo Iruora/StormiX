@@ -9,7 +9,7 @@ stormix run FILE                    # run the flow once, as a functional test
 stormix load FILE                   # run it under load and check thresholds
 stormix diagnose FILE --step NAME   # find where one step's request fails
 stormix import COLLECTION -o FILE   # turn a Postman or Bruno collection into a test file
-stormix export FILE -o DIR          # write a test file as an OpenCollection for Bruno
+stormix export FILE -o DIR          # write a test file as an OpenCollection for Bruno (-o x.json: Postman)
 ```
 
 `FILE` is a test file, a Postman collection export (`.json`), a Bruno collection folder (`.bru` files or OpenCollection YAML) or a bundled OpenCollection `.yml`, for `validate`, `run`, `load` and `diagnose` alike.

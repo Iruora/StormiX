@@ -83,6 +83,17 @@ export const commands = {
 	 *  Returns what could not be carried over.
 	 */
 	exportOpenCollection: (yaml: string, environments: ExportEnvironment[], dir: string) => typedError<string[], string>(__TAURI_INVOKE("export_open_collection", { yaml, environments, dir })),
+	/**
+	 *  Writes the test file in `yaml` as one bundled OpenCollection file at
+	 *  `path`, environments included. Returns what could not be carried over.
+	 */
+	exportOpenCollectionFile: (yaml: string, environments: ExportEnvironment[], path: string) => typedError<string[], string>(__TAURI_INVOKE("export_open_collection_file", { yaml, environments, path })),
+	/**
+	 *  Writes the test file in `yaml` as a Postman collection (v2.1) at
+	 *  `path`, and each environment next to it as
+	 *  `NAME.postman_environment.json`. Returns what could not be carried over.
+	 */
+	exportPostman: (yaml: string, environments: ExportEnvironment[], path: string) => typedError<string[], string>(__TAURI_INVOKE("export_postman", { yaml, environments, path })),
 	/**  Reads a test file the user picked. */
 	readTextFile: (path: string) => typedError<string, string>(__TAURI_INVOKE("read_text_file", { path })),
 	/**  Saves the editor's text where the user chose. */

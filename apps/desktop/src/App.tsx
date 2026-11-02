@@ -713,24 +713,55 @@ function TestFileView({
     },
   });
   // Opening, saving and importing touch the file shown; one at a time.
-  // Writes the test file as an OpenCollection folder that Bruno opens.
-  const exportBruno = useMutation({
-    mutationFn: async () => {
-      const dir = await open({ title: "Choose an empty folder for the Bruno collection", directory: true });
-      if (typeof dir !== "string") return null;
+  // Writes the test file for another tool: an OpenCollection folder that
+  // Bruno opens, one bundled OpenCollection file, or a Postman collection.
+  const exportTo = useMutation({
+    mutationFn: async (kind: "bruno" | "opencollection" | "postman") => {
+      const base = (result?.test?.flow.name ?? "collection").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "collection";
+      const target =
+        kind === "bruno"
+          ? await open({ title: "Choose an empty folder for the Bruno collection", directory: true })
+          : await save(
+              kind === "postman"
+                ? {
+                    title: "Export a Postman collection",
+                    defaultPath: `${base}.postman_collection.json`,
+                    filters: [{ name: "Postman collection", extensions: ["json"] }],
+                  }
+                : {
+                    title: "Export an OpenCollection file",
+                    defaultPath: `${base}.yml`,
+                    filters: [{ name: "OpenCollection", extensions: ["yml", "yaml"] }],
+                  },
+            );
+      if (typeof target !== "string") return null;
       const environments = Object.entries(envs).map(([name, e]) => ({
         name,
         variables: e.variables,
         secrets: e.secrets,
       }));
-      const res = await showing({ label: "Exporting to Bruno", detail: dir }, () =>
-        commands.exportOpenCollection(source, environments, dir),
+      const label =
+        kind === "bruno" ? "Exporting to Bruno" : kind === "postman" ? "Exporting to Postman" : "Exporting to OpenCollection";
+      const res = await showing({ label, detail: target }, () =>
+        kind === "bruno"
+          ? commands.exportOpenCollection(source, environments, target)
+          : kind === "postman"
+            ? commands.exportPostman(source, environments, target)
+            : commands.exportOpenCollectionFile(source, environments, target),
       );
       if (res.status === "error") throw new Error(res.error);
-      return { dir, warnings: res.data };
+      const next =
+        kind === "bruno"
+          ? "Open that folder in Bruno."
+          : kind === "postman"
+            ? environments.length > 0
+              ? "Import it in Postman, with the .postman_environment.json files written next to it."
+              : "Import it in Postman."
+            : "Open or import it in Bruno, or any tool that reads OpenCollection.";
+      return { target, next, warnings: res.data };
     },
   });
-  const fileBusy = file.isPending || importFrom.isPending || importEnv.isPending || exportBruno.isPending;
+  const fileBusy = file.isPending || importFrom.isPending || importEnv.isPending || exportTo.isPending;
 
   const newFromExample = () => {
     setImported(null);
@@ -780,7 +811,15 @@ function TestFileView({
         disabled: fileBusy,
         run: () => importFrom.mutate("opencollection"),
       },
-      { id: "export-bruno", group: "File", label: "Export to Bruno…", disabled: fileBusy, run: () => exportBruno.mutate() },
+      { id: "export-bruno", group: "File", label: "Export to Bruno (folder)…", disabled: fileBusy, run: () => exportTo.mutate("bruno") },
+      {
+        id: "export-oc",
+        group: "File",
+        label: "Export an OpenCollection file…",
+        disabled: fileBusy,
+        run: () => exportTo.mutate("opencollection"),
+      },
+      { id: "export-postman", group: "File", label: "Export a Postman collection…", disabled: fileBusy, run: () => exportTo.mutate("postman") },
       { id: "run", group: "Run", label: "Run once", disabled: !canRun || busy || fileBusy, run: runOnce },
       { id: "load", group: "Run", label: "Load test…", disabled: !canRun || busy || fileBusy, run: () => setSetupOpen(true) },
       ...envNames.map((name) => ({
@@ -881,19 +920,19 @@ function TestFileView({
         />
       </div>
       {file.error && <div className="border-b border-line bg-bad-soft px-3 py-1 text-xs text-bad">{file.error.message}</div>}
-      {exportBruno.error && (
-        <div className="border-b border-line bg-bad-soft px-3 py-1 text-xs text-bad">{exportBruno.error.message}</div>
+      {exportTo.error && (
+        <div className="border-b border-line bg-bad-soft px-3 py-1 text-xs text-bad">{exportTo.error.message}</div>
       )}
-      {exportBruno.data && (
+      {exportTo.data && (
         <div className="flex items-start gap-2 border-b border-line bg-surface-2 px-3 py-1 text-xs text-muted">
           <div className="min-w-0 flex-1">
             <div>
-              Exported to <span className="break-all font-mono text-ink">{exportBruno.data.dir}</span>. Open that
-              folder in Bruno.
+              Exported to <span className="break-all font-mono text-ink">{exportTo.data.target}</span>.{" "}
+              {exportTo.data.next}
             </div>
-            {exportBruno.data.warnings.length > 0 && (
+            {exportTo.data.warnings.length > 0 && (
               <ul className="mt-0.5 list-disc pl-4 text-warn">
-                {exportBruno.data.warnings.map((w) => (
+                {exportTo.data.warnings.map((w) => (
                   <li key={w}>{w}</li>
                 ))}
               </ul>
@@ -902,7 +941,7 @@ function TestFileView({
           <button
             type="button"
             aria-label="Dismiss"
-            onClick={() => exportBruno.reset()}
+            onClick={() => exportTo.reset()}
             className="rounded p-0.5 hover:bg-surface hover:text-ink"
           >
             <X size="0.75rem" />
@@ -1128,8 +1167,15 @@ function TestFileView({
                   OpenCollection file…
                 </MenuItem>
                 <MenuSeparator />
-                <MenuItem icon={<FolderOutput size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), exportBruno.mutate())}>
-                  Export to Bruno…
+                <MenuLabel>Export as</MenuLabel>
+                <MenuItem icon={<FolderOutput size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), exportTo.mutate("bruno"))}>
+                  Bruno folder…
+                </MenuItem>
+                <MenuItem icon={<FileCode size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), exportTo.mutate("opencollection"))}>
+                  OpenCollection file…
+                </MenuItem>
+                <MenuItem icon={<FileJson size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), exportTo.mutate("postman"))}>
+                  Postman collection…
                 </MenuItem>
               </>
             )}

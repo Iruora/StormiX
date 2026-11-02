@@ -599,7 +599,7 @@ fn header_expr(name: &str) -> String {
 /// A JSONPath as a JavaScript expression over `res.body`, for the plain
 /// paths Bruno can follow: `$.a.b[0]`, `$['a b']`. Wildcards, filters and
 /// recursive descent have no equivalent.
-fn json_path_expr(path: &str) -> Option<String> {
+pub(crate) fn json_path_expr(path: &str) -> Option<String> {
     let rest = path.trim().strip_prefix('$')?;
     let mut out = String::from("res.body");
     let mut chars = rest.chars().peekable();
@@ -656,7 +656,7 @@ fn json_path_expr(path: &str) -> Option<String> {
     Some(out)
 }
 
-fn method(m: Method) -> &'static str {
+pub(crate) fn method(m: Method) -> &'static str {
     match m {
         Method::Get => "GET",
         Method::Post => "POST",
