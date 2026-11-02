@@ -1,8 +1,8 @@
-Stormix 1.7.0 adds request tracing and Bruno's OpenCollection format.
+Stormix 1.8.0 helps when a request fails on one network but works elsewhere.
 
-- **Trace requests in Dynatrace and other APM tools:** with `trace: request` (or `trace: flow`), every request carries a W3C `traceparent` header and every result records its trace ID, so a slow or failed request can be followed through each service it reached. Details shows the trace ID with a copy button, and load test results list the slowest traced requests.
-- **OpenCollection import:** Bruno collections saved in OpenCollection YAML, Bruno's format since v3, run and import like `.bru` ones: a folder with `opencollection.yml`, that file, or a single bundled `.yml`, environments included.
-- **Export to Bruno:** `stormix export FILE -o DIR` and the app's **Export to Bruno** button write a test file as an OpenCollection that Bruno opens. Checks become Bruno assertions, and anything Bruno has no place for is listed.
+- **Requests use the system proxy:** the app and the CLI now send requests through the proxy set in Windows or macOS settings, as browsers and Bruno do, instead of connecting directly. On a corporate network a direct connection can be refused, often with a 403. `HTTPS_PROXY` and `NO_PROXY` still take precedence.
+- **Diagnose where a request fails:** **Diagnose** in a step's Details, and `stormix diagnose FILE --step NAME`, send the request again and check each stage: the proxy, name lookup, the connection, the proxy's answer, the TLS certificate and who issued it, and the response. An error is matched to whoever seems to have answered it, like a corporate proxy, a firewall, a CDN or the API. **Copy report** copies the result for a ticket.
+- **Connection tab:** Details shows the route each request took: its proxy, the address it connected to, the HTTP version and the server's certificate.
 
 If you are on 1.1 or later, the app offers this update by itself. On 1.0, download it once from the table below.
 
