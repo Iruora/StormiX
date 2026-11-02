@@ -58,6 +58,7 @@ import { FlowView } from "./views/FlowView";
 import { StepsEditor } from "./views/StepsEditor";
 import { UpdateBanner } from "./views/UpdateBanner";
 import { WorkspacesView } from "./views/Workspaces";
+import { ProxyButton } from "./views/ProxySetting";
 
 export function App() {
   const info = useQuery({ queryKey: ["app-info"], queryFn: commands.getAppInfo });
@@ -1084,6 +1085,7 @@ function TestFileView({
               {envNames.length > 0 ? "Env" : "Import env"}
             </button>
           </div>
+          <ProxyButton />
           <button
             type="button"
             disabled={fileBusy}
