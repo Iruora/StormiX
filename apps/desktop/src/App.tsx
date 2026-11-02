@@ -59,7 +59,7 @@ import { RUNS_KEY, RunsView } from "./views/Runs";
 import { SplitView, usePanel } from "./views/SidePanel";
 import { applyOverrides, EnvEditor, type EnvOverrides } from "./views/EnvEditor";
 import { FlowView } from "./views/FlowView";
-import { StepsEditor } from "./views/StepsEditor";
+import { StepsEditor, type StepsSelection } from "./views/StepsEditor";
 import { UpdateBanner } from "./views/UpdateBanner";
 import { WorkspacesView } from "./views/Workspaces";
 import { ProxyButton } from "./views/ProxySetting";
@@ -345,6 +345,10 @@ function TestFileView({
   const [path, setPath] = useState<string | null>(ws.path);
   const [savedText, setSavedText] = useState<string | null>(ws.dirty ? null : ws.text);
   const [restoreNote, setRestoreNote] = useState<string | null>(null);
+  // Which tab of the results panel is open.
+  const [resultsTab, setResultsTab] = useState<"problems" | "run" | "summary">("problems");
+  // The step the Steps tab shows, or the flow's settings.
+  const [selectedStep, setSelectedStep] = useState<StepsSelection>(0);
   const [tab, setTab] = useState<"steps" | "flow" | "yaml">(
     ws.tab === "flow" || ws.tab === "yaml" ? ws.tab : "steps",
   );
@@ -437,6 +441,10 @@ function TestFileView({
     },
   });
   const busy = run.isPending || load.isPending;
+  // A run that starts shows its progress.
+  useEffect(() => {
+    if (busy) setResultsTab("run");
+  }, [busy]);
   // What a file, import or restore is doing now, for the activity strip.
   const [activity, setActivity] = useState<Activity | null>(null);
   /** Shows `what` in the activity strip while `work` runs. */
@@ -778,12 +786,10 @@ function TestFileView({
     setEnvName(name);
     run.reset();
   };
-  /** Shows the Steps tab and scrolls to step `i` once it has rendered. */
+  /** Shows step `i` in the Steps tab. */
   const openStep = (i: number) => {
     setTab("steps");
-    requestAnimationFrame(() =>
-      document.getElementById(`step-${i}`)?.scrollIntoView({ block: "start", behavior: "smooth" }),
-    );
+    setSelectedStep(i);
   };
   const fileLabel = path
     ? path.split(/[\\/]/).pop()
@@ -968,13 +974,10 @@ function TestFileView({
           </VariablesContext.Provider>
         </div>
       ) : shown ? (
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1">
           <VariablesContext.Provider value={variables}>
-            <StepsEditor test={shown} onChange={editSteps} />
+            <StepsEditor test={shown} onChange={editSteps} selected={selectedStep} onSelect={setSelectedStep} />
           </VariablesContext.Provider>
-          <p className="px-4 pb-4 text-xs text-subtle">
-            Editing here rewrites the YAML, so comments in it are dropped.
-          </p>
         </div>
       ) : (
         <div className="p-4 text-muted">
@@ -987,65 +990,119 @@ function TestFileView({
       )}
     </>
   );
-  const resultsPane = (
-    <>
-      {result?.parseError ? (
+  // The results panel's tabs: what is wrong with the file, the last run, and what the file does.
+  const problemErrors =
+    (result?.parseError ? 1 : 0) +
+    (envError ? 1 : 0) +
+    (importFrom.error ? 1 : 0) +
+    (result?.issues.filter((i) => i.severity === "error").length ?? 0);
+  const problemCount =
+    problemErrors +
+    (restoreNote ? 1 : 0) +
+    (imported && imported.warnings.length > 0 ? 1 : 0) +
+    (result?.issues.filter((i) => i.severity !== "error").length ?? 0);
+  const runFailed =
+    !!(run.error ?? load.error) ||
+    !!run.data?.steps.some((st) => !st.skipped && !stepPassed(st)) ||
+    !!load.data?.thresholds.some((t) => !t.passed);
+  const hasRun = busy || !!run.data || !!load.data || !!(run.error ?? load.error);
+  const problemsPane = (
+    <div className="space-y-4">
+      {result?.parseError && (
         <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="The file does not parse">
           <pre className="mono whitespace-pre-wrap text-xs">{result.parseError}</pre>
         </Banner>
-      ) : result?.test ? (
-        <>
-          {restoreNote && (
-            <div className="mb-4">
-              <Banner tone="warn" icon={<TriangleAlert size="1rem" />} title="Workspace">
-                {restoreNote}
-              </Banner>
-            </div>
-          )}
-          {envError && (
-            <div className="mb-4">
-              <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="Environment">
-                {envError}
-              </Banner>
-            </div>
-          )}
-          {importFrom.error && (
-            <div className="mb-4">
-              <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="The collection could not be imported">
-                {importFrom.error.message}
-              </Banner>
-            </div>
-          )}
-          {imported && imported.warnings.length > 0 && (
-            <div className="mb-4">
-              <Banner
-                tone="warn"
-                icon={<TriangleAlert size="1rem" />}
-                title={`${count(imported.warnings.length, "thing")} did not carry over`}
-              >
-                <ul className="space-y-1">
-                  {imported.warnings.map((w, i) => (
-                    <li key={i}>{w}</li>
-                  ))}
-                </ul>
-              </Banner>
-            </div>
-          )}
-          <Issues issues={result.issues} />
-          {(run.error ?? load.error) && (
-            <div className="mt-4">
-              <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="The run could not start">
-                {(run.error ?? load.error)?.message}
-              </Banner>
-            </div>
-          )}
-          {run.isPending && <RunLive name={result.test.flow.name} progress={runStep} />}
-          {run.data && <RunResult result={run.data} diagnose={diagnoseIn(run.variables)} />}
-          {load.isPending && <LoadLive points={points} />}
-          {load.data && <LoadResult report={load.data} diagnose={diagnoseIn(load.variables)} />}
-          <Summary test={result.test} />
-        </>
-      ) : null}
+      )}
+      {restoreNote && (
+        <Banner tone="warn" icon={<TriangleAlert size="1rem" />} title="Workspace">
+          {restoreNote}
+        </Banner>
+      )}
+      {envError && (
+        <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="Environment">
+          {envError}
+        </Banner>
+      )}
+      {importFrom.error && (
+        <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="The collection could not be imported">
+          {importFrom.error.message}
+        </Banner>
+      )}
+      {imported && imported.warnings.length > 0 && (
+        <Banner
+          tone="warn"
+          icon={<TriangleAlert size="1rem" />}
+          title={`${count(imported.warnings.length, "thing")} did not carry over`}
+        >
+          <ul className="space-y-1">
+            {imported.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </Banner>
+      )}
+      {result?.test && <Issues issues={result.issues} />}
+    </div>
+  );
+  const runPane = (
+    <>
+      {(run.error ?? load.error) && (
+        <div className="mb-4">
+          <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="The run could not start">
+            {(run.error ?? load.error)?.message}
+          </Banner>
+        </div>
+      )}
+      {run.isPending && <RunLive name={result?.test?.flow.name ?? "the flow"} progress={runStep} />}
+      {run.data && <RunResult result={run.data} diagnose={diagnoseIn(run.variables)} />}
+      {load.isPending && <LoadLive points={points} />}
+      {load.data && <LoadResult report={load.data} diagnose={diagnoseIn(load.variables)} />}
+      {!hasRun && (
+        <p className="rounded-lg border border-dashed border-line px-4 py-6 text-center text-xs text-muted">
+          Nothing run since the last change. <b className="font-semibold text-ink">Run once</b> sends every step one
+          time; <b className="font-semibold text-ink">Load test</b> replays them under load. The results show here.
+        </p>
+      )}
+    </>
+  );
+  const resultsPane = (
+    <>
+      <div
+        role="tablist"
+        aria-label="Results"
+        className="sticky -top-4 z-10 -mx-4 -mt-4 mb-4 flex gap-1 border-b border-line bg-bg px-3 pt-2"
+      >
+        <ResultsTab
+          active={resultsTab === "problems"}
+          onClick={() => setResultsTab("problems")}
+          label="Problems"
+          badge={
+            problemCount > 0 ? (
+              <span className={problemErrors > 0 ? "text-bad" : "text-warn"}>{problemCount}</span>
+            ) : (
+              <CircleCheck size="0.75rem" className="text-ok" />
+            )
+          }
+        />
+        <ResultsTab
+          active={resultsTab === "run"}
+          onClick={() => setResultsTab("run")}
+          label="Last run"
+          badge={
+            busy ? (
+              <LoaderCircle size="0.75rem" className="animate-spin text-accent" />
+            ) : hasRun ? (
+              runFailed ? (
+                <CircleAlert size="0.75rem" className="text-bad" />
+              ) : (
+                <CircleCheck size="0.75rem" className="text-ok" />
+              )
+            ) : null
+          }
+        />
+        <ResultsTab active={resultsTab === "summary"} onClick={() => setResultsTab("summary")} label="Summary" />
+      </div>
+      {resultsTab === "problems" ? problemsPane : resultsTab === "run" ? runPane : result?.test ? <Summary test={result.test} /> : null}
     </>
   );
 
@@ -1351,6 +1408,33 @@ function TestFileView({
   );
 }
 
+function ResultsTab({
+  active,
+  onClick,
+  label,
+  badge,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  badge?: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`-mb-px flex items-center gap-1.5 border-b-2 px-2.5 pb-1.5 pt-1 text-xs font-medium ${
+        active ? "border-accent text-accent" : "border-transparent text-muted hover:text-ink"
+      }`}
+    >
+      {label}
+      {badge && <span className="flex items-center text-[0.6875rem] font-semibold">{badge}</span>}
+    </button>
+  );
+}
+
 function PanelToggle({ open, onClick, alert }: { open: boolean; onClick: () => void; alert: "bad" | "warn" | null }) {
   const label = open ? "Hide the results panel" : "Show the results panel";
   return (
@@ -1404,7 +1488,7 @@ function Summary({ test }: { test: TestFile }) {
   const running = flow.steps.filter((s) => s.enabled !== false);
   const skipped = flow.steps.length - running.length;
   return (
-    <section className="mt-4 rounded-lg border border-line bg-surface">
+    <section className="rounded-lg border border-line bg-surface">
       <div className="border-b border-line px-4 py-3">
         <div className="font-semibold">{flow.name}</div>
         <div className="text-xs text-muted">{describeLoad(test.load)}</div>

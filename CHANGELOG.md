@@ -9,6 +9,8 @@
 - **Search every action with Ctrl K** (⌘ K): type a few letters of an action, an environment, a proxy mode, a step or a workspace, then Enter. The **Search** button in the header opens it too.
 - **Export to OpenCollection and Postman.** **File › Export as** now writes a Bruno folder, one bundled OpenCollection file, or a Postman collection (v2.1) with each environment as a `.postman_environment.json` file next to it. Checks become `pm.test` lines and extractions set collection variables. On the command line, `stormix export FILE -o NAME.json` writes the Postman collection. See [Exporting to Postman](docs/COLLECTIONS.md#exporting-to-postman).
 - **Settings** at the bottom of the sidebar holds the proxy for requests and the keyboard shortcuts.
+- **Steps listed beside the editor**, like Bruno: the Steps tab lists every step with its method on the left, and edits the one you click on the right. Up and down move through the list. **Flow settings**, at the top of the list, holds the flow's name, tracing, load profile and thresholds. Clicking a step in the Flow tab or in Ctrl K search opens it here.
+- **Tabs in the results panel**: **Problems** (with a count), **Last run** and **Summary**, instead of one long stack. A run opens Last run while it goes.
 - The file name and its saved state moved up next to the workspace name; the tab row now only switches between Steps, Flow and YAML.
 
 ## 1.8.2 (2026-11-02)
