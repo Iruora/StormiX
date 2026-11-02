@@ -14,15 +14,16 @@ use crate::{print_warnings, source, Format};
 /// What `run` and `load` both take: the flow and how to send its requests.
 #[derive(Args)]
 pub struct Target {
-    /// A test file, a Postman collection (.json) or a Bruno collection folder.
+    /// A test file, a Postman collection (.json), a Bruno collection folder
+    /// or an OpenCollection (folder or bundled .yml).
     pub file: PathBuf,
     /// Set a variable, overriding the file and the environment. Repeatable.
     #[arg(long = "var", value_name = "NAME=VALUE", value_parser = parse_var)]
     vars: Vec<(String, String)>,
-    /// Variables from a YAML or JSON file, a Postman environment export or
-    /// a Bruno environment (.bru). A name works too: one of a Bruno
-    /// collection's environments, or a file in the `environments/` folder
-    /// next to a test file.
+    /// Variables from a YAML or JSON file, a Postman environment export, a
+    /// Bruno environment (.bru or OpenCollection .yml). A name works too:
+    /// one of a Bruno collection's environments, or a file in the
+    /// `environments/` folder next to a test file.
     #[arg(long, value_name = "FILE|NAME")]
     env: Option<PathBuf>,
     /// Time allowed for each request.

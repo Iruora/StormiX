@@ -386,6 +386,51 @@ pub fn diff_runs(
     Ok(stormix_store::diff(&a.data, &b.data))
 }
 
+/// An environment to export with a collection. Secrets are named only.
+#[derive(Debug, Clone, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportEnvironment {
+    pub name: String,
+    pub variables: BTreeMap<String, String>,
+    pub secrets: Vec<String>,
+}
+
+/// Writes the test file in `yaml` as an OpenCollection that Bruno opens,
+/// into the folder `dir`. The folder must be empty or hold an earlier
+/// export (an `opencollection.yml`), so nothing else in it is overwritten.
+/// Returns what could not be carried over.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn export_open_collection(
+    yaml: String,
+    environments: Vec<ExportEnvironment>,
+    dir: String,
+) -> Result<Vec<String>, String> {
+    use stormix_collections::{environment::Environment, opencollection};
+    let test = TestFile::from_yaml(&yaml).map_err(|e| e.to_string())?;
+    let root = Path::new(&dir);
+    let empty = std::fs::read_dir(root).map_or(true, |mut d| d.next().is_none());
+    let earlier = opencollection::ROOT_FILES
+        .iter()
+        .any(|n| root.join(n).is_file());
+    if !empty && !earlier {
+        return Err(format!(
+            "{dir} is not empty; choose an empty folder, or one with an earlier export in it"
+        ));
+    }
+    let environments: Vec<Environment> = environments
+        .into_iter()
+        .map(|e| Environment {
+            name: e.name,
+            variables: e.variables,
+            secrets: e.secrets,
+        })
+        .collect();
+    let exported = opencollection::to_files(&test, &environments);
+    opencollection::write_dir(root, &exported).map_err(|e| format!("cannot write {dir}: {e}"))?;
+    Ok(exported.warnings)
+}
+
 /// Writes a stored run as a JSON, JUnit XML or HTML report.
 #[tauri::command(async)]
 #[specta::specta]

@@ -8,9 +8,10 @@ stormix validate FILE               # check a file without sending anything
 stormix run FILE                    # run the flow once, as a functional test
 stormix load FILE                   # run it under load and check thresholds
 stormix import COLLECTION -o FILE   # turn a Postman or Bruno collection into a test file
+stormix export FILE -o DIR          # write a test file as an OpenCollection for Bruno
 ```
 
-`FILE` is a test file, a Postman collection export (`.json`) or a Bruno collection folder, for `validate`, `run` and `load` alike.
+`FILE` is a test file, a Postman collection export (`.json`), a Bruno collection folder (`.bru` files or OpenCollection YAML) or a bundled OpenCollection `.yml`, for `validate`, `run` and `load` alike.
 
 ## Exit codes
 
@@ -109,6 +110,15 @@ A request counts as failed when no response came back or a check on it failed. W
 With `-o`, a collection's environments are written to `environments/NAME.yaml` next to the test file, so `stormix run FILE --env NAME` still finds them. Secrets have no value there; their names are listed under `$secrets`, and you pass them with `--var`.
 
 What does not carry over is printed as a warning. See [Compatibility](COMPATIBILITY.md).
+
+## `export`
+
+| Option | |
+|---|---|
+| `-o`, `--output DIR` | The folder to write the collection into, or a `.yml`/`.yaml` file for a single bundled file |
+| `--force` | Write into a folder that is not empty, or replace the bundled file |
+
+Writes `FILE` as an [OpenCollection](COLLECTIONS.md#opencollection), the YAML format Bruno opens. `FILE` can be a test file, whose environments in `environments/` next to it go with it, or any collection Stormix reads, with its own environments. What Bruno has no place for is printed as a warning; see [Exporting to Bruno](COLLECTIONS.md#exporting-to-bruno).
 
 ## `init`
 

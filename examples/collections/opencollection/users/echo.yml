@@ -1,0 +1,32 @@
+info:
+  name: Echo a form
+  type: http
+  seq: 3
+http:
+  method: POST
+  url: "{{base_url}}/echo"
+  body:
+    type: multipart-form
+    data:
+      - name: q
+        type: text
+        value: a b
+      - name: user
+        type: text
+        value: "{{user}}"
+      - name: "off"
+        type: text
+        value: "1"
+        disabled: true
+runtime:
+  scripts:
+    - type: before-request
+      code: req.setHeader("X-Request", "echo");
+    - type: tests
+      code: |-
+        test("sent the form as multipart", function () {
+          expect(res.body.contentType).to.include("multipart/form-data");
+          expect(res.body.body).to.include('name="user"');
+          expect(res.body.body).to.include("demo");
+          expect(res.body.body).to.not.include('name="off"');
+        });

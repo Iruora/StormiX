@@ -42,14 +42,26 @@ enum Command {
     Run(run::RunArgs),
     /// Run a test file or collection under load and check its thresholds.
     Load(load::LoadArgs),
-    /// Convert a Postman collection (.json) or Bruno collection (folder)
-    /// into a Stormix test file.
+    /// Convert a Postman collection (.json), Bruno collection (folder) or
+    /// OpenCollection (folder or bundled .yml) into a Stormix test file.
     Import {
         collection: PathBuf,
         /// Write the test file here instead of printing it.
         #[arg(long, short)]
         output: Option<PathBuf>,
         /// Replace the output file if it exists.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Write a test file or collection as an OpenCollection, the YAML
+    /// format Bruno opens: a folder, or a single bundled .yml file.
+    Export {
+        file: PathBuf,
+        /// A folder to write the collection into, or a .yml/.yaml file for
+        /// a bundled one.
+        #[arg(long, short)]
+        output: PathBuf,
+        /// Write into a folder that is not empty, or replace the file.
         #[arg(long)]
         force: bool,
     },
@@ -84,6 +96,11 @@ fn main() -> ExitCode {
             output,
             force,
         } => import(&collection, output.as_deref(), force),
+        Command::Export {
+            file,
+            output,
+            force,
+        } => export(&file, &output, force),
         Command::Init { file, force } => init(&file, force),
     };
     match result {
@@ -154,7 +171,7 @@ fn validate(file: &Path, format: Format, strict: bool) -> Result<ExitCode, Strin
 fn import(collection: &Path, output: Option<&Path>, force: bool) -> Result<ExitCode, String> {
     if !source::is_collection(collection) {
         return Err(format!(
-            "{} is not a collection: expected a Postman .json export or a Bruno folder",
+            "{} is not a collection: expected a Postman .json export, a Bruno folder or an OpenCollection",
             collection.display()
         ));
     }
@@ -223,6 +240,73 @@ fn write_environments(source: &source::Source, output: &Path, force: bool) -> Re
         );
     }
     Ok(())
+}
+
+/// Writes `file` (a test file or any collection) as an OpenCollection,
+/// with its environments: a collection's own, or those in `environments/`
+/// next to a test file.
+fn export(file: &Path, output: &Path, force: bool) -> Result<ExitCode, String> {
+    use stormix_collections::environment::{dir_for, read_dir, Environment};
+    use stormix_collections::opencollection;
+
+    let source = source::load(file)?;
+    print_warnings(&source.warnings);
+    let environments: Vec<Environment> = if source::is_collection(file) {
+        source
+            .environments
+            .iter()
+            .map(|(name, variables)| Environment {
+                name: name.clone(),
+                variables: variables.clone(),
+                secrets: source.secrets.get(name).cloned().unwrap_or_default(),
+            })
+            .collect()
+    } else {
+        read_dir(&dir_for(file)).map_err(|e| e.to_string())?
+    };
+
+    let bundled = output
+        .extension()
+        .is_some_and(|e| e == "yml" || e == "yaml");
+    let steps = source.test.flow.steps.len();
+    if bundled {
+        if output.exists() && !force {
+            return Err(format!(
+                "{} already exists; pass --force to replace it",
+                output.display()
+            ));
+        }
+        let (yaml, warnings) = opencollection::to_bundle(&source.test, &environments);
+        print_warnings(&warnings);
+        if let Some(dir) = output.parent().filter(|d| !d.as_os_str().is_empty()) {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        }
+        std::fs::write(output, yaml)
+            .map_err(|e| format!("cannot write {}: {e}", output.display()))?;
+    } else {
+        let busy = std::fs::read_dir(output).is_ok_and(|mut d| d.next().is_some());
+        if busy && !force {
+            return Err(format!(
+                "{} is not empty; pass --force to write into it",
+                output.display()
+            ));
+        }
+        let exported = opencollection::to_files(&source.test, &environments);
+        print_warnings(&exported.warnings);
+        opencollection::write_dir(output, &exported)
+            .map_err(|e| format!("cannot write {}: {e}", output.display()))?;
+    }
+    let envs = match environments.len() {
+        0 => String::new(),
+        1 => " and 1 environment".into(),
+        n => format!(" and {n} environments"),
+    };
+    eprintln!(
+        "Wrote {} ({steps} steps{envs}). Open it in Bruno, or run it with `stormix run {0}`.",
+        output.display()
+    );
+    Ok(ExitCode::SUCCESS)
 }
 
 fn init(file: &Path, force: bool) -> Result<ExitCode, String> {

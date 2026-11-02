@@ -1,0 +1,14 @@
+opencollection: 1.0.0
+info:
+  name: Demo API (OpenCollection)
+request:
+  headers:
+    - name: X-Client
+      value: stormix-fixture
+  scripts:
+    - type: tests
+      code: |-
+        test("responds within 2 s", function () {
+          expect(res.getResponseTime()).to.be.below(2000);
+        });
+bundled: false

@@ -6,8 +6,15 @@
 
 - **Trace requests in Dynatrace and other APM tools.** With `trace: request` (or `trace: flow`) on a flow, every request carries a W3C `traceparent` header, and every result records its trace ID, so a slow or failed request can be found in Dynatrace, Datadog, Jaeger or any tool that reads W3C trace context and followed through each service it reached. `request` gives each request its own trace; `flow` makes each run of the flow, or each load test iteration, one trace with a span per request. A step's own `traceparent` header is kept. Load test reports list the slowest traced requests of each step. `stormix run` and `stormix load` take `--trace`. See [Tracing requests](docs/TEST_FILE.md#tracing-requests).
 
+### Collections
+
+- **OpenCollection.** Bruno collections saved in OpenCollection YAML, the format Bruno uses since v3, run and import like `.bru` ones: a folder with `opencollection.yml`, that file, or a bundled `.yml` file. Collection and folder defaults, auth, variables, `set-variable` actions, assertions, scripts, body variants and environments (including `extends` and secrets) carry over, and the same collection imports to the same steps in either format. OpenCollection environment files work with `--env` and are saved back in their own format. See [OpenCollection](docs/COLLECTIONS.md#opencollection).
+- **`stormix export FILE -o DIR`** writes a test file, or any collection, as an OpenCollection folder that Bruno opens (`-o file.yml` for one bundled file), with its environments. Checks become Bruno assertions and extractions become post-response variables; what Bruno has no place for is reported. See [Exporting to Bruno](docs/COLLECTIONS.md#exporting-to-bruno).
+- Basic auth built from variables in an imported Bruno collection is now set with `req.setHeader` and `bru.interpolate`, so it also runs in Bruno after an export.
+
 ### Desktop app
 
+- **OpenCollection** import button for an `opencollection.yml` or bundled file; the **Bruno** button takes OpenCollection folders too. **Export to Bruno** writes the open test file and its environments as an OpenCollection folder and lists anything that did not carry over.
 - **Trace requests** in the Steps tab and the load test setup turns tracing on for each request or each flow run. Details shows the request's trace ID with **Copy trace ID**, and load test results list the slowest traced requests with a copy button for each. The YAML editor completes `trace`.
 
 ## 1.6.0 (2026-11-01)

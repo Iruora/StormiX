@@ -1,10 +1,10 @@
-//! What `run`, `validate` and `import` read: a Stormix test file, a Postman
-//! collection export or a Bruno collection folder.
+//! What `run`, `validate`, `import` and `export` read: a Stormix test file,
+//! a Postman collection export, a Bruno collection folder or an
+//! OpenCollection (folder or bundled file).
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use stormix_collections::Format;
 use stormix_flow::TestFile;
 
 pub struct Source {
@@ -18,8 +18,8 @@ pub struct Source {
 }
 
 pub fn load(path: &Path) -> Result<Source, String> {
-    let is_yaml = path.extension().is_some_and(|e| e == "yaml" || e == "yml");
-    if is_yaml || stormix_collections::detect(path).is_none() {
+    // A YAML file is a test file unless it is an OpenCollection.
+    if stormix_collections::detect(path).is_none() {
         let text = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         let test = TestFile::from_yaml(&text).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -40,8 +40,5 @@ pub fn load(path: &Path) -> Result<Source, String> {
 }
 
 pub fn is_collection(path: &Path) -> bool {
-    matches!(
-        stormix_collections::detect(path),
-        Some(Format::Postman | Format::Bruno)
-    ) && !path.extension().is_some_and(|e| e == "yaml" || e == "yml")
+    stormix_collections::detect(path).is_some()
 }
