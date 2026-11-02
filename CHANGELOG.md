@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- **Requests use the system proxy.** The desktop app and the CLI now send requests through the proxy set in Windows or macOS settings, as browsers and Bruno do, instead of connecting directly. On a corporate network a direct connection can be refused, often with a 403, although the same request copied as cURL works elsewhere. The `HTTPS_PROXY` and `NO_PROXY` environment variables still take precedence. See [Proxies](docs/CLI.md#proxies).
+
 ## 1.7.0 (2026-11-02)
 
 ### Flows

@@ -38,6 +38,12 @@ stormix export FILE -o DIR          # write a test file as an OpenCollection for
 
 Report paths are created along with any missing folders.
 
+### Proxies
+
+Requests go through the same proxy as the rest of the system. On Windows that is the proxy set in **Settings > Network & internet > Proxy** (Internet Options), with its bypass list; on macOS it is the one in System Settings. The `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` and `NO_PROXY` environment variables take precedence, in the desktop app and the CLI alike. A proxy that needs a user name and password takes them in its URL, like `HTTPS_PROXY=http://user:password@proxy.example.com:8080`.
+
+A proxy set only by an automatic configuration script (a PAC file, "Use setup script" on Windows) is not read: set `HTTPS_PROXY` to the proxy that script picks for your API. Windows integrated sign-in to a proxy (NTLM or Kerberos) is not supported either.
+
 ## `run`
 
 | Option | |
