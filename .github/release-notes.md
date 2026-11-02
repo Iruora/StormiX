@@ -1,6 +1,12 @@
-Stormix 1.8.2 adds a proxy button to the header.
+Stormix 1.9.0 tidies the header into menus, lists the steps beside the editor, and exports to Postman.
 
-- **Proxy button**, like Bruno's proxy preference: it shows the mode in use (**System proxy**, **No proxy** or **Proxy** with an address) and changes it before any run. The choice is kept when Stormix restarts, and is still under **Proxy for requests** in a step's Details (**Connection** tab).
+- **File menu**: New, Open, Save, Save as, every import and every export in one place, with Ctrl O, Ctrl S and Ctrl Shift S.
+- **Environment menu**: one button with the environment in use, its changed variables and missing secrets; the list, Variables, Secrets, Import and Remove inside.
+- **Ctrl K search** for every action, environment, proxy mode, step and workspace.
+- **Settings** at the bottom of the sidebar, with the proxy and the keyboard shortcuts.
+- **Steps listed beside the editor**, like Bruno: click a step to edit it; **Flow settings** holds the name, tracing, load profile and thresholds.
+- **Results panel tabs**: Problems, Last run and Summary.
+- **Export to Postman and OpenCollection**: **File › Export as** writes a Bruno folder, one OpenCollection file, or a Postman collection with its environments. `stormix export FILE -o NAME.json` does the same from the command line.
 
 If you are on 1.1 or later, the app offers this update by itself. On 1.0, download it once from the table below.
 
