@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Args, ValueEnum};
-use stormix_engine::{junit_report, Exchanges, FlowResult, RunOptions, Runner, Variables};
+use stormix_engine::{
+    junit_report, Exchanges, FlowResult, ProxyChoice, RunOptions, Runner, Variables,
+};
 use stormix_flow::{Duration, Severity, TestFile, TraceMode};
 
 use crate::vars::{parse_var, read_env};
@@ -44,6 +46,22 @@ pub struct Target {
     /// run of the flow one trace. Overrides the file's `trace`.
     #[arg(long, value_enum, value_name = "MODE", num_args = 0..=1, default_missing_value = "request")]
     trace: Option<TraceArg>,
+    /// Which proxy requests go through: `system` (the default: the
+    /// HTTPS_PROXY variables, then the Windows or macOS settings), `none`,
+    /// or a proxy URL like http://proxy.corp:8080 for every request.
+    #[arg(long, value_name = "system|none|URL", default_value = "system", value_parser = parse_proxy)]
+    proxy: ProxyChoice,
+}
+
+fn parse_proxy(value: &str) -> Result<ProxyChoice, String> {
+    match value {
+        "system" => Ok(ProxyChoice::System),
+        "none" | "off" => Ok(ProxyChoice::None),
+        url if url.contains("://") => Ok(ProxyChoice::Url(url.to_owned())),
+        other => Err(format!(
+            "`{other}` is not system, none or a proxy URL like http://proxy:8080"
+        )),
+    }
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -164,6 +182,7 @@ impl Target {
             // JSON reports carry the exchange of each failed step, which
             // is what a CI log needs, without every passing body.
             exchanges: Exchanges::FailedOnly,
+            proxy: self.proxy,
         })
         .map_err(|e| e.to_string())?;
         Ok(Prepared {

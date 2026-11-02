@@ -12,8 +12,9 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
-import type { Connection, Diagnosis, DiagnosisStage, HeaderPair, Payload, StepResult } from "../bindings";
+import type { Connection, Diagnosis, DiagnosisStage, HeaderPair, Payload, ProxyChoice, StepResult } from "../bindings";
 import { methodText } from "../lib/methods";
+import { describeProxy, useProxy } from "../lib/proxy";
 import { Spinner } from "./Busy";
 
 type Tab = "failure" | "request" | "response" | "connection";
@@ -316,7 +317,10 @@ function ConnectionTab({
                 <CircleX size="1rem" className="mt-px shrink-0" />
               )}
               <span className="min-w-0 flex-1 text-ink">{result.verdict}</span>
-              <CopyButton label="Copy report" text={() => diagnosisText(step, result)} />
+              <div className="flex shrink-0 flex-col items-end gap-1.5">
+                <CopyButton label="Copy report" text={() => diagnosisText(step, result)} />
+                {directWorks(result) && <UseNoProxy onDone={onDiagnose} />}
+              </div>
             </div>
             <ol className="mt-2 divide-y divide-line rounded-md border border-line">
               {result.stages.map((s, i) => (
@@ -325,6 +329,9 @@ function ConnectionTab({
             </ol>
           </div>
         )}
+      </Section>
+      <Section title="Proxy for requests">
+        <ProxySetting />
       </Section>
       <Section title="Route">
         {connection ? (
@@ -338,6 +345,95 @@ function ConnectionTab({
         )}
       </Section>
     </>
+  );
+}
+
+/** Sent straight to the server, the request went through. */
+function directWorks(d: Diagnosis): boolean {
+  return d.stages.some((s) => s.name === "Without the proxy" && s.outcome === "passed");
+}
+
+function UseNoProxy({ onDone }: { onDone?: () => void }) {
+  const { current, change } = useProxy();
+  if (current === "none") return null;
+  return (
+    <button
+      type="button"
+      disabled={change.isPending}
+      onClick={() => change.mutate("none", { onSuccess: () => onDone?.() })}
+      className="rounded border border-line bg-surface px-1.5 py-0.5 text-xs font-medium text-ink hover:bg-surface-2"
+    >
+      Use no proxy
+    </button>
+  );
+}
+
+/** Like Bruno's proxy preference: the system's, none, or one address. Kept across launches. */
+export function ProxySetting() {
+  const { current, change } = useProxy();
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    if (current && typeof current === "object") setUrl(current.url);
+  }, [current]);
+  const mode = current === null ? null : typeof current === "object" ? "url" : current;
+  const pick = (choice: ProxyChoice) => change.mutate(choice);
+  const options: { id: "system" | "none" | "url"; label: string }[] = [
+    { id: "system", label: "System" },
+    { id: "none", label: "No proxy" },
+    { id: "url", label: "This proxy" },
+  ];
+  return (
+    <div className="text-[0.8125rem]">
+      <div className="flex flex-wrap items-center gap-2">
+        <div role="radiogroup" aria-label="Proxy for requests" className="flex rounded-md border border-line p-0.5">
+          {options.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              role="radio"
+              aria-checked={mode === o.id}
+              onClick={() => (o.id === "url" ? url.includes("://") && pick({ url }) : pick(o.id))}
+              className={`rounded px-2 py-0.5 text-xs font-medium ${
+                mode === o.id ? "bg-accent-soft text-accent" : "text-muted hover:text-ink"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <form
+          className="flex min-w-0 flex-1 items-center gap-1.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (url.includes("://")) pick({ url: url.trim() });
+          }}
+        >
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="http://proxy.example:8080"
+            aria-label="Proxy address"
+            className="mono min-w-0 flex-1 rounded-md border border-line bg-surface px-2 py-0.5 text-xs"
+          />
+          <button
+            type="submit"
+            disabled={!url.includes("://")}
+            className="rounded-md border border-line px-2 py-0.5 text-xs text-muted hover:text-ink disabled:opacity-50"
+          >
+            Use
+          </button>
+        </form>
+      </div>
+      <p className="mt-1.5 text-xs text-muted">
+        {mode === "none"
+          ? "Requests go straight to every server, like Bruno with its proxy off."
+          : mode === "url"
+            ? `Every request goes through ${current && describeProxy(current)}.`
+            : "Requests follow HTTPS_PROXY and NO_PROXY, then the Windows or macOS proxy settings."}{" "}
+        Applies to every run from now on, and is kept when Stormix restarts.
+      </p>
+      {change.error && <p className="mt-1 text-xs text-bad">{change.error.message}</p>}
+    </div>
   );
 }
 

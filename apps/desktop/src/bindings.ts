@@ -22,6 +22,13 @@ export const commands = {
 	 *  the response. Not saved to the run history.
 	 */
 	diagnoseStep: (text: string, variables: { [key in string]: string }, step: string) => typedError<Diagnosis_Serialize, string>(__TAURI_INVOKE("diagnose_step", { text, variables, step })),
+	/**  The proxy requests go through. */
+	getProxy: () => __TAURI_INVOKE<ProxyChoice>("get_proxy"),
+	/**
+	 *  Sends requests through `proxy` from now on, keeping cached responses.
+	 *  Refuses a proxy URL that does not parse.
+	 */
+	setProxy: (proxy: ProxyChoice) => typedError<null, string>(__TAURI_INVOKE("set_proxy", { proxy })),
 	/**
 	 *  Imports a Postman `.json` export or a Bruno collection folder, sending
 	 *  [`ImportProgress`] events as a folder's files are read. It runs off the
@@ -740,6 +747,21 @@ export type Payload = {
 	/**  Not UTF-8; `text` only describes it. */
 	binary: boolean,
 };
+
+/**  Which proxy requests go through. */
+export type ProxyChoice = 
+/**
+ *  `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` first, then the Windows
+ *  or macOS proxy settings. `NO_PROXY` lists hosts reached directly.
+ */
+"system" | 
+/**  Straight to every server, whatever the system says. */
+"none" | 
+/**
+ *  This proxy for every request, like `http://proxy.corp:8080`.
+ *  Environment variables and system settings are ignored.
+ */
+{ url: string };
 
 export type ReportFormat = "json" | "junit" | "html";
 

@@ -16,6 +16,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::validate_test_file,
             commands::run_test_file,
             commands::diagnose_step,
+            commands::get_proxy,
+            commands::set_proxy,
             commands::import_collection,
             commands::read_environment,
             commands::environments_beside,
@@ -76,7 +78,9 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
-            app.manage(Runner::new(RunOptions::default())?);
+            app.manage(commands::SharedRunner::new(Runner::new(
+                RunOptions::default(),
+            )?));
             let data = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data)?;
             app.manage(Mutex::new(Store::open(&data.join("runs.db"))?));

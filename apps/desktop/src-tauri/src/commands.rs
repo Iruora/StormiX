@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use stormix_engine::{
-    run_load, CachedStep, Diagnosis, FlowResult, LoadOptions, LoadReport, Runner, StepStart,
-    Variables,
+    run_load, CachedStep, Diagnosis, FlowResult, LoadOptions, LoadReport, ProxyChoice, Runner,
+    StepStart, Variables,
 };
 use stormix_flow::{Issue, Severity, TestFile};
 use stormix_store::{RunData, RunDiff, RunSummary, Store, StoredRun};
@@ -237,7 +237,7 @@ pub async fn run_load_test(
     variables: BTreeMap<String, String>,
     source: Option<String>,
     app: AppHandle,
-    runner: State<'_, Runner>,
+    runner: State<'_, SharedRunner>,
     store: State<'_, Mutex<Store>>,
 ) -> Result<LoadReport, String> {
     let test = checked(&text)?;
@@ -247,7 +247,7 @@ pub async fn run_load_test(
     let mut vars = Variables::new();
     vars.extend(variables);
     let report = run_load(
-        &runner,
+        &runner.get(),
         &test.flow,
         &vars,
         profile,
@@ -313,13 +313,14 @@ pub async fn run_test_file(
     variables: BTreeMap<String, String>,
     source: Option<String>,
     app: AppHandle,
-    runner: State<'_, Runner>,
+    runner: State<'_, SharedRunner>,
     store: State<'_, Mutex<Store>>,
 ) -> Result<FlowResult, String> {
     let test = checked(&text)?;
     let mut vars = Variables::new();
     vars.extend(variables);
     let result = runner
+        .get()
         .run_with_progress(&test.flow, &vars, |s: StepStart<'_>| {
             let _ = RunProgress {
                 index: s.index as u32,
@@ -346,27 +347,62 @@ pub async fn diagnose_step(
     text: String,
     variables: BTreeMap<String, String>,
     step: String,
-    runner: State<'_, Runner>,
+    runner: State<'_, SharedRunner>,
 ) -> Result<Diagnosis, String> {
     let test = checked(&text)?;
     let mut vars = Variables::new();
     vars.extend(variables);
-    runner.diagnose(&test.flow, &vars, &step).await
+    runner.get().diagnose(&test.flow, &vars, &step).await
+}
+
+/// The runner every command sends with, swapped when the proxy changes.
+/// Clones share their connection pool and response cache.
+pub struct SharedRunner(std::sync::RwLock<Runner>);
+
+impl SharedRunner {
+    pub fn new(runner: Runner) -> Self {
+        Self(std::sync::RwLock::new(runner))
+    }
+
+    pub fn get(&self) -> Runner {
+        self.0.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
+/// The proxy requests go through.
+#[tauri::command]
+#[specta::specta]
+pub fn get_proxy(runner: State<'_, SharedRunner>) -> ProxyChoice {
+    runner.get().proxy().clone()
+}
+
+/// Sends requests through `proxy` from now on, keeping cached responses.
+/// Refuses a proxy URL that does not parse.
+#[tauri::command]
+#[specta::specta]
+pub fn set_proxy(proxy: ProxyChoice, runner: State<'_, SharedRunner>) -> Result<(), String> {
+    let next = runner.get().with_proxy(proxy).map_err(|e| e.to_string())?;
+    *runner.0.write().unwrap_or_else(|e| e.into_inner()) = next;
+    Ok(())
 }
 
 /// Steps with a cached response, from steps marked `cache: true`.
 #[tauri::command]
 #[specta::specta]
-pub fn cached_steps(runner: State<'_, Runner>) -> Vec<CachedStep> {
-    runner.cache().steps()
+pub fn cached_steps(runner: State<'_, SharedRunner>) -> Vec<CachedStep> {
+    runner.get().cache().steps()
 }
 
 /// Forgets cached responses: one step's (`flow` and `step`), one flow's,
 /// or with neither, all of them. Returns how many were forgotten.
 #[tauri::command]
 #[specta::specta]
-pub fn clear_cache(flow: Option<String>, step: Option<String>, runner: State<'_, Runner>) -> u32 {
-    runner.cache().clear(flow.as_deref(), step.as_deref()) as u32
+pub fn clear_cache(
+    flow: Option<String>,
+    step: Option<String>,
+    runner: State<'_, SharedRunner>,
+) -> u32 {
+    runner.get().cache().clear(flow.as_deref(), step.as_deref()) as u32
 }
 
 /// The most recent runs first.
