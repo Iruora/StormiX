@@ -8,6 +8,7 @@ use stormix_flow::Severity;
 #[cfg(test)]
 use stormix_flow::TestFile;
 
+mod diagnose;
 mod load;
 mod run;
 mod source;
@@ -42,6 +43,9 @@ enum Command {
     Run(run::RunArgs),
     /// Run a test file or collection under load and check its thresholds.
     Load(load::LoadArgs),
+    /// Send one step's request and check each stage on the way: proxy,
+    /// name lookup, connection, TLS and the response, to tell where it fails.
+    Diagnose(diagnose::DiagnoseArgs),
     /// Convert a Postman collection (.json), Bruno collection (folder) or
     /// OpenCollection (folder or bundled .yml) into a Stormix test file.
     Import {
@@ -91,6 +95,7 @@ fn main() -> ExitCode {
         } => validate(&file, format, strict),
         Command::Run(args) => run::run(args),
         Command::Load(args) => load::load(args),
+        Command::Diagnose(args) => diagnose::diagnose(args),
         Command::Import {
             collection,
             output,

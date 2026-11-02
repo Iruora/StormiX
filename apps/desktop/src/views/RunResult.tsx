@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { FlowResult, RunProgress, StepResult } from "../bindings";
 import { methodText } from "../lib/methods";
 import { ProgressBar, Spinner } from "./Busy";
-import { StepDetails } from "./StepDetails";
+import { StepDetails, type Diagnose } from "./StepDetails";
 
 /** While a single run goes: which step it is on, out of how many. */
 export function RunLive({ name, progress }: { name: string; progress: RunProgress | null }) {
@@ -32,7 +32,7 @@ export function RunLive({ name, progress }: { name: string; progress: RunProgres
 }
 
 /** The outcome of one functional run: a summary line, then each step with what failed. */
-export function RunResult({ result }: { result: FlowResult }) {
+export function RunResult({ result, diagnose }: { result: FlowResult; diagnose?: Diagnose }) {
   const ran = result.steps.filter((s) => !s.skipped);
   const failed = ran.filter((s) => !stepPassed(s)).length;
   const checks = ran.flatMap((s) => s.checks);
@@ -58,7 +58,7 @@ export function RunResult({ result }: { result: FlowResult }) {
           <Step key={i} step={step} onDetails={() => setOpen(step)} />
         ))}
       </ol>
-      {open && <StepDetails step={open} onClose={() => setOpen(null)} />}
+      {open && <StepDetails step={open} onClose={() => setOpen(null)} diagnose={diagnose} />}
     </section>
   );
 }

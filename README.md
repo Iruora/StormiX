@@ -123,7 +123,7 @@ Latency is measured per request with HDR histograms, so percentiles are exact to
 
 ## Desktop app
 
-Open a test file or import a Postman or Bruno collection, then edit it as steps (method, URL, headers, body, expected status, load profile, thresholds) or as YAML. The YAML editor underlines syntax and format errors where they are as you type, and completes the format's keys and your `{{variables}}`. **Run once** checks the flow; **Load test** runs it under its load profile with a live chart. **Details** on a failed step shows the failed checks, the request as sent and the response as received, and copies the request as a cURL command.
+Open a test file or import a Postman or Bruno collection, then edit it as steps (method, URL, headers, body, expected status, load profile, thresholds) or as YAML. The YAML editor underlines syntax and format errors where they are as you type, and completes the format's keys and your `{{variables}}`. **Run once** checks the flow; **Load test** runs it under its load profile with a live chart. **Details** on a failed step shows the failed checks, the request as sent and the response as received, and copies the request as a cURL command. **Diagnose** there sends it again and checks each stage, from the proxy and TLS to the response, to show where it fails.
 
 Every run is kept in a local history (`runs.db` in the app's data folder). On the **Runs** page, open a run to export it as JSON or JUnit, or tick two runs to compare them: which steps broke or were fixed and which checks changed, or, for load tests, how throughput and latency moved (more than 10% counts as worse or better).
 

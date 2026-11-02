@@ -48,6 +48,7 @@ import { type Activity, ActivityStrip, BusyIcon, Loading } from "./views/Busy";
 import { LoadLive, LoadResult } from "./views/LoadResult";
 import { LoadSetup, type LoadSetupChoice } from "./views/LoadSetup";
 import { RunLive, RunResult, stepPassed } from "./views/RunResult";
+import type { Diagnose } from "./views/StepDetails";
 import { RUNS_KEY, RunsView } from "./views/Runs";
 import { SplitView, usePanel } from "./views/SidePanel";
 import { applyOverrides, EnvEditor, type EnvOverrides } from "./views/EnvEditor";
@@ -364,6 +365,16 @@ function TestFileView({
       client.invalidateQueries({ queryKey: CACHE_KEY });
     },
   });
+  // Diagnoses a step of the file a run was made from, with today's environment.
+  const diagnoseIn =
+    (yaml: string | undefined): Diagnose | undefined =>
+    yaml === undefined
+      ? undefined
+      : async (step) => {
+          const res = await commands.diagnoseStep(yaml, envVars, step);
+          if (res.status === "error") throw new Error(res.error);
+          return res.data;
+        };
   const [points, setPoints] = useState<LoadProgress[]>([]);
   const load = useMutation({
     mutationFn: async (yaml: string) => {
@@ -865,9 +876,9 @@ function TestFileView({
             </div>
           )}
           {run.isPending && <RunLive name={result.test.flow.name} progress={runStep} />}
-          {run.data && <RunResult result={run.data} />}
+          {run.data && <RunResult result={run.data} diagnose={diagnoseIn(run.variables)} />}
           {load.isPending && <LoadLive points={points} />}
-          {load.data && <LoadResult report={load.data} />}
+          {load.data && <LoadResult report={load.data} diagnose={diagnoseIn(load.variables)} />}
           <Summary test={result.test} />
         </>
       ) : null}

@@ -13,8 +13,11 @@ specta = ["dep:specta", "stormix-flow/specta", "stormix-metrics/specta"]
 [dependencies]
 bytes.workspace = true
 fastrand.workspace = true
+http.workspace = true
+hyper-util.workspace = true
 regex.workspace = true
 reqwest.workspace = true
+rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_json_path.workspace = true
@@ -24,7 +27,9 @@ stormix-metrics.workspace = true
 stormix-script.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
 uuid.workspace = true
+x509-parser.workspace = true
 
 [dev-dependencies]
 axum.workspace = true

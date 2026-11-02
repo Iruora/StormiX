@@ -7,6 +7,8 @@
 
 mod cache;
 mod checks;
+mod connection;
+mod diagnose;
 mod graphql;
 mod junit;
 mod load;
@@ -16,8 +18,12 @@ mod trace;
 mod variables;
 
 pub use cache::{CachedStep, ResponseCache};
+pub use diagnose::{Diagnosis, DiagnosisStage, StageOutcome};
 pub use junit::{junit_load_report, junit_report};
 pub use load::{run_load, LoadOptions, LoadReport, Progress, SlowRequest};
-pub use result::{Check, Exchange, FlowResult, HeaderPair, Payload, ResponseRecord, StepResult};
+pub use result::{
+    Certificate, Check, Connection, Exchange, FlowResult, HeaderPair, Payload, ResponseRecord,
+    StepResult,
+};
 pub use runner::{Exchanges, RunOptions, Runner, RunnerError, StepStart};
 pub use variables::Variables;

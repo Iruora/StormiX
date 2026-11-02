@@ -7,11 +7,12 @@ stormix init [FILE]                 # write an example test file (stormix.yaml)
 stormix validate FILE               # check a file without sending anything
 stormix run FILE                    # run the flow once, as a functional test
 stormix load FILE                   # run it under load and check thresholds
+stormix diagnose FILE --step NAME   # find where one step's request fails
 stormix import COLLECTION -o FILE   # turn a Postman or Bruno collection into a test file
 stormix export FILE -o DIR          # write a test file as an OpenCollection for Bruno
 ```
 
-`FILE` is a test file, a Postman collection export (`.json`), a Bruno collection folder (`.bru` files or OpenCollection YAML) or a bundled OpenCollection `.yml`, for `validate`, `run` and `load` alike.
+`FILE` is a test file, a Postman collection export (`.json`), a Bruno collection folder (`.bru` files or OpenCollection YAML) or a bundled OpenCollection `.yml`, for `validate`, `run`, `load` and `diagnose` alike.
 
 ## Exit codes
 
@@ -21,7 +22,7 @@ stormix export FILE -o DIR          # write a test file as an OpenCollection for
 | 1 | Errors (and warnings with `--strict`) | A step or check failed | A threshold failed |
 | 2 | The file could not be read | The run could not start: unreadable file, errors in it, bad options | The same |
 
-## Options for `run` and `load`
+## Options for `run`, `load` and `diagnose`
 
 | Option | |
 |---|---|
@@ -37,6 +38,12 @@ stormix export FILE -o DIR          # write a test file as an OpenCollection for
 | `--format text\|json` | What goes to standard output |
 
 Report paths are created along with any missing folders.
+
+### Proxies
+
+Requests go through the same proxy as the rest of the system. On Windows that is the proxy set in **Settings > Network & internet > Proxy** (Internet Options), with its bypass list; on macOS it is the one in System Settings. The `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` and `NO_PROXY` environment variables take precedence, in the desktop app and the CLI alike. A proxy that needs a user name and password takes them in its URL, like `HTTPS_PROXY=http://user:password@proxy.example.com:8080`.
+
+A proxy set only by an automatic configuration script (a PAC file, "Use setup script" on Windows) is not read: set `HTTPS_PROXY` to the proxy that script picks for your API. Windows integrated sign-in to a proxy (NTLM or Kerberos) is not supported either.
 
 ## `run`
 
@@ -92,6 +99,39 @@ Demo API login · ramping from 10/s: 100/s over 5s, 100/s over 10s, 0/s over 5s 
 ```
 
 A request counts as failed when no response came back or a check on it failed. When nothing checks it, a 4xx or 5xx status also counts as failed. Latency is recorded in HDR histograms, so percentiles stay accurate to three significant digits at any volume.
+
+## `diagnose`
+
+`stormix diagnose FILE --step NAME` sends one step's request again and checks each stage on its way, to tell where it fails when it works from another client or another network:
+
+1. **Proxy**: the proxy it goes through and where that setting came from, or none.
+2. **Name lookup**: the server's addresses, or the proxy's.
+3. **Connection**: a TCP connection to the server or the proxy.
+4. **Proxy tunnel** (HTTPS through a proxy): what the proxy answered when asked to connect to the server, and who answered, like a `407` that wants a sign-in or a `403` from a web filter.
+5. **TLS**: the certificate presented and who issued it. Under TLS inspection the issuer is your company's certificate authority, not a public one.
+6. **Response**: the status, and who seems to have answered an error. Proxies, firewalls and CDNs such as Zscaler, Cloudflare, Akamai, AWS or a `Via` header are recognised from their headers, and an HTML error page's title is shown.
+
+The enabled steps before it run first, for the variables they set, like a token. Its cache is ignored, so the request is always sent. `--format json` prints the whole diagnosis with the step's request and response. It exits with 0 when the request went through and its checks passed, 1 otherwise.
+
+```sh
+stormix diagnose orders.stormix.yaml --step "List orders" --env work
+```
+
+```text
+Diagnosing `List orders`: GET https://api.example.com/orders
+
+  ok   Earlier steps  Ran the step before it for the variables it sets.
+       Proxy          Through http://proxy.corp.example:8080, from Windows proxy settings.
+  ok   Name lookup    The proxy proxy.corp.example is at 10.20.0.15.
+  ok   Connection     Connected to the proxy 10.20.0.15:8080. (2 ms)
+  ok   Proxy tunnel   The proxy opened a connection to api.example.com:443. (41 ms)
+  ok   TLS            Certificate for CN=api.example.com, issued by CN=Corp Inspection CA. (38 ms)
+  FAIL Response       HTTP/1.1 403 Forbidden, from Zscaler, a corporate proxy: "Website blocked".
+
+The 403 Forbidden seems to come from Zscaler, a corporate proxy, not from the API. ...
+```
+
+In the desktop app, **Diagnose** in a step's Details does the same, and the **Connection** tab shows the route every request took.
 
 ## `validate`
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Diagnosing requests
+
+- **Diagnose where a request fails.** `stormix diagnose FILE --step NAME`, and **Diagnose** in a step's Details, send the step again after the steps before it and check each stage on the way: the proxy and where its setting came from, name lookup, the connection, the proxy's answer when asked to reach the server, the TLS certificate and its issuer, and the response. An error is matched to whoever seems to have answered it, like a corporate proxy, a firewall, a CDN or the API itself, from its headers and the title of an HTML error page. **Copy report** copies the result as text for a ticket. See [`diagnose`](docs/CLI.md#diagnose).
+- Every request now records its route: the proxy it went through, the address it connected to, the HTTP version and, without a proxy, the server's certificate. Details shows it in a new **Connection** tab, and JSON reports carry it as `exchange.connection`.
+
+### Fixes
+
+- **Requests use the system proxy.** The desktop app and the CLI now send requests through the proxy set in Windows or macOS settings, as browsers and Bruno do, instead of connecting directly. On a corporate network a direct connection can be refused, often with a 403, although the same request copied as cURL works elsewhere. The `HTTPS_PROXY` and `NO_PROXY` environment variables still take precedence. See [Proxies](docs/CLI.md#proxies).
+
 ## 1.7.0 (2026-11-02)
 
 ### Flows

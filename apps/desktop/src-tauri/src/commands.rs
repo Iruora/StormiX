@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use stormix_engine::{
-    run_load, CachedStep, FlowResult, LoadOptions, LoadReport, Runner, StepStart, Variables,
+    run_load, CachedStep, Diagnosis, FlowResult, LoadOptions, LoadReport, Runner, StepStart,
+    Variables,
 };
 use stormix_flow::{Issue, Severity, TestFile};
 use stormix_store::{RunData, RunDiff, RunSummary, Store, StoredRun};
@@ -334,6 +335,23 @@ pub async fn run_test_file(
         source.as_deref(),
     );
     Ok(result)
+}
+
+/// Sends one step of the file again, after the enabled steps before it, and
+/// checks each stage of its request: proxy, name lookup, connection, TLS and
+/// the response. Not saved to the run history.
+#[tauri::command]
+#[specta::specta]
+pub async fn diagnose_step(
+    text: String,
+    variables: BTreeMap<String, String>,
+    step: String,
+    runner: State<'_, Runner>,
+) -> Result<Diagnosis, String> {
+    let test = checked(&text)?;
+    let mut vars = Variables::new();
+    vars.extend(variables);
+    runner.diagnose(&test.flow, &vars, &step).await
 }
 
 /// Steps with a cached response, from steps marked `cache: true`.

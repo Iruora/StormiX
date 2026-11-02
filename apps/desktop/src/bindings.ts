@@ -17,6 +17,12 @@ export const commands = {
 	 */
 	runTestFile: (text: string, variables: { [key in string]: string }, source: string | null) => typedError<FlowResult_Serialize, string>(__TAURI_INVOKE("run_test_file", { text, variables, source })),
 	/**
+	 *  Sends one step of the file again, after the enabled steps before it, and
+	 *  checks each stage of its request: proxy, name lookup, connection, TLS and
+	 *  the response. Not saved to the run history.
+	 */
+	diagnoseStep: (text: string, variables: { [key in string]: string }, step: string) => typedError<Diagnosis_Serialize, string>(__TAURI_INVOKE("diagnose_step", { text, variables, step })),
+	/**
 	 *  Imports a Postman `.json` export or a Bruno collection folder, sending
 	 *  [`ImportProgress`] events as a folder's files are read. It runs off the
 	 *  main thread, so the window stays responsive while a large one loads.
@@ -160,6 +166,13 @@ export type CachedStep = {
 	storedAt: number | null,
 };
 
+export type Certificate = {
+	subject: string,
+	issuer: string,
+	/**  When it expires, as the certificate gives it. */
+	notAfter: string,
+};
+
 /**  One assertion or extraction and how it went. */
 export type Check = Check_Serialize | Check_Deserialize;
 
@@ -197,6 +210,107 @@ export type Check_Serialize = {
 	message: string | null,
 };
 
+/**
+ *  The route a request took, to tell a proxy, a firewall or TLS inspection
+ *  apart from the API itself when a request fails on one network only.
+ */
+export type Connection = Connection_Serialize | Connection_Deserialize;
+
+/**
+ *  The route a request took, to tell a proxy, a firewall or TLS inspection
+ *  apart from the API itself when a request fails on one network only.
+ */
+export type Connection_Deserialize = {
+	/**
+	 *  The proxy the request was sent through, with any password hidden.
+	 *  `None` when it went straight to the server.
+	 */
+	proxy?: string | null,
+	/**  Where that proxy came from, like `HTTPS_PROXY` or `Windows proxy settings`. */
+	proxySource?: string | null,
+	/**  The IP address and port connected to: the proxy's when there is one. */
+	remoteAddress?: string | null,
+	/**  Like `HTTP/1.1` or `HTTP/2`. */
+	httpVersion?: string | null,
+	/**
+	 *  The certificate the server, or whatever intercepted the connection,
+	 *  presented. A corporate issuer here means TLS inspection.
+	 */
+	certificate?: Certificate | null,
+};
+
+/**
+ *  The route a request took, to tell a proxy, a firewall or TLS inspection
+ *  apart from the API itself when a request fails on one network only.
+ */
+export type Connection_Serialize = {
+	/**
+	 *  The proxy the request was sent through, with any password hidden.
+	 *  `None` when it went straight to the server.
+	 */
+	proxy: string | null,
+	/**  Where that proxy came from, like `HTTPS_PROXY` or `Windows proxy settings`. */
+	proxySource: string | null,
+	/**  The IP address and port connected to: the proxy's when there is one. */
+	remoteAddress: string | null,
+	/**  Like `HTTP/1.1` or `HTTP/2`. */
+	httpVersion: string | null,
+	/**
+	 *  The certificate the server, or whatever intercepted the connection,
+	 *  presented. A corporate issuer here means TLS inspection.
+	 */
+	certificate: Certificate | null,
+};
+
+/**  Where a request fails, stage by stage. */
+export type Diagnosis = Diagnosis_Serialize | Diagnosis_Deserialize;
+
+export type DiagnosisStage = DiagnosisStage_Serialize | DiagnosisStage_Deserialize;
+
+export type DiagnosisStage_Deserialize = {
+	name: string,
+	outcome: StageOutcome,
+	summary: string,
+	durationMs?: number | null,
+};
+
+export type DiagnosisStage_Serialize = {
+	name: string,
+	outcome: StageOutcome,
+	summary: string,
+	durationMs: number | null,
+};
+
+/**  Where a request fails, stage by stage. */
+export type Diagnosis_Deserialize = {
+	/**  In the order a request goes through them. */
+	stages: DiagnosisStage_Deserialize[],
+	/**
+	 *  One or two sentences: where it failed and what to try, or that it
+	 *  went through.
+	 */
+	verdict: string,
+	/**  The request got a response that passed. */
+	ok: boolean,
+	/**  The step as it ran this time, with its request and response. */
+	step: StepResult_Deserialize,
+};
+
+/**  Where a request fails, stage by stage. */
+export type Diagnosis_Serialize = {
+	/**  In the order a request goes through them. */
+	stages: DiagnosisStage_Serialize[],
+	/**
+	 *  One or two sentences: where it failed and what to try, or that it
+	 *  went through.
+	 */
+	verdict: string,
+	/**  The request got a response that passed. */
+	ok: boolean,
+	/**  The step as it ran this time, with its request and response. */
+	step: StepResult_Serialize,
+};
+
 /**  One request and its response, as they went over the wire. */
 export type Exchange = Exchange_Serialize | Exchange_Deserialize;
 
@@ -207,6 +321,12 @@ export type Exchange_Deserialize = {
 	requestBody?: Payload | null,
 	/**  `None` when no response came back. */
 	response?: ResponseRecord_Deserialize | null,
+	/**
+	 *  How the request got to the server: the proxy, the address it
+	 *  connected to, the HTTP version and the TLS certificate. Missing for
+	 *  a cached response and from runs saved before 1.8.
+	 */
+	connection?: Connection_Deserialize | null,
 };
 
 /**  One request and its response, as they went over the wire. */
@@ -216,6 +336,12 @@ export type Exchange_Serialize = {
 	requestBody: Payload | null,
 	/**  `None` when no response came back. */
 	response: ResponseRecord_Serialize | null,
+	/**
+	 *  How the request got to the server: the proxy, the address it
+	 *  connected to, the HTTP version and the TLS certificate. Missing for
+	 *  a cached response and from runs saved before 1.8.
+	 */
+	connection?: Connection_Serialize,
 };
 
 /**  An environment to export with a collection. Secrets are named only. */
@@ -791,6 +917,12 @@ export type Stage = {
 	duration: string,
 	target: number,
 };
+
+export type StageOutcome = "passed" | "failed" | "warning" | 
+/**  Not a check, only what was found, like the proxy in use. */
+"info" | 
+/**  After a stage that failed. */
+"notReached";
 
 export type Step = Step_Serialize | Step_Deserialize;
 
