@@ -201,7 +201,8 @@ fn exports_a_test_file_that_imports_back() {
     let paths: Vec<_> = out
         .files
         .iter()
-        .map(|(p, _)| p.to_string_lossy().into_owned())
+        // Windows joins with `\`.
+        .map(|(p, _)| p.to_string_lossy().replace('\\', "/"))
         .collect();
     assert_eq!(
         paths,
