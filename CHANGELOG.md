@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.2 (2026-11-02)
 
 - **Proxy button in the header**, like Bruno's proxy preference: it shows the mode in use (**System proxy**, **No proxy** or **Proxy**) and changes it before any run, without opening a step's Details.
 
