@@ -214,3 +214,33 @@ fn bad_input_is_reported_with_its_location() {
         .to_string()
         .contains("Collection v2.1"));
 }
+
+#[test]
+fn opencollection_matches_the_bruno_collection() {
+    let path = fixture("opencollection");
+    assert_eq!(detect(&path), Some(Format::OpenCollection));
+    assert_eq!(
+        detect(&path.join("opencollection.yml")),
+        Some(Format::OpenCollection)
+    );
+    let mut seen = Vec::new();
+    let imported = import_with_progress(&path, &mut |p| seen.push((p.done, p.total))).unwrap();
+    assert_eq!(imported.warnings, Vec::<String>::new());
+    assert_eq!(seen.len(), 7);
+    assert_eq!(imported.environments["local"]["user"], "demo");
+    let flow = &imported.test.flow;
+    assert_eq!(flow.name, "Demo API (OpenCollection)");
+
+    // The same collection saved as .bru imports to the very same steps.
+    let bruno = import(&fixture("bruno")).unwrap();
+    assert_eq!(flow.steps.len(), bruno.test.flow.steps.len());
+    for (oc, bru) in flow.steps.iter().zip(&bruno.test.flow.steps) {
+        assert_eq!(oc, bru, "{}", bru.name);
+    }
+    assert_eq!(imported.environments, bruno.environments);
+    // Its root file stands for the folder.
+    assert_eq!(
+        import(&path.join("opencollection.yml")).unwrap().test,
+        imported.test
+    );
+}

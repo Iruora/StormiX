@@ -30,7 +30,8 @@ const UNARY: [&str; 12] = [
     "isBoolean",
     "isArray",
 ];
-const BINARY: [&str; 15] = [
+const BINARY: [&str; 16] = [
+    "between",
     "eq",
     "neq",
     "gt",
@@ -366,6 +367,7 @@ impl Importer<'_> {
         };
         if let Some(auth) = auth {
             common::apply_auth(
+                common::Dialect::Bruno,
                 &auth,
                 &mut request,
                 &mut pre_request,
@@ -462,10 +464,26 @@ impl Importer<'_> {
     }
 }
 
+/// Every assertion operator, for checks that keep up with the list.
+#[cfg(test)]
+pub(crate) const OPERATORS: [&str; 28] = {
+    let mut all = [""; 28];
+    let mut i = 0;
+    while i < UNARY.len() {
+        all[i] = UNARY[i];
+        i += 1;
+    }
+    while i < 28 {
+        all[i] = BINARY[i - UNARY.len()];
+        i += 1;
+    }
+    all
+};
+
 /// `res.status: eq 200` becomes a test of the same name. The left side is a
 /// JavaScript expression; the right side an operator and its argument, or
 /// just a value, which means `eq`.
-fn assertion(expr: &str, rule: &str) -> String {
+pub(crate) fn assertion(expr: &str, rule: &str) -> String {
     let (op, arg) = match rule.split_once(char::is_whitespace) {
         Some((op, arg)) if BINARY.contains(&op) => (op, arg.trim()),
         _ if UNARY.contains(&rule) => (rule, ""),

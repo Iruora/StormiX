@@ -1,0 +1,21 @@
+info:
+  name: Read the profile
+  type: http
+  seq: 2
+http:
+  method: GET
+  url: "{{base_url}}/me"
+  auth:
+    type: bearer
+    token: "{{token}}"
+runtime:
+  assertions:
+    - expression: res.body.user
+      operator: eq
+      value: "{{user}}"
+    - expression: res.body.roles
+      operator: contains
+      value: tester
+    - expression: res.body.never
+      operator: isDefined
+      disabled: true

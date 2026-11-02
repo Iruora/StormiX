@@ -8,7 +8,7 @@ What Stormix 1.0 runs from Postman and Bruno collections, feature by feature. An
 
 | Feature | Postman | Bruno | Notes |
 |---|---|---|---|
-| Collection format | ✓ v2.0, v2.1 | ✓ `.bru` folders | Postman v1: export again as v2.1 |
+| Collection format | ✓ v2.0, v2.1 | ✓ `.bru` folders, OpenCollection YAML (folder or bundled file) | Postman v1: export again as v2.1. Test files can be exported as OpenCollection for Bruno |
 | Folders | ✓ | ✓ | Flattened in run order; steps are named `Folder / Request` |
 | Methods | ✓ | ✓ | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS |
 | Query parameters | ✓ | ✓ | Disabled ones are left out |

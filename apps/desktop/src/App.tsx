@@ -10,6 +10,7 @@ import {
   FilePlus,
   FileUp,
   FolderOpen,
+  FolderOutput,
   Gauge,
   History,
   Layers,
@@ -577,18 +578,28 @@ function TestFileView({
   });
 
   const importFrom = useMutation({
-    mutationFn: async (kind: "postman" | "bruno") => {
+    mutationFn: async (kind: "postman" | "bruno" | "opencollection") => {
       const path = await open(
         kind === "postman"
           ? { title: "Import a Postman collection", filters: [{ name: "Postman collection", extensions: ["json"] }] }
-          : { title: "Import a Bruno collection folder", directory: true },
+          : kind === "opencollection"
+            ? {
+                title: "Import an OpenCollection: its opencollection.yml or a bundled file",
+                filters: [{ name: "OpenCollection", extensions: ["yml", "yaml"] }],
+              }
+            : { title: "Import a Bruno collection folder (.bru or OpenCollection YAML)", directory: true },
       );
       if (typeof path !== "string") return null;
       const what: Activity = {
-        label: kind === "postman" ? "Importing the Postman collection" : "Importing the Bruno collection",
+        label:
+          kind === "postman"
+            ? "Importing the Postman collection"
+            : kind === "opencollection"
+              ? "Importing the OpenCollection"
+              : "Importing the Bruno collection",
         detail: path,
       };
-      // A Bruno folder reports each request file it reads.
+      // A Bruno or OpenCollection folder reports each request file it reads.
       const unlisten = await events.importProgress.listen(({ payload: p }) =>
         setActivity({ ...what, detail: p.file, done: p.done, total: p.total, unit: "files" }),
       );
@@ -648,7 +659,24 @@ function TestFileView({
     },
   });
   // Opening, saving and importing touch the file shown; one at a time.
-  const fileBusy = file.isPending || importFrom.isPending || importEnv.isPending;
+  // Writes the test file as an OpenCollection folder that Bruno opens.
+  const exportBruno = useMutation({
+    mutationFn: async () => {
+      const dir = await open({ title: "Choose an empty folder for the Bruno collection", directory: true });
+      if (typeof dir !== "string") return null;
+      const environments = Object.entries(envs).map(([name, e]) => ({
+        name,
+        variables: e.variables,
+        secrets: e.secrets,
+      }));
+      const res = await showing({ label: "Exporting to Bruno", detail: dir }, () =>
+        commands.exportOpenCollection(source, environments, dir),
+      );
+      if (res.status === "error") throw new Error(res.error);
+      return { dir, warnings: res.data };
+    },
+  });
+  const fileBusy = file.isPending || importFrom.isPending || importEnv.isPending || exportBruno.isPending;
 
   const editorPane = (
     <>
@@ -696,6 +724,14 @@ function TestFileView({
           onClick={() => file.mutate("save")}
         />
         <FileButton label="Save as" disabled={fileBusy} onClick={() => file.mutate("saveAs")} />
+        <FileButton
+          label="Export to Bruno"
+          title="Write this test file as an OpenCollection folder, the YAML format Bruno opens"
+          icon={<FolderOutput size="0.8125rem" />}
+          busy={exportBruno.isPending}
+          disabled={fileBusy}
+          onClick={() => exportBruno.mutate()}
+        />
         <PanelToggle
           open={panel.open}
           onClick={() => panel.setOpen(!panel.open)}
@@ -703,6 +739,34 @@ function TestFileView({
         />
       </div>
       {file.error && <div className="border-b border-line bg-bad-soft px-3 py-1 text-xs text-bad">{file.error.message}</div>}
+      {exportBruno.error && (
+        <div className="border-b border-line bg-bad-soft px-3 py-1 text-xs text-bad">{exportBruno.error.message}</div>
+      )}
+      {exportBruno.data && (
+        <div className="flex items-start gap-2 border-b border-line bg-surface-2 px-3 py-1 text-xs text-muted">
+          <div className="min-w-0 flex-1">
+            <div>
+              Exported to <span className="break-all font-mono text-ink">{exportBruno.data.dir}</span>. Open that
+              folder in Bruno.
+            </div>
+            {exportBruno.data.warnings.length > 0 && (
+              <ul className="mt-0.5 list-disc pl-4 text-warn">
+                {exportBruno.data.warnings.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => exportBruno.reset()}
+            className="rounded p-0.5 hover:bg-surface hover:text-ink"
+          >
+            <X size="0.75rem" />
+          </button>
+        </div>
+      )}
       {tab === "yaml" ? (
         <YamlEditor
           value={source}
@@ -915,10 +979,25 @@ function TestFileView({
             disabled={fileBusy}
             aria-busy={importFrom.isPending && importFrom.variables === "bruno"}
             onClick={() => importFrom.mutate("bruno")}
+            title="A Bruno collection folder, in .bru files or OpenCollection YAML"
             className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100 disabled:hover:bg-transparent"
           >
             <BusyIcon busy={importFrom.isPending && importFrom.variables === "bruno"} icon={<FolderOpen size="0.8125rem" />} />
             Bruno
+          </button>
+          <button
+            type="button"
+            disabled={fileBusy}
+            aria-busy={importFrom.isPending && importFrom.variables === "opencollection"}
+            onClick={() => importFrom.mutate("opencollection")}
+            title="An OpenCollection file: a collection's opencollection.yml, or a bundled .yml holding the whole collection"
+            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100 disabled:hover:bg-transparent"
+          >
+            <BusyIcon
+              busy={importFrom.isPending && importFrom.variables === "opencollection"}
+              icon={<FileCode size="0.8125rem" />}
+            />
+            OpenCollection
           </button>
           <div className="flex items-center rounded-md border border-line">
             {envNames.length > 0 && (
@@ -985,7 +1064,7 @@ function TestFileView({
               disabled={fileBusy}
               aria-busy={importEnv.isPending}
               onClick={() => importEnv.mutate()}
-              title="Import an environment file: YAML or JSON variables, a Postman environment export or a Bruno .bru environment"
+              title="Import an environment file: YAML or JSON variables, a Postman environment export or a Bruno environment (.bru or OpenCollection .yml)"
               className="flex items-center gap-1.5 rounded-r-md px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100"
             >
               <BusyIcon busy={importEnv.isPending} icon={<FileUp size="0.8125rem" />} />
@@ -1086,12 +1165,14 @@ function PanelToggle({ open, onClick, alert }: { open: boolean; onClick: () => v
 
 function FileButton({
   label,
+  title,
   icon,
   busy,
   disabled,
   onClick,
 }: {
   label: string;
+  title?: string;
   icon?: ReactNode;
   busy?: boolean;
   disabled?: boolean;
@@ -1100,6 +1181,7 @@ function FileButton({
   return (
     <button
       type="button"
+      title={title}
       onClick={onClick}
       disabled={disabled}
       aria-busy={busy}

@@ -1,5 +1,7 @@
-//! Turns Postman v2.1 collections and Bruno collections into Stormix test
-//! files, scripts included, so the engine can run them as they are.
+//! Turns Postman v2.1 collections and Bruno collections (`.bru` or
+//! OpenCollection YAML) into Stormix test files, scripts included, so the
+//! engine can run them as they are. Test files can also be exported as
+//! OpenCollection, which Bruno opens.
 //!
 //! Folders are flattened in run order and their names kept in each step's
 //! name ("Users / Create user"). Collection and folder auth, headers and
@@ -16,6 +18,7 @@ mod bru;
 pub mod bruno;
 mod common;
 pub mod environment;
+pub mod opencollection;
 pub mod postman;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,6 +37,9 @@ pub struct Imported {
 pub enum Format {
     Postman,
     Bruno,
+    /// Bruno's YAML format: a folder with `opencollection.yml`, that file,
+    /// or a bundled `.yml` file holding the whole collection.
+    OpenCollection,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -55,23 +61,43 @@ pub enum ImportError {
     Environment { file: PathBuf, message: String },
     #[error("{} is not a Bruno collection: it has no bruno.json and no .bru files", .0.display())]
     NotBruno(PathBuf),
+    #[error("{}: {message}", file.display())]
+    Yaml { file: PathBuf, message: String },
+    #[error("{} is not an OpenCollection: it has no opencollection.yml", .0.display())]
+    NotOpenCollection(PathBuf),
 }
 
-/// Guesses the format from the path alone: a `.json` file is a Postman
-/// export, a folder (or a `.bru` file inside one) is a Bruno collection.
+/// Guesses the format from the path: a `.json` file is a Postman export, a
+/// folder (or a `.bru` file inside one) is a Bruno collection, and one
+/// with `opencollection.yml` in it an OpenCollection. A `.yml` or `.yaml`
+/// file is an OpenCollection only when it starts one (an `opencollection:`
+/// key); otherwise it is taken for a Stormix test file and this says `None`.
 pub fn detect(path: &Path) -> Option<Format> {
     if path.is_dir() {
-        return Some(Format::Bruno);
+        let open = opencollection::ROOT_FILES
+            .iter()
+            .any(|n| path.join(n).is_file());
+        return Some(if open {
+            Format::OpenCollection
+        } else {
+            Format::Bruno
+        });
     }
     match path.extension()?.to_str()? {
         "json" => Some(Format::Postman),
         "bru" => Some(Format::Bruno),
+        "yml" | "yaml"
+            if opencollection::is_root_file(path) || opencollection::looks_bundled(path) =>
+        {
+            Some(Format::OpenCollection)
+        }
         _ => None,
     }
 }
 
-/// Imports the collection at `path`, a Postman `.json` export or a Bruno
-/// collection folder. A `.bru` file stands for the folder it is in.
+/// Imports the collection at `path`: a Postman `.json` export, a Bruno
+/// collection folder or an OpenCollection folder or bundled file. A `.bru`
+/// file stands for the folder it is in, as does `opencollection.yml`.
 pub fn import(path: &Path) -> Result<Imported, ImportError> {
     import_with_progress(path, &mut |_| {})
 }
@@ -88,8 +114,9 @@ pub fn import_with_progress(
         Some(Format::Bruno) => {
             bruno::from_dir_with_progress(path.parent().unwrap_or(Path::new(".")), on_progress)
         }
+        Some(Format::OpenCollection) => opencollection::from_path_with_progress(path, on_progress),
         None => Err(ImportError::Postman(format!(
-            "{} is neither a .json export nor a Bruno folder",
+            "{} is neither a .json export, a Bruno folder nor an OpenCollection",
             path.display()
         ))),
     }

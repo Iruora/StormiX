@@ -126,6 +126,7 @@ impl Importer {
             test.extend(events(item, "test"));
             let auth = auth(request.get("auth")).unwrap_or_else(|| scope.auth.clone());
             common::apply_auth(
+                common::Dialect::Postman,
                 &auth,
                 &mut built,
                 &mut pre_request,

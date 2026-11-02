@@ -1,17 +1,38 @@
 # Collections
 
-`stormix run` takes a Postman collection or a Bruno collection as it is, scripts included. `stormix import` converts one into a Stormix test file when you would rather keep YAML in the repository. The desktop app imports both from the **Import** buttons on the Test file screen.
+`stormix run` takes a Postman collection or a Bruno collection as it is, scripts included. Bruno collections can be in either of Bruno's formats: `.bru` files, or [OpenCollection](https://www.opencollection.com) YAML, the format Bruno saves in since v3. `stormix import` converts one into a Stormix test file when you would rather keep YAML in the repository, and `stormix export` goes the other way, writing a test file as an OpenCollection that Bruno opens. The desktop app imports all of them from the **Import** buttons on the Test file screen, and writes the open test file for Bruno with **Export to Bruno**.
 
 ```sh
 stormix run my-api.postman_collection.json --env staging.postman_environment.json
 stormix run ./my-bruno-collection --env local          # a Bruno environment, by name
 stormix import ./my-bruno-collection -o my-api.stormix.yaml   # also writes environments/local.yaml
 stormix run my-api.stormix.yaml --env local --var token=...
+stormix run ./my-opencollection --env local             # opencollection.yml in it
+stormix run my-api.yml                                  # a bundled OpenCollection file
+stormix export my-api.stormix.yaml -o ./for-bruno       # a folder Bruno opens
 ```
+
+## OpenCollection
+
+An OpenCollection is a folder with `opencollection.yml` at its root, a `folder.yml` in each sub-folder, one `.yml` file per request and environments in `environments/`, or a single bundled `.yml` file holding all of it (environments under `config.environments`). Stormix reads both: pass the folder, its `opencollection.yml`, or the bundled file. A `.yml` file counts as an OpenCollection only when it has a top-level `opencollection:` key, so Stormix test files are never mistaken for one.
+
+It imports exactly like the same collection saved as `.bru` files: collection and folder headers, auth, variables and scripts are applied to each request under them, `set-variable` actions are Bruno's post-response variables, and assertions take every Bruno operator. Disabled headers, parameters, form fields, variables and assertions are left out. Where a body or variable has several variants, the selected one is used. An environment that `extends` another gets the other's variables under its own.
+
+### Exporting to Bruno
+
+`stormix export FILE -o DIR` writes `FILE` (a test file, or any collection Stormix reads) as an OpenCollection folder, with the environments next to the test file in `environments/`. `-o api.yml` writes one bundled file instead. In the desktop app, **Export to Bruno** writes the open test file and its environments to a folder you choose. Then open the folder in Bruno.
+
+- Steps named `Folder / Request` go into folders.
+- `assert` checks become Bruno assertions: `status` is `res.status eq`, `max_duration_ms` is `res.responseTime lte`, `header` checks read `res.headers["name"]`, and `json` checks read the path under `res.body`. `body_contains` becomes a `test` in the tests script.
+- `extract` becomes post-response variables (`set-variable` actions) for JSON paths and headers, and a line of post-response script for a regex.
+- Scripts go over as they are, as `before-request` and `tests` scripts.
+- Environment secrets are written by name only, as Bruno secrets.
+
+What Bruno has no place for is left out and printed as a warning: steps that are turned off or set aside, `cache`, `trace`, `allow_errors` and `operation_name` on GraphQL bodies, the load profile and thresholds, and JSON paths with wildcards, filters or `..`. Scripts written for Postman (`pm.*`) are exported but warned about, since Bruno runs only part of that API. Bruno runs a folder's own requests before its sub-folders; when the steps are ordered otherwise, the export says so.
 
 ## Environments
 
-An environment file is a flat YAML or JSON map of names to values, a Postman environment export or a Bruno `.bru` environment. `--env` takes a path, or a name: one of a Bruno collection's `environments/`, or a file in the `environments/` folder next to a test file. That is where `stormix import -o` writes a collection's environments. Secrets (Bruno's `vars:secret`) have no value in the file; in YAML their names are listed under `$secrets`:
+An environment file is a flat YAML or JSON map of names to values, a Postman environment export, or a Bruno environment: a `.bru` file or an OpenCollection `.yml` (`name` and a `variables` list). Saving changes to an OpenCollection environment keeps it in that format. `--env` takes a path, or a name: one of a Bruno collection's `environments/`, or a file in the `environments/` folder next to a test file. That is where `stormix import -o` writes a collection's environments. Secrets (Bruno's `vars:secret`) have no value in the file; in YAML their names are listed under `$secrets`:
 
 ```yaml
 base_url: https://staging.example.com
@@ -24,16 +45,16 @@ Folders are flattened in run order, and each step is named after its folder path
 
 ## What carries over
 
-| | Postman (v2.0, v2.1) | Bruno |
+| | Postman (v2.0, v2.1) | Bruno (`.bru` or OpenCollection) |
 |---|---|---|
 | Requests | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS | the same |
-| Variables | collection variables; environments with `--env` | `vars:pre-request` of the collection; `environments/*.bru` with `--env NAME` |
+| Variables | collection variables; environments with `--env` | `vars:pre-request` (OpenCollection: `request.variables`) of the collection; `environments/*.bru` or `*.yml` with `--env NAME` |
 | Path variables | `:id` from the URL's variables | `params:path` |
 | Headers | request headers; disabled ones are left out | collection, folder and request headers; `~` disabled ones left out |
 | Bodies | raw (with the language's `Content-Type`), URL-encoded, form-data text fields, GraphQL | json, text, xml, form-urlencoded, multipart text fields, GraphQL |
 | Auth | bearer, basic, API key (header or query); inherited from folders and the collection | bearer, basic, API key; `inherit` from folder and collection |
 | Scripts | collection, folder and request pre-request and test scripts, in that order | collection, folder and request `script:pre-request`, `script:post-response` and `tests` |
-| Assertions | `pm.test` and legacy `tests["..."]` | `assert` blocks, with every Bruno operator; `vars:post-response` |
+| Assertions | `pm.test` and legacy `tests["..."]` | `assert` blocks (OpenCollection: `runtime.assertions`), with every Bruno operator; `vars:post-response` (`set-variable` actions) |
 
 Scripts run in an embedded JavaScript engine (QuickJS) as async functions, so top-level `await` works. They have no file access and can only reach the network through `sendRequest`. They have a memory cap and a time limit (`--script-timeout`, 5 s by default). Time spent waiting on `bru.sleep` and `sendRequest` does not count toward it; waiting has its own cap of 5 minutes per script. They see:
 

@@ -72,6 +72,16 @@ jobs:
       - name: Run the Bruno collection unchanged
         if: always()
         run: ./target/debug/stormix run examples/collections/bruno --env local --verbose --junit junit/bruno.xml
+      - name: Run the OpenCollection fixture unchanged
+        if: always()
+        run: ./target/debug/stormix run examples/collections/opencollection --env local --verbose --junit junit/opencollection.xml
+      - name: Export the demo flow and the Bruno fixture as OpenCollection and run the exports
+        if: always()
+        run: |
+          ./target/debug/stormix export examples/demo-api.stormix.yaml -o exported/demo
+          ./target/debug/stormix run exported/demo --junit junit/exported-demo.xml
+          ./target/debug/stormix export examples/collections/bruno -o exported/bruno.yml
+          ./target/debug/stormix run exported/bruno.yml --env local --junit junit/exported-bruno.xml
       - name: Load test the demo flow and check its thresholds
         if: always()
         run: ./target/debug/stormix load examples/demo-api.stormix.yaml --junit junit/load.xml --out load-report.json --html reports/load.html

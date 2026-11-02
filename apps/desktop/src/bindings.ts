@@ -63,6 +63,13 @@ export const commands = {
 	diffRuns: (before: number, after: number) => typedError<RunDiff_Serialize, string>(__TAURI_INVOKE("diff_runs", { before, after })),
 	/**  Writes a stored run as a JSON, JUnit XML or HTML report. */
 	exportRun: (id: number, path: string, format: ReportFormat) => typedError<null, string>(__TAURI_INVOKE("export_run", { id, path, format })),
+	/**
+	 *  Writes the test file in `yaml` as an OpenCollection that Bruno opens,
+	 *  into the folder `dir`. The folder must be empty or hold an earlier
+	 *  export (an `opencollection.yml`), so nothing else in it is overwritten.
+	 *  Returns what could not be carried over.
+	 */
+	exportOpenCollection: (yaml: string, environments: ExportEnvironment[], dir: string) => typedError<string[], string>(__TAURI_INVOKE("export_open_collection", { yaml, environments, dir })),
 	/**  Reads a test file the user picked. */
 	readTextFile: (path: string) => typedError<string, string>(__TAURI_INVOKE("read_text_file", { path })),
 	/**  Saves the editor's text where the user chose. */
@@ -209,6 +216,13 @@ export type Exchange_Serialize = {
 	requestBody: Payload | null,
 	/**  `None` when no response came back. */
 	response: ResponseRecord_Serialize | null,
+};
+
+/**  An environment to export with a collection. Secrets are named only. */
+export type ExportEnvironment = {
+	name: string,
+	variables: { [key in string]: string },
+	secrets: string[],
 };
 
 export type ExtractSource = 

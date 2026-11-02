@@ -22,6 +22,14 @@ pub enum Auth {
     Unsupported(String),
 }
 
+/// Whose script API the lines an importer adds are written in, so a flow
+/// exported back to that tool still runs there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dialect {
+    Postman,
+    Bruno,
+}
+
 pub fn method(name: &str) -> Option<Method> {
     Some(match name.to_ascii_uppercase().as_str() {
         "GET" => Method::Get,
@@ -71,6 +79,7 @@ pub fn inherit_headers(request: &mut Request, inherited: &[Header]) {
 /// built from variables therefore becomes a line of script, appended to
 /// `pre_request`. A request's own `Authorization` header wins.
 pub fn apply_auth(
+    dialect: Dialect,
     auth: &Auth,
     request: &mut Request,
     pre_request: &mut Vec<String>,
@@ -83,11 +92,15 @@ pub fn apply_auth(
         Auth::Basic { .. } if has_header(request, "Authorization") => {}
         Auth::Basic { username, password } => {
             if username.contains("{{") || password.contains("{{") {
-                pre_request.push(format!(
-                    "pm.request.headers.upsert({{ key: \"Authorization\", value: \"Basic \" + btoa(pm.variables.replaceIn({}) + \":\" + pm.variables.replaceIn({})) }});",
-                    js_string(username),
-                    js_string(password)
-                ));
+                let (u, p) = (js_string(username), js_string(password));
+                pre_request.push(match dialect {
+                    Dialect::Postman => format!(
+                        "pm.request.headers.upsert({{ key: \"Authorization\", value: \"Basic \" + btoa(pm.variables.replaceIn({u}) + \":\" + pm.variables.replaceIn({p})) }});"
+                    ),
+                    Dialect::Bruno => format!(
+                        "req.setHeader(\"Authorization\", \"Basic \" + btoa(bru.interpolate({u}) + \":\" + bru.interpolate({p})));"
+                    ),
+                });
             } else {
                 let encoded = base64::engine::general_purpose::STANDARD
                     .encode(format!("{username}:{password}"));

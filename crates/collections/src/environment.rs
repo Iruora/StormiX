@@ -1,7 +1,8 @@
 //! Environment files on their own, outside a collection: a flat YAML or
 //! JSON map of names to values, a Postman environment export
-//! (`{"name", "values": [{"key", "value", "enabled"}]}`) or a Bruno
-//! environment (`.bru`).
+//! (`{"name", "values": [{"key", "value", "enabled"}]}`), a Bruno
+//! environment (`.bru`) or an OpenCollection one
+//! (`{"name", "variables": [{"name", "value"}]}`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -107,6 +108,10 @@ pub fn write_file(path: &Path, env: &Environment) -> Result<(), String> {
     let text = match ext.as_str() {
         "bru" => to_bru(env, existing.as_deref())?,
         "json" => to_json(env, existing.as_deref())?,
+        _ if existing.as_deref().is_some_and(is_opencollection) => {
+            let doc = crate::opencollection::export::environment(env);
+            serde_yaml_ng::to_string(&doc).expect("JSON values always serialize")
+        }
         _ => to_yaml(env),
     };
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
@@ -269,11 +274,24 @@ pub fn to_yaml(env: &Environment) -> String {
     out
 }
 
+/// Whether `text` is an OpenCollection environment: a `variables` list.
+fn is_opencollection(text: &str) -> bool {
+    serde_yaml_ng::from_str::<Value>(text)
+        .is_ok_and(|v| v.get("variables").is_some_and(Value::is_array))
+}
+
 /// A YAML or JSON environment. Its name is empty unless it carries one
-/// (a Postman export's `name`).
+/// (a Postman export's or OpenCollection environment's `name`).
 pub fn parse(text: &str) -> Result<Environment, String> {
     // JSON is YAML, so one parser covers both.
     let value: Value = serde_yaml_ng::from_str(text).map_err(|e| e.to_string())?;
+    if let Some((name, variables, secrets)) = crate::opencollection::environment(&value) {
+        return Ok(Environment {
+            name: name.trim().to_owned(),
+            variables,
+            secrets,
+        });
+    }
     let Value::Object(map) = value else {
         return Err("expected a map of variable names to values".into());
     };
