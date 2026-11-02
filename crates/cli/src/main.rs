@@ -61,8 +61,10 @@ enum Command {
     /// format Bruno opens: a folder, or a single bundled .yml file.
     Export {
         file: PathBuf,
-        /// A folder to write the collection into, or a .yml/.yaml file for
-        /// a bundled one.
+        /// A folder to write an OpenCollection into, a .yml/.yaml file for
+        /// a bundled OpenCollection, or a .json file for a Postman
+        /// collection (environments go next to it as
+        /// NAME.postman_environment.json).
         #[arg(long, short)]
         output: PathBuf,
         /// Write into a folder that is not empty, or replace the file.
@@ -273,8 +275,33 @@ fn export(file: &Path, output: &Path, force: bool) -> Result<ExitCode, String> {
     let bundled = output
         .extension()
         .is_some_and(|e| e == "yml" || e == "yaml");
+    let postman = output.extension().is_some_and(|e| e == "json");
     let steps = source.test.flow.steps.len();
-    if bundled {
+    if postman {
+        use stormix_collections::postman_export;
+        if output.exists() && !force {
+            return Err(format!(
+                "{} already exists; pass --force to replace it",
+                output.display()
+            ));
+        }
+        let (json, warnings) = postman_export::to_json(&source.test);
+        print_warnings(&warnings);
+        let dir = output.parent().filter(|d| !d.as_os_str().is_empty());
+        if let Some(dir) = dir {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        }
+        std::fs::write(output, json)
+            .map_err(|e| format!("cannot write {}: {e}", output.display()))?;
+        for env in &environments {
+            let path = dir
+                .unwrap_or(Path::new(""))
+                .join(postman_export::environment_file_name(&env.name));
+            std::fs::write(&path, postman_export::environment_json(env))
+                .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        }
+    } else if bundled {
         if output.exists() && !force {
             return Err(format!(
                 "{} already exists; pass --force to replace it",
@@ -308,8 +335,9 @@ fn export(file: &Path, output: &Path, force: bool) -> Result<ExitCode, String> {
         n => format!(" and {n} environments"),
     };
     eprintln!(
-        "Wrote {} ({steps} steps{envs}). Open it in Bruno, or run it with `stormix run {0}`.",
-        output.display()
+        "Wrote {} ({steps} steps{envs}). Open it in {}, or run it with `stormix run {0}`.",
+        output.display(),
+        if postman { "Postman" } else { "Bruno" }
     );
     Ok(ExitCode::SUCCESS)
 }
