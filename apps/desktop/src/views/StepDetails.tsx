@@ -1,21 +1,58 @@
-import { Check, CircleCheck, CircleX, Copy, Waypoints, X } from "lucide-react";
+import {
+  Check,
+  CircleAlert,
+  CircleCheck,
+  CircleMinus,
+  CircleX,
+  Copy,
+  Info,
+  Stethoscope,
+  Waypoints,
+  X,
+} from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
-import type { HeaderPair, Payload, StepResult } from "../bindings";
+import type { Connection, Diagnosis, DiagnosisStage, HeaderPair, Payload, StepResult } from "../bindings";
 import { methodText } from "../lib/methods";
+import { Spinner } from "./Busy";
 
-type Tab = "failure" | "request" | "response";
+type Tab = "failure" | "request" | "response" | "connection";
+
+/** Sends the step again and checks each stage of its request. */
+export type Diagnose = (stepName: string) => Promise<Diagnosis>;
 
 /**
  * Everything about one step: why it failed, the request as sent and the
  * response as received. Opens over the app; Escape or the backdrop closes it.
  */
-export function StepDetails({ step, onClose }: { step: StepResult; onClose: () => void }) {
+export function StepDetails({
+  step,
+  onClose,
+  diagnose,
+}: {
+  step: StepResult;
+  onClose: () => void;
+  /** Missing where the step cannot be sent again, like a run from the history. */
+  diagnose?: Diagnose;
+}) {
   const exchange = step.exchange ?? null;
   const response = exchange?.response ?? null;
   const failedChecks = step.checks.filter((c) => !c.passed);
   const passed = !step.skipped && step.error == null && failedChecks.length === 0 && (step.status ?? 0) < 400;
   const [tab, setTab] = useState<Tab>(passed ? "response" : "failure");
+  const [diagnosis, setDiagnosis] = useState<{ pending: boolean; result?: Diagnosis; error?: string }>({
+    pending: false,
+  });
+  const startDiagnosis = async () => {
+    if (!diagnose) return;
+    setTab("connection");
+    setDiagnosis({ pending: true });
+    try {
+      setDiagnosis({ pending: false, result: await diagnose(step.name) });
+    } catch (e) {
+      setDiagnosis({ pending: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -67,7 +104,7 @@ export function StepDetails({ step, onClose }: { step: StepResult; onClose: () =
         </header>
 
         <nav className="flex gap-1 border-b border-line bg-surface-2 px-4 py-1.5">
-          {(["failure", "request", "response"] as const).map((t) => (
+          {(["failure", "request", "response", "connection"] as const).map((t) => (
             <button
               key={t}
               type="button"
@@ -76,7 +113,15 @@ export function StepDetails({ step, onClose }: { step: StepResult; onClose: () =
                 tab === t ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface"
               }`}
             >
-              {t === "failure" ? (passed ? "Checks" : "Failure") : t === "request" ? "Request" : "Response"}
+              {t === "failure"
+                ? passed
+                  ? "Checks"
+                  : "Failure"
+                : t === "request"
+                  ? "Request"
+                  : t === "response"
+                    ? "Response"
+                    : "Connection"}
             </button>
           ))}
         </nav>
@@ -89,6 +134,14 @@ export function StepDetails({ step, onClose }: { step: StepResult; onClose: () =
                 <Section title="Response body">
                   <Body payload={response.body ?? null} empty="The response had no body." />
                 </Section>
+              )}
+              {!passed && diagnose && !step.cached && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-line bg-surface-2 px-3 py-2 text-[0.8125rem]">
+                  <span className="min-w-0 flex-1 text-muted">
+                    Not sure whether the proxy, the network, TLS or the API refused it?
+                  </span>
+                  <DiagnoseButton pending={diagnosis.pending} onClick={startDiagnosis} />
+                </div>
               )}
             </>
           )}
@@ -105,6 +158,14 @@ export function StepDetails({ step, onClose }: { step: StepResult; onClose: () =
             ) : (
               <NotKept />
             ))}
+          {tab === "connection" && (
+            <ConnectionTab
+              step={step}
+              connection={(diagnosis.result?.step.exchange ?? exchange)?.connection ?? null}
+              diagnosis={diagnosis}
+              onDiagnose={diagnose && startDiagnosis}
+            />
+          )}
           {tab === "response" &&
             (!exchange ? (
               <NotKept />
@@ -196,6 +257,140 @@ function Outcome({ step }: { step: StepResult }) {
       )}
     </>
   );
+}
+
+function DiagnoseButton({ pending, onClick, again = false }: { pending: boolean; onClick: () => void; again?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={pending}
+      aria-busy={pending}
+      className="flex shrink-0 items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1 text-xs font-medium text-ink hover:bg-surface-2 disabled:opacity-60"
+    >
+      {pending ? <Spinner size="0.8125rem" /> : <Stethoscope size="0.8125rem" />}
+      {pending ? "Diagnosing" : again ? "Diagnose again" : "Diagnose"}
+    </button>
+  );
+}
+
+/** How the request got to the server, and where it fails when diagnosed. */
+function ConnectionTab({
+  step,
+  connection,
+  diagnosis,
+  onDiagnose,
+}: {
+  step: StepResult;
+  connection: Connection | null;
+  diagnosis: { pending: boolean; result?: Diagnosis; error?: string };
+  onDiagnose?: () => void;
+}) {
+  const result = diagnosis.result;
+  return (
+    <>
+      <Section title="Diagnose">
+        <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+          <p className="min-w-0 flex-1 text-[0.8125rem] text-muted">
+            {onDiagnose
+              ? "Sends this request again, after the steps before it for their variables, and checks each stage on the way: the proxy, name lookup, the connection, TLS and the response."
+              : "Run the file again to diagnose this step: it can be sent again only from the latest run."}
+          </p>
+          {onDiagnose && <DiagnoseButton pending={diagnosis.pending} onClick={onDiagnose} again={!!result} />}
+        </div>
+        {diagnosis.error && (
+          <div className="mt-2 rounded-md border border-bad/30 bg-bad-soft px-3 py-2 text-[0.8125rem] text-bad">
+            {diagnosis.error}
+          </div>
+        )}
+        {result && (
+          <div className="mt-3">
+            <div
+              className={`flex items-start gap-2 rounded-md border px-3 py-2 text-[0.8125rem] ${
+                result.ok ? "border-ok/30 bg-ok-soft text-ok" : "border-bad/30 bg-bad-soft text-bad"
+              }`}
+            >
+              {result.ok ? (
+                <CircleCheck size="1rem" className="mt-px shrink-0" />
+              ) : (
+                <CircleX size="1rem" className="mt-px shrink-0" />
+              )}
+              <span className="min-w-0 flex-1 text-ink">{result.verdict}</span>
+              <CopyButton label="Copy report" text={() => diagnosisText(step, result)} />
+            </div>
+            <ol className="mt-2 divide-y divide-line rounded-md border border-line">
+              {result.stages.map((s, i) => (
+                <StageRow key={i} stage={s} />
+              ))}
+            </ol>
+          </div>
+        )}
+      </Section>
+      <Section title="Route">
+        {connection ? (
+          <Table rows={connectionRows(connection, step.url.startsWith("https:"))} />
+        ) : (
+          <p className="text-[0.8125rem] text-muted">
+            {step.cached
+              ? "The response came from the cache, so no connection was made."
+              : "Not recorded for this step. Runs saved before Stormix 1.8 have no connection details."}
+          </p>
+        )}
+      </Section>
+    </>
+  );
+}
+
+function StageRow({ stage }: { stage: DiagnosisStage }) {
+  const icon = {
+    passed: <CircleCheck size="0.875rem" className="text-ok" />,
+    failed: <CircleX size="0.875rem" className="text-bad" />,
+    warning: <CircleAlert size="0.875rem" className="text-warn" />,
+    info: <Info size="0.875rem" className="text-accent" />,
+    notReached: <CircleMinus size="0.875rem" className="text-subtle" />,
+  }[stage.outcome];
+  return (
+    <li className={`flex items-start gap-2 px-3 py-1.5 text-[0.8125rem] ${stage.outcome === "notReached" ? "text-subtle" : ""}`}>
+      <span className="mt-0.5 shrink-0">{icon}</span>
+      <span className="w-28 shrink-0 font-medium">{stage.name}</span>
+      <span className={`min-w-0 flex-1 break-words ${stage.outcome === "notReached" ? "" : "text-muted"}`}>
+        {stage.summary}
+      </span>
+      {stage.durationMs != null && (
+        <span className="mono shrink-0 text-xs text-subtle">{formatMs(stage.durationMs)}</span>
+      )}
+    </li>
+  );
+}
+
+function connectionRows(c: Connection, https: boolean): { name: string; value: string }[] {
+  const rows = [
+    { name: "Proxy", value: c.proxy ? `${c.proxy} (from ${c.proxySource})` : "None, straight to the server" },
+    { name: "Connected to", value: c.remoteAddress ?? "No connection was made" },
+  ];
+  if (c.httpVersion) rows.push({ name: "Protocol", value: c.httpVersion });
+  if (c.certificate) {
+    rows.push(
+      { name: "Certificate for", value: c.certificate.subject },
+      { name: "Issued by", value: c.certificate.issuer },
+      { name: "Expires", value: c.certificate.notAfter },
+    );
+  } else if (c.proxy && c.httpVersion && https) {
+    rows.push({ name: "Certificate", value: "Not reported through a proxy: Diagnose reads it" });
+  }
+  return rows;
+}
+
+/** Plain text, to paste into a ticket for the network team. */
+function diagnosisText(step: StepResult, d: Diagnosis): string {
+  const mark = { passed: "ok  ", failed: "FAIL", warning: "warn", info: "    ", notReached: " -  " };
+  const lines = [`Stormix diagnosis of ${step.name}: ${d.step.method} ${d.step.url}`, ""];
+  for (const s of d.stages) {
+    const time = s.durationMs != null ? ` (${Math.round(s.durationMs)} ms)` : "";
+    lines.push(`${mark[s.outcome]} ${s.name}: ${s.summary}${time}`);
+  }
+  lines.push("", d.verdict);
+  return lines.join("\n");
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {

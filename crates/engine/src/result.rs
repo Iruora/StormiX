@@ -71,6 +71,41 @@ pub struct Exchange {
     pub request_body: Option<Payload>,
     /// `None` when no response came back.
     pub response: Option<ResponseRecord>,
+    /// How the request got to the server: the proxy, the address it
+    /// connected to, the HTTP version and the TLS certificate. Missing for
+    /// a cached response and from runs saved before 1.8.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<Connection>,
+}
+
+/// The route a request took, to tell a proxy, a firewall or TLS inspection
+/// apart from the API itself when a request fails on one network only.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct Connection {
+    /// The proxy the request was sent through, with any password hidden.
+    /// `None` when it went straight to the server.
+    pub proxy: Option<String>,
+    /// Where that proxy came from, like `HTTPS_PROXY` or `Windows proxy settings`.
+    pub proxy_source: Option<String>,
+    /// The IP address and port connected to: the proxy's when there is one.
+    pub remote_address: Option<String>,
+    /// Like `HTTP/1.1` or `HTTP/2`.
+    pub http_version: Option<String>,
+    /// The certificate the server, or whatever intercepted the connection,
+    /// presented. A corporate issuer here means TLS inspection.
+    pub certificate: Option<Certificate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct Certificate {
+    pub subject: String,
+    pub issuer: String,
+    /// When it expires, as the certificate gives it.
+    pub not_after: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import type { LoadProgress, LoadReport, Second, SlowRequest, StepResult, StepSummary, ThresholdResult } from "../bindings";
 import { ProgressBar } from "./Busy";
 import { DetailsButton, stepPassed } from "./RunResult";
-import { CopyButton, StepDetails } from "./StepDetails";
+import { CopyButton, StepDetails, type Diagnose } from "./StepDetails";
 
 /** Live figures while a load test runs: progress, the current second and a throughput chart. */
 export function LoadLive({ points }: { points: LoadProgress[] }) {
@@ -34,7 +34,7 @@ export function LoadLive({ points }: { points: LoadProgress[] }) {
 }
 
 /** The outcome of a load test: headline figures, thresholds, a timeline and each step. */
-export function LoadResult({ report }: { report: LoadReport }) {
+export function LoadResult({ report, diagnose }: { report: LoadReport; diagnose?: Diagnose }) {
   const s = report.summary;
   const passed = report.thresholds.every((t) => t.passed);
   const errorRate = s.requests ? (s.failedRequests / s.requests) * 100 : 0;
@@ -129,7 +129,7 @@ export function LoadResult({ report }: { report: LoadReport }) {
           {s.interruptedIterations > 0 && `${s.interruptedIterations} iterations were cut off at the end.`}
         </div>
       )}
-      {open && <StepDetails step={open} onClose={() => setOpen(null)} />}
+      {open && <StepDetails step={open} onClose={() => setOpen(null)} diagnose={diagnose} />}
     </section>
   );
 }

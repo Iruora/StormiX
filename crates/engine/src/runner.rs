@@ -14,7 +14,8 @@ use stormix_script::{
 
 use crate::cache::{Key, ResponseCache};
 use crate::checks::{self, Response};
-use crate::result::{Exchange, HeaderPair, Payload, ResponseRecord};
+use crate::connection::{Proxies, Wire};
+use crate::result::{Connection, Exchange, HeaderPair, Payload, ResponseRecord};
 use crate::trace::{self, TraceParent};
 use crate::{Check, FlowResult, StepResult, Variables};
 
@@ -65,8 +66,11 @@ pub enum RunnerError {
 #[derive(Debug, Clone)]
 pub struct Runner {
     client: reqwest::Client,
-    options: RunOptions,
+    pub(crate) options: RunOptions,
     cache: Arc<ResponseCache>,
+    /// To report the proxy each request went through; the client makes the
+    /// same choice from the same settings.
+    pub(crate) proxies: Arc<Proxies>,
 }
 
 /// A step about to run, as [`Runner::run_with_progress`] reports it.
@@ -85,6 +89,7 @@ impl Runner {
             client,
             options,
             cache: Arc::default(),
+            proxies: Arc::new(Proxies::system()),
         })
     }
 
@@ -356,21 +361,25 @@ impl Runner {
                 result.span_id = Some(parent.span_id);
             }
         }
+        let mut wire = None;
         let (status, headers, body) = if let Some(kept) = kept {
             result.cached = true;
             result.time_to_headers_ms = Some(millis(started.elapsed()));
             (kept.status, kept.headers.clone(), kept.body.clone())
         } else {
-            let response = match self.client.execute(request).await {
+            let target = request.url().clone();
+            let mut response = match self.client.execute(request).await {
                 Ok(response) => response,
                 Err(err) => {
                     result.duration_ms = millis(started.elapsed());
                     result.error = Some(describe(&err, self.options.timeout));
-                    result.exchange = Some(sent.into_exchange(None));
+                    let connection = Wire::unanswered(target).connection(&self.proxies);
+                    result.exchange = Some(sent.into_exchange(None, Some(connection)));
                     return result;
                 }
             };
             result.time_to_headers_ms = Some(millis(started.elapsed()));
+            wire = Some(Wire::of(target, &mut response));
             let status = response.status();
             let headers = response.headers().clone();
             match response.bytes().await {
@@ -379,11 +388,15 @@ impl Runner {
                     result.duration_ms = millis(started.elapsed());
                     result.status = Some(status.as_u16());
                     result.error = Some(describe(&err, self.options.timeout));
-                    result.exchange = Some(sent.into_exchange(Some(ResponseRecord {
-                        status_text: status.canonical_reason().unwrap_or_default().to_owned(),
-                        headers: header_pairs(&headers),
-                        body: None,
-                    })));
+                    let connection = wire.take().map(|w| w.connection(&self.proxies));
+                    result.exchange = Some(sent.into_exchange(
+                        Some(ResponseRecord {
+                            status_text: status.canonical_reason().unwrap_or_default().to_owned(),
+                            headers: header_pairs(&headers),
+                            body: None,
+                        }),
+                        connection,
+                    ));
                     return result;
                 }
             }
@@ -468,11 +481,15 @@ impl Runner {
         }
         // Under load an unchecked 4xx or 5xx counts as failed too.
         if self.options.exchanges == Exchanges::All || !result.passed() || status.as_u16() >= 400 {
-            result.exchange = Some(sent.into_exchange(Some(ResponseRecord {
-                status_text: status.canonical_reason().unwrap_or_default().to_owned(),
-                headers: header_pairs(&headers),
-                body: (!body.is_empty()).then(|| Payload::new(&body)),
-            })));
+            let connection = wire.map(|w| w.connection(&self.proxies));
+            result.exchange = Some(sent.into_exchange(
+                Some(ResponseRecord {
+                    status_text: status.canonical_reason().unwrap_or_default().to_owned(),
+                    headers: header_pairs(&headers),
+                    body: (!body.is_empty()).then(|| Payload::new(&body)),
+                }),
+                connection,
+            ));
         }
         result
     }
@@ -497,7 +514,11 @@ impl Sent {
         }
     }
 
-    fn into_exchange(self, response: Option<ResponseRecord>) -> Exchange {
+    fn into_exchange(
+        self,
+        response: Option<ResponseRecord>,
+        connection: Option<Connection>,
+    ) -> Exchange {
         let empty = HeaderMap::new();
         let headers = match (&self.copy, &self.headers) {
             (Some(copy), _) => copy.headers(),
@@ -528,6 +549,7 @@ impl Sent {
             request_headers,
             request_body,
             response,
+            connection,
         }
     }
 }
@@ -720,6 +742,8 @@ fn build_client(options: &RunOptions) -> reqwest::Result<reqwest::Client> {
             Policy::none()
         })
         .tls_danger_accept_invalid_certs(options.insecure)
+        // For the certificate shown in Details: TLS inspection replaces it.
+        .tls_info(true)
         .build()
 }
 
