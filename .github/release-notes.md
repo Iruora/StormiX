@@ -1,8 +1,8 @@
-Stormix 1.6.0 supports GraphQL natively.
+Stormix 1.7.0 adds request tracing and Bruno's OpenCollection format.
 
-- **GraphQL steps:** a new `graphql` body with `query`, `variables` and `operation_name`, plus a GraphQL editor in the Steps tab. A `{{variable}}` is sent as the type the query declares, so `id: "{{user_id}}"` goes out as a number for `$id: Int!`.
-- **GraphQL errors fail the step:** a response with an `errors` array fails the step even with status 200, and load tests count it as an error. Set `allow_errors: true` for a step that expects errors.
-- **Imports fixed:** GraphQL requests from Postman and Bruno whose variables use bare `{{variables}}`, like `{ "id": {{userId}} }`, were sent with `null` variables. They now keep their variables and fill them in when sent.
+- **Trace requests in Dynatrace and other APM tools:** with `trace: request` (or `trace: flow`), every request carries a W3C `traceparent` header and every result records its trace ID, so a slow or failed request can be followed through each service it reached. Details shows the trace ID with a copy button, and load test results list the slowest traced requests.
+- **OpenCollection import:** Bruno collections saved in OpenCollection YAML, Bruno's format since v3, run and import like `.bru` ones: a folder with `opencollection.yml`, that file, or a single bundled `.yml`, environments included.
+- **Export to Bruno:** `stormix export FILE -o DIR` and the app's **Export to Bruno** button write a test file as an OpenCollection that Bruno opens. Checks become Bruno assertions, and anything Bruno has no place for is listed.
 
 If you are on 1.1 or later, the app offers this update by itself. On 1.0, download it once from the table below.
 
