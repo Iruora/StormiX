@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.8.1 (2026-11-02)
+
+### Fixes
+
+- **Choose the proxy.** A request that a client with its proxy off, like Bruno, gets through could be blocked by a corporate proxy that Stormix took from `HTTPS_PROXY`. Requests can now go through the system's proxy (the default), no proxy, or one given proxy: **Proxy for requests** in a step's Details, **Connection** tab, kept across launches, and `--proxy system|none|URL` for `run`, `load` and `diagnose`. See [Proxies](docs/CLI.md#proxies).
+- **Diagnose** sends a request that failed through a proxy once more without it, and says when the proxy is what refuses it, with a **Use no proxy** button. FortiGate and FortiProxy block pages are recognised.
+
 ## 1.8.0 (2026-11-02)
 
 ### Diagnosing requests

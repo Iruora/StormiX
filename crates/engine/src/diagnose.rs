@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use stormix_flow::{Flow, TraceMode};
 use tokio::net::TcpStream;
 
+use crate::connection::ProxyChoice;
 use crate::result::{Certificate, HeaderPair, StepResult};
 use crate::runner::{Exchanges, Runner};
 use crate::trace::{self, TraceParent};
@@ -117,11 +118,28 @@ impl Runner {
         // Sent for real, so a cached response does not hide the network.
         let mut step = steps[index].clone();
         step.cache = false;
+        let before = vars.clone();
         let result = runner
             .run_step(&flow.name, &step, &mut vars, tracing().as_ref())
             .await;
-        let (more, verdict, ok) = self.probe(&result).await;
+        let (more, mut verdict, ok) = self.probe(&result).await;
         stages.extend(more);
+
+        // Through a proxy and refused: is it the proxy that refuses?
+        let proxied = reqwest::Url::parse(&result.url)
+            .ok()
+            .and_then(|url| Some((self.proxies.for_url(&url)?, url.host_str()?.to_owned())));
+        if let (false, Some((proxy, host))) = (ok, proxied) {
+            if let Ok(direct) = runner.with_proxy(ProxyChoice::None) {
+                let mut vars = before;
+                let again = direct
+                    .run_step(&flow.name, &step, &mut vars, tracing().as_ref())
+                    .await;
+                let (stage, advice) = compare_direct(&proxy.shown, &host, &result, &again);
+                stages.push(stage);
+                verdict = advice.unwrap_or(verdict);
+            }
+        }
         Ok(Diagnosis {
             stages,
             verdict,
@@ -178,7 +196,13 @@ impl Runner {
             None => stages.push(DiagnosisStage::new(
                 "Proxy",
                 StageOutcome::Info,
-                "None: straight to the server. Set HTTPS_PROXY if your network needs one.".into(),
+                if *self.proxy() == ProxyChoice::None {
+                    "None: Stormix is set to send requests straight to the server.".into()
+                } else {
+                    "None: straight to the server. Choose a proxy, or set HTTPS_PROXY, if your \
+                     network needs one."
+                        .into()
+                },
             )),
         }
         let (dial_host, dial_port) = match &proxy {
@@ -725,6 +749,79 @@ async fn peer_certificate(stream: TcpStream, host: &str) -> Result<Option<Certif
     }
 }
 
+/// The same request sent straight to the server, after it failed through
+/// the proxy, and what that says about who refuses it.
+fn compare_direct(
+    proxy: &str,
+    host: &str,
+    through: &StepResult,
+    direct: &StepResult,
+) -> (DiagnosisStage, Option<String>) {
+    let name = "Without the proxy";
+    let status_line = |r: &StepResult| {
+        let text = r
+            .exchange
+            .as_ref()
+            .and_then(|e| e.response.as_ref())
+            .map(|r| r.status_text.clone())
+            .unwrap_or_default();
+        format!("{} {text}", r.status.unwrap_or_default())
+            .trim()
+            .to_owned()
+    };
+    match direct.status {
+        Some(status) if status < 400 && direct.passed() => (
+            DiagnosisStage::new(
+                name,
+                StageOutcome::Passed,
+                format!(
+                    "Straight to {host}: {} in {} ms.",
+                    status_line(direct),
+                    direct.duration_ms.round()
+                ),
+            ),
+            Some(format!(
+                "The proxy {proxy} refuses this request: sent straight to {host}, it gets {}. \
+                 Choose No proxy for requests, or add {host} to NO_PROXY. A client that works, \
+                 like Bruno, probably reaches it without this proxy.",
+                status_line(direct)
+            )),
+        ),
+        Some(status) if Some(status) == through.status => (
+            DiagnosisStage::new(
+                name,
+                StageOutcome::Failed,
+                format!("Straight to {host}: {} as well.", status_line(direct)),
+            ),
+            Some(format!(
+                "{host} answers {} with or without the proxy {proxy}, so the API, or a firewall in \
+                 front of it, refuses the request itself. Compare its headers and body with a \
+                 client that gets through.",
+                status_line(direct)
+            )),
+        ),
+        Some(_) => (
+            DiagnosisStage::new(
+                name,
+                StageOutcome::Warning,
+                format!("Straight to {host}: {}.", status_line(direct)),
+            ),
+            None,
+        ),
+        None => (
+            DiagnosisStage::new(
+                name,
+                StageOutcome::Info,
+                format!(
+                    "{host} cannot be reached without a proxy: {}.",
+                    direct.error.as_deref().unwrap_or("no response")
+                ),
+            ),
+            None,
+        ),
+    }
+}
+
 fn is_tls_error(error: &str) -> bool {
     ["certificate", "unknownissuer", "tls", "handshake", "ssl"]
         .iter()
@@ -761,6 +858,14 @@ fn answered_by(status: u16, headers: &[HeaderPair], body: &str) -> Option<String
         ("forcepoint", "Forcepoint, a corporate proxy"),
         ("websense", "Websense, a corporate proxy"),
         ("fortigate", "a FortiGate firewall"),
+        (
+            "blocked by a firewall policy",
+            "a FortiGate or FortiProxy web filter",
+        ),
+        (
+            "send request to urlfilter",
+            "a FortiGate or FortiProxy web filter",
+        ),
         ("fortinet", "a FortiGate firewall"),
         ("palo alto", "a Palo Alto firewall"),
         (
@@ -845,6 +950,11 @@ mod tests {
             .unwrap()
             .contains("Via: 1.1 gateway"));
         assert_eq!(answered_by(403, &[h("Server", "nginx")], "{}"), None);
+        let forti = "<h1>Access Denied</h1><p>The page you requested has been blocked by a firewall policy restriction.</p>";
+        assert_eq!(
+            answered_by(403, &[h("content-type", "text/html")], forti).as_deref(),
+            Some("a FortiGate or FortiProxy web filter")
+        );
     }
 
     #[test]

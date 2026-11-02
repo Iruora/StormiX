@@ -14,7 +14,7 @@ use stormix_script::{
 
 use crate::cache::{Key, ResponseCache};
 use crate::checks::{self, Response};
-use crate::connection::{Proxies, Wire};
+use crate::connection::{Proxies, ProxyChoice, Wire};
 use crate::result::{Connection, Exchange, HeaderPair, Payload, ResponseRecord};
 use crate::trace::{self, TraceParent};
 use crate::{Check, FlowResult, StepResult, Variables};
@@ -32,6 +32,8 @@ pub struct RunOptions {
     pub script_timeout: Duration,
     /// Which steps keep the request and response they exchanged.
     pub exchanges: Exchanges,
+    /// Which proxy requests go through.
+    pub proxy: ProxyChoice,
 }
 
 /// Keeping headers and bodies costs a copy per request, which a load test
@@ -51,6 +53,7 @@ impl Default for RunOptions {
             bail: false,
             script_timeout: Duration::from_secs(5),
             exchanges: Exchanges::All,
+            proxy: ProxyChoice::System,
         }
     }
 }
@@ -87,10 +90,30 @@ impl Runner {
         let client = build_client(&options)?;
         Ok(Self {
             client,
+            proxies: Arc::new(Proxies::new(&options.proxy)),
             options,
             cache: Arc::default(),
-            proxies: Arc::new(Proxies::system()),
         })
+    }
+
+    /// A runner like this one, keeping its cache, whose requests go
+    /// through `proxy` instead. Fails on a proxy URL that does not parse.
+    pub fn with_proxy(&self, proxy: ProxyChoice) -> Result<Self, RunnerError> {
+        let options = RunOptions {
+            proxy,
+            ..self.options.clone()
+        };
+        Ok(Self {
+            client: build_client(&options)?,
+            proxies: Arc::new(Proxies::new(&options.proxy)),
+            options,
+            cache: self.cache.clone(),
+        })
+    }
+
+    /// The proxy choice requests follow.
+    pub fn proxy(&self) -> &ProxyChoice {
+        &self.options.proxy
     }
 
     /// The responses kept for cached steps, shared by every clone of this
@@ -733,7 +756,8 @@ fn describe(err: &reqwest::Error, timeout: Duration) -> String {
 }
 
 fn build_client(options: &RunOptions) -> reqwest::Result<reqwest::Client> {
-    reqwest::Client::builder()
+    let builder = options.proxy.apply(reqwest::Client::builder())?;
+    builder
         .user_agent(USER_AGENT)
         .timeout(options.timeout)
         .redirect(if options.follow_redirects {

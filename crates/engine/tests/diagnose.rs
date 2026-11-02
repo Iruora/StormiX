@@ -3,7 +3,7 @@
 use axum::http::{header, StatusCode};
 use axum::routing::get;
 use axum::Router;
-use stormix_engine::{RunOptions, Runner, StageOutcome, Variables};
+use stormix_engine::{ProxyChoice, RunOptions, Runner, StageOutcome, Variables};
 use stormix_flow::TestFile;
 
 async fn serve() -> String {
@@ -134,4 +134,72 @@ async fn refuses_an_unknown_step() {
         .await
         .unwrap_err();
     assert!(err.contains("`nope`"));
+}
+
+/// A proxy that refuses everything, as a corporate web filter might.
+async fn refusing_proxy() -> String {
+    let app = Router::new().fallback(|| async {
+        (
+            StatusCode::FORBIDDEN,
+            [(header::CONTENT_TYPE, "text/html")],
+            "<html><head><title>Access Denied</title></head></html>",
+        )
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{addr}")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tells_when_only_the_proxy_refuses() {
+    let base = serve().await;
+    let proxy = refusing_proxy().await;
+    let runner = Runner::new(RunOptions {
+        proxy: ProxyChoice::Url(proxy.clone()),
+        ..RunOptions::default()
+    })
+    .unwrap();
+    let d = runner
+        .diagnose(&flow(&base, &["/ok"]), &Variables::new(), "/ok")
+        .await
+        .unwrap();
+    assert!(!d.ok);
+    let proxy_stage = d.stages.iter().find(|s| s.name == "Proxy").unwrap();
+    assert!(
+        proxy_stage.summary.contains("Stormix's proxy setting"),
+        "{}",
+        proxy_stage.summary
+    );
+    assert_eq!(outcome(&d, "Without the proxy"), StageOutcome::Passed);
+    assert!(
+        d.verdict
+            .starts_with(&format!("The proxy {proxy} refuses this request")),
+        "{}",
+        d.verdict
+    );
+    // The step reported is the one sent through the proxy.
+    assert_eq!(d.step.status, Some(403));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn no_proxy_goes_straight_to_the_server() {
+    let base = serve().await;
+    let runner = Runner::new(RunOptions {
+        proxy: ProxyChoice::Url(refusing_proxy().await),
+        ..RunOptions::default()
+    })
+    .unwrap()
+    .with_proxy(ProxyChoice::None)
+    .unwrap();
+    let result = runner.run(&flow(&base, &["/ok"]), &Variables::new()).await;
+    assert_eq!(result.steps[0].status, Some(200));
+    let connection = result.steps[0]
+        .exchange
+        .as_ref()
+        .unwrap()
+        .connection
+        .as_ref()
+        .unwrap();
+    assert_eq!(connection.proxy, None);
 }

@@ -30,6 +30,7 @@ stormix export FILE -o DIR          # write a test file as an OpenCollection for
 | `--env FILE\|NAME` | Variables from a YAML or JSON map, a Postman environment export or a Bruno `.bru` environment. A name works too: one of a Bruno collection's environments, or a file in the `environments/` folder next to a test file |
 | `--timeout 30s` | Time allowed for each request |
 | `--insecure` | Accept invalid or self-signed TLS certificates |
+| `--proxy system\|none\|URL` | Which proxy requests go through. `system` (the default) follows the environment variables, then the Windows or macOS settings; `none` sends every request straight to the server; a URL like `http://proxy.example:8080` sends every request through that proxy. See [Proxies](#proxies) |
 | `--no-follow-redirects` | Report redirects instead of following them |
 | `--script-timeout 5s` | Running time allowed for each pre-request or test script. Waiting on `bru.sleep` and `sendRequest` does not count |
 | `--trace [request\|flow\|off]` | Send a W3C `traceparent` header with every request, for Dynatrace and other APM tools, and report each request's trace ID. `request` (the default with no value) gives each request its own trace, `flow` one trace per flow run; `off` sends none even if the file sets `trace` |
@@ -42,6 +43,8 @@ Report paths are created along with any missing folders.
 ### Proxies
 
 Requests go through the same proxy as the rest of the system. On Windows that is the proxy set in **Settings > Network & internet > Proxy** (Internet Options), with its bypass list; on macOS it is the one in System Settings. The `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` and `NO_PROXY` environment variables take precedence, in the desktop app and the CLI alike. A proxy that needs a user name and password takes them in its URL, like `HTTPS_PROXY=http://user:password@proxy.example.com:8080`.
+
+`--proxy none` (in the desktop app, **No proxy** under **Proxy for requests** in a step's Details, **Connection** tab) sends every request straight to the server, whatever the variables and settings say, like Bruno with its proxy off. `--proxy URL` (**This proxy**) sends every request through one proxy. The app keeps its choice across launches.
 
 A proxy set only by an automatic configuration script (a PAC file, "Use setup script" on Windows) is not read: set `HTTPS_PROXY` to the proxy that script picks for your API. Windows integrated sign-in to a proxy (NTLM or Kerberos) is not supported either.
 
@@ -109,7 +112,8 @@ A request counts as failed when no response came back or a check on it failed. W
 3. **Connection**: a TCP connection to the server or the proxy.
 4. **Proxy tunnel** (HTTPS through a proxy): what the proxy answered when asked to connect to the server, and who answered, like a `407` that wants a sign-in or a `403` from a web filter.
 5. **TLS**: the certificate presented and who issued it. Under TLS inspection the issuer is your company's certificate authority, not a public one.
-6. **Response**: the status, and who seems to have answered an error. Proxies, firewalls and CDNs such as Zscaler, Cloudflare, Akamai, AWS or a `Via` header are recognised from their headers, and an HTML error page's title is shown.
+6. **Response**: the status, and who seems to have answered an error. Proxies, firewalls and CDNs such as Zscaler, FortiGate, Cloudflare, Akamai, AWS or a `Via` header are recognised from their headers and error page, and an HTML error page's title is shown.
+7. **Without the proxy**: when the request went through a proxy and failed, it is sent once more straight to the server. If that works, the proxy is what refuses it, and the app offers **Use no proxy**. Diagnose then sends the request twice, which matters for a `POST` that changes data.
 
 The enabled steps before it run first, for the variables they set, like a token. Its cache is ignored, so the request is always sent. `--format json` prints the whole diagnosis with the step's request and response. It exits with 0 when the request went through and its checks passed, 1 otherwise.
 

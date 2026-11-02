@@ -49,6 +49,7 @@ import { LoadLive, LoadResult } from "./views/LoadResult";
 import { LoadSetup, type LoadSetupChoice } from "./views/LoadSetup";
 import { RunLive, RunResult, stepPassed } from "./views/RunResult";
 import type { Diagnose } from "./views/StepDetails";
+import { useRestoreProxy } from "./lib/proxy";
 import { RUNS_KEY, RunsView } from "./views/Runs";
 import { SplitView, usePanel } from "./views/SidePanel";
 import { applyOverrides, EnvEditor, type EnvOverrides } from "./views/EnvEditor";
@@ -60,6 +61,7 @@ import { WorkspacesView } from "./views/Workspaces";
 
 export function App() {
   const info = useQuery({ queryKey: ["app-info"], queryFn: commands.getAppInfo });
+  useRestoreProxy();
   const client = useQueryClient();
   const list = useQuery({ queryKey: WORKSPACES_KEY, queryFn: commands.listWorkspaces });
   const [view, setView] = useState<"file" | "runs" | "workspaces">("file");
