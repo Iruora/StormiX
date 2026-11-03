@@ -137,7 +137,7 @@ Every run is kept in a local history (`runs.db` in the app's data folder). On th
 
 ## Collections
 
-`stormix run` takes a Postman collection export (`.json`) or a Bruno collection (a `.bru` folder or OpenCollection YAML) directly, and runs its pre-request scripts, test scripts and assertions in an embedded JavaScript engine. `stormix import` turns one into a test file, and `stormix export` writes a test file as an OpenCollection that Bruno opens. [docs/COLLECTIONS.md](docs/COLLECTIONS.md) lists what carries over and what does not yet.
+`stormix run` takes a Postman collection export (`.json`) or a Bruno collection (a `.bru` folder or OpenCollection YAML) directly, and runs its pre-request scripts, test scripts and assertions in an embedded JavaScript engine. `stormix import` turns one into a test file, and `stormix export` writes a test file as an OpenCollection that Bruno opens, or as a Postman collection. [docs/COLLECTIONS.md](docs/COLLECTIONS.md) lists what carries over and what does not yet.
 
 ```sh
 stormix run my-api.postman_collection.json --env staging.postman_environment.json
@@ -154,6 +154,7 @@ stormix run stormix.yaml --env staging.json --junit report.xml --html report.htm
 stormix load stormix.yaml --threshold "p95 < 300ms"
 stormix import collection.json -o stormix.yaml # Postman export, Bruno folder or OpenCollection
 stormix export stormix.yaml -o ./for-bruno     # an OpenCollection folder for Bruno
+stormix export stormix.yaml -o api.json        # a Postman collection
 ```
 
 `run` exits with 1 when a check fails, `load` when a threshold fails, and both with 2 when the file cannot be run. The [CLI reference](docs/CLI.md) has every option. From a checkout, use `cargo run -p stormix-cli -- <command>`.

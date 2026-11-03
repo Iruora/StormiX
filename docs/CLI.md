@@ -9,7 +9,7 @@ stormix run FILE                    # run the flow once, as a functional test
 stormix load FILE                   # run it under load and check thresholds
 stormix diagnose FILE --step NAME   # find where one step's request fails
 stormix import COLLECTION -o FILE   # turn a Postman or Bruno collection into a test file
-stormix export FILE -o DIR          # write a test file as an OpenCollection for Bruno
+stormix export FILE -o DIR          # write a test file as an OpenCollection for Bruno (-o x.json: Postman)
 ```
 
 `FILE` is a test file, a Postman collection export (`.json`), a Bruno collection folder (`.bru` files or OpenCollection YAML) or a bundled OpenCollection `.yml`, for `validate`, `run`, `load` and `diagnose` alike.
@@ -44,7 +44,7 @@ Report paths are created along with any missing folders.
 
 Requests go through the same proxy as the rest of the system. On Windows that is the proxy set in **Settings > Network & internet > Proxy** (Internet Options), with its bypass list; on macOS it is the one in System Settings. The `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` and `NO_PROXY` environment variables take precedence, in the desktop app and the CLI alike. A proxy that needs a user name and password takes them in its URL, like `HTTPS_PROXY=http://user:password@proxy.example.com:8080`.
 
-`--proxy none` (in the desktop app, **No proxy** under **Proxy for requests** in a step's Details, **Connection** tab) sends every request straight to the server, whatever the variables and settings say, like Bruno with its proxy off. `--proxy URL` (**This proxy**) sends every request through one proxy. The app keeps its choice across launches.
+`--proxy none` (in the desktop app, **No proxy** from the proxy button in the header, which shows the mode in use, in **Settings**, or in a step's Details, **Connection** tab) sends every request straight to the server, whatever the variables and settings say, like Bruno with its proxy off. `--proxy URL` (**Proxy**, with its address) sends every request through one proxy. The app keeps its choice across launches.
 
 A proxy set only by an automatic configuration script (a PAC file, "Use setup script" on Windows) is not read: set `HTTPS_PROXY` to the proxy that script picks for your API. Windows integrated sign-in to a proxy (NTLM or Kerberos) is not supported either.
 

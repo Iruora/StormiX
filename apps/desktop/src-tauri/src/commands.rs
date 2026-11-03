@@ -485,6 +485,58 @@ pub fn export_open_collection(
     Ok(exported.warnings)
 }
 
+/// Writes the test file in `yaml` as one bundled OpenCollection file at
+/// `path`, environments included. Returns what could not be carried over.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn export_open_collection_file(
+    yaml: String,
+    environments: Vec<ExportEnvironment>,
+    path: String,
+) -> Result<Vec<String>, String> {
+    use stormix_collections::opencollection;
+    let test = TestFile::from_yaml(&yaml).map_err(|e| e.to_string())?;
+    let (text, warnings) = opencollection::to_bundle(&test, &export_environments(environments));
+    std::fs::write(&path, text).map_err(|e| format!("cannot write {path}: {e}"))?;
+    Ok(warnings)
+}
+
+/// Writes the test file in `yaml` as a Postman collection (v2.1) at
+/// `path`, and each environment next to it as
+/// `NAME.postman_environment.json`. Returns what could not be carried over.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn export_postman(
+    yaml: String,
+    environments: Vec<ExportEnvironment>,
+    path: String,
+) -> Result<Vec<String>, String> {
+    use stormix_collections::postman_export;
+    let test = TestFile::from_yaml(&yaml).map_err(|e| e.to_string())?;
+    let (json, warnings) = postman_export::to_json(&test);
+    std::fs::write(&path, json).map_err(|e| format!("cannot write {path}: {e}"))?;
+    let dir = Path::new(&path).parent().unwrap_or(Path::new(""));
+    for env in export_environments(environments) {
+        let at = dir.join(postman_export::environment_file_name(&env.name));
+        std::fs::write(&at, postman_export::environment_json(&env))
+            .map_err(|e| format!("cannot write {}: {e}", at.display()))?;
+    }
+    Ok(warnings)
+}
+
+fn export_environments(
+    environments: Vec<ExportEnvironment>,
+) -> Vec<stormix_collections::environment::Environment> {
+    environments
+        .into_iter()
+        .map(|e| stormix_collections::environment::Environment {
+            name: e.name,
+            variables: e.variables,
+            secrets: e.secrets,
+        })
+        .collect()
+}
+
 /// Writes a stored run as a JSON, JUnit XML or HTML report.
 #[tauri::command(async)]
 #[specta::specta]

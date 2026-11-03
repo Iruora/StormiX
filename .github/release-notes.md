@@ -1,7 +1,6 @@
-Stormix 1.8.1 lets you choose the proxy requests go through.
+Stormix 1.9.1 fixes the variables list on a Flow step card.
 
-- **Choose the proxy:** System (the default), **No proxy** or one given proxy, under **Proxy for requests** in a step's Details (**Connection** tab), and `--proxy system|none|URL` on the command line. A corporate proxy taken from `HTTPS_PROXY` could block a request that Bruno, with its proxy off, gets through.
-- **Diagnose** retries a request that failed through a proxy without it, and says when the proxy is what refuses it, with a **Use no proxy** button. FortiGate and FortiProxy block pages are recognised.
+- **Flow tab:** a step's "sets" list stays inside its card. It shows one line with **+N more** to open the whole list, and a long name is cut with the full name on hover.
 
 If you are on 1.1 or later, the app offers this update by itself. On 1.0, download it once from the table below.
 

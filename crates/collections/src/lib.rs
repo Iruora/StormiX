@@ -20,6 +20,7 @@ mod common;
 pub mod environment;
 pub mod opencollection;
 pub mod postman;
+pub mod postman_export;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Imported {

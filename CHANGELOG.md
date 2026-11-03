@@ -1,10 +1,27 @@
 # Changelog
 
-## Unreleased
+## 1.9.1 (2026-11-03)
 
 ### Fixes
 
 - **Flow tab:** a step's "sets" list no longer runs past its card. The variables wrap to the card's width on one line, a long name is cut with its full name on hover, and **+N more** shows the whole list (**Show less** folds it again).
+
+## 1.9.0 (2026-11-02)
+
+### A tidier header
+
+- **File menu.** New from example, Open, Save, Save as, the Postman, Bruno and OpenCollection imports and Export to Bruno are now in one **File** menu at the left of the header, instead of buttons spread over the header and the tab row. Ctrl O opens, Ctrl S saves and Ctrl Shift S saves as, from anywhere in the window (⌘ on macOS).
+- **Environment menu.** One button shows the environment in use and how many of its variables you changed, and turns amber while a secret has no value. It opens the list of environments, **Variables**, **Secrets**, **Import environment** and **Remove**, which used to be five joined buttons.
+- **Search every action with Ctrl K** (⌘ K): type a few letters of an action, an environment, a proxy mode, a step or a workspace, then Enter. The **Search** button in the header opens it too.
+- **Export to OpenCollection and Postman.** **File › Export as** now writes a Bruno folder, one bundled OpenCollection file, or a Postman collection (v2.1) with each environment as a `.postman_environment.json` file next to it. Checks become `pm.test` lines and extractions set collection variables. On the command line, `stormix export FILE -o NAME.json` writes the Postman collection. See [Exporting to Postman](docs/COLLECTIONS.md#exporting-to-postman).
+- **Settings** at the bottom of the sidebar holds the proxy for requests and the keyboard shortcuts.
+- **Steps listed beside the editor**, like Bruno: the Steps tab lists every step with its method on the left, and edits the one you click on the right. Up and down move through the list. **Flow settings**, at the top of the list, holds the flow's name, tracing, load profile and thresholds. Clicking a step in the Flow tab or in Ctrl K search opens it here.
+- **Tabs in the results panel**: **Problems** (with a count), **Last run** and **Summary**, instead of one long stack. A run opens Last run while it goes.
+- The file name and its saved state moved up next to the workspace name; the tab row now only switches between Steps, Flow and YAML.
+
+## 1.8.2 (2026-11-02)
+
+- **Proxy button in the header**, like Bruno's proxy preference: it shows the mode in use (**System proxy**, **No proxy** or **Proxy**) and changes it before any run, without opening a step's Details.
 
 ## 1.8.1 (2026-11-02)
 

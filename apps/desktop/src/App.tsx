@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
+  Check,
   ChevronDown,
   CircleAlert,
   CircleCheck,
@@ -13,12 +14,16 @@ import {
   FolderOutput,
   Gauge,
   History,
+  KeyRound,
   Layers,
   LoaderCircle,
+  Menu as MenuIcon,
   PanelRightClose,
   PanelRightOpen,
   Play,
   Save,
+  Search,
+  Settings,
   SlidersHorizontal,
   TriangleAlert,
   X,
@@ -44,27 +49,30 @@ import { describeLoad } from "./lib/describe";
 import { methodText } from "./lib/methods";
 import { VariablesContext, variableTable } from "./lib/variables";
 import { newWorkspace, WORKSPACES_KEY, workspaceTitle } from "./lib/workspace";
-import { type Activity, ActivityStrip, BusyIcon, Loading } from "./views/Busy";
+import { type Activity, ActivityStrip, Loading } from "./views/Busy";
 import { LoadLive, LoadResult } from "./views/LoadResult";
 import { LoadSetup, type LoadSetupChoice } from "./views/LoadSetup";
 import { RunLive, RunResult, stepPassed } from "./views/RunResult";
 import type { Diagnose } from "./views/StepDetails";
-import { useRestoreProxy } from "./lib/proxy";
+import { useProxy, useRestoreProxy } from "./lib/proxy";
 import { RUNS_KEY, RunsView } from "./views/Runs";
 import { SplitView, usePanel } from "./views/SidePanel";
 import { applyOverrides, EnvEditor, type EnvOverrides } from "./views/EnvEditor";
-import { EnvSecrets } from "./views/EnvSecrets";
 import { FlowView } from "./views/FlowView";
-import { StepsEditor } from "./views/StepsEditor";
+import { StepsEditor, type StepsSelection } from "./views/StepsEditor";
 import { UpdateBanner } from "./views/UpdateBanner";
 import { WorkspacesView } from "./views/Workspaces";
+import { ProxyButton } from "./views/ProxySetting";
+import { type Command, CommandPalette } from "./views/CommandPalette";
+import { Menu, MenuItem, MenuLabel, MenuSeparator, shortcut } from "./views/Menu";
+import { SettingsView } from "./views/Settings";
 
 export function App() {
   const info = useQuery({ queryKey: ["app-info"], queryFn: commands.getAppInfo });
   useRestoreProxy();
   const client = useQueryClient();
   const list = useQuery({ queryKey: WORKSPACES_KEY, queryFn: commands.listWorkspaces });
-  const [view, setView] = useState<"file" | "runs" | "workspaces">("file");
+  const [view, setView] = useState<"file" | "runs" | "workspaces" | "settings">("file");
   // The workspace open in the editor, as it was when opened. The editor
   // reports its changes through `onSnapshot`; they are saved shortly after.
   const [active, setActive] = useState<Workspace | null>(null);
@@ -124,7 +132,7 @@ export function App() {
   };
   const showView = (next: typeof view) => {
     setView(next);
-    if (latest.current && next !== "workspaces" && latest.current.view !== next) {
+    if (latest.current && (next === "file" || next === "runs") && latest.current.view !== next) {
       persist({ ...latest.current, view: next });
     }
   };
@@ -167,6 +175,15 @@ export function App() {
     return [{ ...active, name: activeName }, ...saved];
   }, [list.data, active, activeName]);
 
+  const appCommands: Command[] = [
+    { id: "go-runs", group: "Go to", label: "Runs", keywords: "history", run: () => showView("runs") },
+    { id: "go-workspaces", group: "Go to", label: "Workspaces", run: () => showView("workspaces") },
+    { id: "go-settings", group: "Go to", label: "Settings", keywords: "proxy preferences", run: () => showView("settings") },
+    ...items
+      .filter((w) => w.id !== active?.id)
+      .map((w) => ({ id: `ws-${w.id}`, group: "Switch workspace", label: w.name, run: () => openWorkspace(w) })),
+  ];
+
   return (
     <div className="flex h-full">
       <nav className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-line bg-surface py-3">
@@ -184,7 +201,14 @@ export function App() {
           active={view === "workspaces"}
           onClick={() => showView("workspaces")}
         />
-        <div className="mt-auto text-[0.625rem] text-subtle">{info.data ? `v${info.data.version}` : ""}</div>
+        <div className="mt-auto" />
+        <NavItem
+          icon={<Settings size="1.125rem" />}
+          label="Settings"
+          active={view === "settings"}
+          onClick={() => showView("settings")}
+        />
+        <div className="mt-1 text-[0.625rem] text-subtle">{info.data ? `v${info.data.version}` : ""}</div>
       </nav>
       <main className="flex min-w-0 flex-1 flex-col">
         <UpdateBanner />
@@ -199,12 +223,20 @@ export function App() {
               onSnapshot={onSnapshot}
               secretValues={secretValues}
               setSecretValues={setSecretValues}
+              visible={view === "file"}
+              appCommands={appCommands}
+              onShowFile={() => showView("file")}
             />
           )}
         </div>
         {view === "runs" && (
           <div className="min-h-0 flex-1">
             <RunsView />
+          </div>
+        )}
+        {view === "settings" && (
+          <div className="min-h-0 flex-1">
+            <SettingsView version={info.data?.version ?? null} />
           </div>
         )}
         {view === "workspaces" && (
@@ -274,6 +306,9 @@ function TestFileView({
   onSnapshot,
   secretValues,
   setSecretValues,
+  visible,
+  appCommands,
+  onShowFile,
 }: {
   /** What to show at first; the view reports its changes to `onSnapshot`. */
   workspace: Workspace;
@@ -282,6 +317,12 @@ function TestFileView({
   onSnapshot: (snap: Snapshot) => void;
   secretValues: Record<string, string>;
   setSecretValues: Dispatch<SetStateAction<Record<string, string>>>;
+  /** Whether this page is the one shown; its shortcuts only work then. */
+  visible: boolean;
+  /** Going to the app's other pages, for the Ctrl K search. */
+  appCommands: Command[];
+  /** Brings this page to the front. */
+  onShowFile: () => void;
 }) {
   const example = useQuery({ queryKey: ["example"], queryFn: commands.exampleTestFile });
   const [text, setText] = useState<string | null>(ws.text);
@@ -304,6 +345,10 @@ function TestFileView({
   const [path, setPath] = useState<string | null>(ws.path);
   const [savedText, setSavedText] = useState<string | null>(ws.dirty ? null : ws.text);
   const [restoreNote, setRestoreNote] = useState<string | null>(null);
+  // Which tab of the results panel is open.
+  const [resultsTab, setResultsTab] = useState<"problems" | "run" | "summary">("problems");
+  // The step the Steps tab shows, or the flow's settings.
+  const [selectedStep, setSelectedStep] = useState<StepsSelection>(0);
   const [tab, setTab] = useState<"steps" | "flow" | "yaml">(
     ws.tab === "flow" || ws.tab === "yaml" ? ws.tab : "steps",
   );
@@ -396,6 +441,10 @@ function TestFileView({
     },
   });
   const busy = run.isPending || load.isPending;
+  // A run that starts shows its progress.
+  useEffect(() => {
+    if (busy) setResultsTab("run");
+  }, [busy]);
   // What a file, import or restore is doing now, for the activity strip.
   const [activity, setActivity] = useState<Activity | null>(null);
   /** Shows `what` in the activity strip while `work` runs. */
@@ -672,24 +721,187 @@ function TestFileView({
     },
   });
   // Opening, saving and importing touch the file shown; one at a time.
-  // Writes the test file as an OpenCollection folder that Bruno opens.
-  const exportBruno = useMutation({
-    mutationFn: async () => {
-      const dir = await open({ title: "Choose an empty folder for the Bruno collection", directory: true });
-      if (typeof dir !== "string") return null;
+  // Writes the test file for another tool: an OpenCollection folder that
+  // Bruno opens, one bundled OpenCollection file, or a Postman collection.
+  const exportTo = useMutation({
+    mutationFn: async (kind: "bruno" | "opencollection" | "postman") => {
+      const base = (result?.test?.flow.name ?? "collection").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "collection";
+      const target =
+        kind === "bruno"
+          ? await open({ title: "Choose an empty folder for the Bruno collection", directory: true })
+          : await save(
+              kind === "postman"
+                ? {
+                    title: "Export a Postman collection",
+                    defaultPath: `${base}.postman_collection.json`,
+                    filters: [{ name: "Postman collection", extensions: ["json"] }],
+                  }
+                : {
+                    title: "Export an OpenCollection file",
+                    defaultPath: `${base}.yml`,
+                    filters: [{ name: "OpenCollection", extensions: ["yml", "yaml"] }],
+                  },
+            );
+      if (typeof target !== "string") return null;
       const environments = Object.entries(envs).map(([name, e]) => ({
         name,
         variables: e.variables,
         secrets: e.secrets,
       }));
-      const res = await showing({ label: "Exporting to Bruno", detail: dir }, () =>
-        commands.exportOpenCollection(source, environments, dir),
+      const label =
+        kind === "bruno" ? "Exporting to Bruno" : kind === "postman" ? "Exporting to Postman" : "Exporting to OpenCollection";
+      const res = await showing({ label, detail: target }, () =>
+        kind === "bruno"
+          ? commands.exportOpenCollection(source, environments, target)
+          : kind === "postman"
+            ? commands.exportPostman(source, environments, target)
+            : commands.exportOpenCollectionFile(source, environments, target),
       );
       if (res.status === "error") throw new Error(res.error);
-      return { dir, warnings: res.data };
+      const next =
+        kind === "bruno"
+          ? "Open that folder in Bruno."
+          : kind === "postman"
+            ? environments.length > 0
+              ? "Import it in Postman, with the .postman_environment.json files written next to it."
+              : "Import it in Postman."
+            : "Open or import it in Bruno, or any tool that reads OpenCollection.";
+      return { target, next, warnings: res.data };
     },
   });
-  const fileBusy = file.isPending || importFrom.isPending || importEnv.isPending || exportBruno.isPending;
+  const fileBusy = file.isPending || importFrom.isPending || importEnv.isPending || exportTo.isPending;
+
+  const newFromExample = () => {
+    setImported(null);
+    setPath(null);
+    edit(null);
+  };
+  const runOnce = () => {
+    if (!canRun || busy || fileBusy) return;
+    load.reset();
+    panel.setOpen(true);
+    run.mutate(source);
+  };
+  const chooseEnv = (name: string) => {
+    setEnvName(name);
+    run.reset();
+  };
+  /** Shows step `i` in the Steps tab. */
+  const openStep = (i: number) => {
+    setTab("steps");
+    setSelectedStep(i);
+  };
+  const fileLabel = path
+    ? path.split(/[\\/]/).pop()
+    : imported
+      ? "Imported, not saved"
+      : text == null
+        ? "Unsaved example"
+        : "Not saved to a file";
+
+  // Every action, for the Ctrl K search.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const proxy = useProxy();
+  const paletteCommands = (): Command[] => {
+    const local: Command[] = [
+      { id: "new", group: "File", label: "New from example", disabled: fileBusy, run: newFromExample },
+      { id: "open", group: "File", label: "Open…", hint: shortcut("O"), disabled: fileBusy, run: () => file.mutate("open") },
+      { id: "save", group: "File", label: "Save", hint: shortcut("S"), disabled: fileBusy, run: () => file.mutate("save") },
+      { id: "save-as", group: "File", label: "Save as…", hint: shortcut("S", true), disabled: fileBusy, run: () => file.mutate("saveAs") },
+      { id: "import-postman", group: "File", label: "Import a Postman collection…", disabled: fileBusy, run: () => importFrom.mutate("postman") },
+      { id: "import-bruno", group: "File", label: "Import a Bruno folder…", disabled: fileBusy, run: () => importFrom.mutate("bruno") },
+      {
+        id: "import-oc",
+        group: "File",
+        label: "Import an OpenCollection file…",
+        disabled: fileBusy,
+        run: () => importFrom.mutate("opencollection"),
+      },
+      { id: "export-bruno", group: "File", label: "Export to Bruno (folder)…", disabled: fileBusy, run: () => exportTo.mutate("bruno") },
+      {
+        id: "export-oc",
+        group: "File",
+        label: "Export an OpenCollection file…",
+        disabled: fileBusy,
+        run: () => exportTo.mutate("opencollection"),
+      },
+      { id: "export-postman", group: "File", label: "Export a Postman collection…", disabled: fileBusy, run: () => exportTo.mutate("postman") },
+      { id: "run", group: "Run", label: "Run once", disabled: !canRun || busy || fileBusy, run: runOnce },
+      { id: "load", group: "Run", label: "Load test…", disabled: !canRun || busy || fileBusy, run: () => setSetupOpen(true) },
+      ...envNames.map((name) => ({
+        id: `env-${name}`,
+        group: "Environment",
+        label: `Use the ${name} environment`,
+        hint: envName === name ? "in use" : undefined,
+        run: () => chooseEnv(name),
+      })),
+      ...(envNames.length > 0
+        ? [{ id: "env-none", group: "Environment", label: "Use no environment", hint: envName === "" ? "in use" : undefined, run: () => chooseEnv("") }]
+        : []),
+      ...(env
+        ? [{ id: "env-edit", group: "Environment", label: "Variables and secrets…", run: () => setEnvEditorOpen(true) }]
+        : []),
+      { id: "env-import", group: "Environment", label: "Import an environment…", disabled: fileBusy, run: () => importEnv.mutate() },
+      {
+        id: "proxy-system",
+        group: "Proxy",
+        label: "Use the system proxy",
+        hint: proxy.current === "system" ? "in use" : undefined,
+        run: () => proxy.change.mutate("system"),
+      },
+      {
+        id: "proxy-none",
+        group: "Proxy",
+        label: "Use no proxy",
+        keywords: "direct off",
+        hint: proxy.current === "none" ? "in use" : undefined,
+        run: () => proxy.change.mutate("none"),
+      },
+      { id: "tab-steps", group: "View", label: "Show the steps", run: () => setTab("steps") },
+      { id: "tab-flow", group: "View", label: "Show the flow", run: () => setTab("flow") },
+      { id: "tab-yaml", group: "View", label: "Show the YAML", run: () => setTab("yaml") },
+      {
+        id: "panel",
+        group: "View",
+        label: panel.open ? "Hide the results panel" : "Show the results panel",
+        run: () => panel.setOpen(!panel.open),
+      },
+      ...(shown?.flow.steps ?? []).map((step, i) => ({
+        id: `step-${i}`,
+        group: "Go to step",
+        label: step.name,
+        keywords: `${step.request.method} ${step.request.url}`,
+        hint: step.request.method,
+        run: () => openStep(i),
+      })),
+    ];
+    // These are about the test file, so they show it first.
+    return [...local.map((c) => ({ ...c, run: () => (onShowFile(), c.run()) })), ...appCommands];
+  };
+  // Shortcuts that work anywhere in the window, unless a focused editor took the key.
+  const onKey = useRef<(e: KeyboardEvent) => void>(() => {});
+  onKey.current = (e) => {
+    if (e.defaultPrevented || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+    const key = e.key.toLowerCase();
+    if (key === "k") {
+      e.preventDefault();
+      setPaletteOpen((o) => !o);
+      return;
+    }
+    if (!visible || fileBusy) return;
+    if (key === "o" && !e.shiftKey) {
+      e.preventDefault();
+      file.mutate("open");
+    } else if (key === "s") {
+      e.preventDefault();
+      file.mutate(e.shiftKey ? "saveAs" : "save");
+    }
+  };
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => onKey.current(e);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
 
   const editorPane = (
     <>
@@ -706,45 +918,7 @@ function TestFileView({
             {t === "steps" ? "Steps" : t === "flow" ? "Flow" : "YAML"}
           </button>
         ))}
-        <span className="mono ml-3 min-w-0 flex-1 basis-24 truncate text-xs text-muted" title={path ?? undefined}>
-          {path
-            ? path.split(/[\\/]/).pop()
-            : imported
-              ? "Imported, not saved"
-              : text == null
-                ? "Unsaved example"
-                : "Not saved to a file"}
-          {dirty && <span className="text-warn"> ●</span>}
-          {justSaved && !dirty && (
-            <span className="ml-1.5 inline-flex items-center gap-1 font-sans text-ok">
-              <CircleCheck size="0.75rem" />
-              Saved
-            </span>
-          )}
-        </span>
-        <FileButton
-          label="Open"
-          icon={<FolderOpen size="0.8125rem" />}
-          busy={file.isPending && file.variables === "open"}
-          disabled={fileBusy}
-          onClick={() => file.mutate("open")}
-        />
-        <FileButton
-          label="Save"
-          icon={<Save size="0.8125rem" />}
-          busy={file.isPending && file.variables !== "open"}
-          disabled={fileBusy}
-          onClick={() => file.mutate("save")}
-        />
-        <FileButton label="Save as" disabled={fileBusy} onClick={() => file.mutate("saveAs")} />
-        <FileButton
-          label="Export to Bruno"
-          title="Write this test file as an OpenCollection folder, the YAML format Bruno opens"
-          icon={<FolderOutput size="0.8125rem" />}
-          busy={exportBruno.isPending}
-          disabled={fileBusy}
-          onClick={() => exportBruno.mutate()}
-        />
+        <span className="flex-1" />
         <PanelToggle
           open={panel.open}
           onClick={() => panel.setOpen(!panel.open)}
@@ -752,19 +926,19 @@ function TestFileView({
         />
       </div>
       {file.error && <div className="border-b border-line bg-bad-soft px-3 py-1 text-xs text-bad">{file.error.message}</div>}
-      {exportBruno.error && (
-        <div className="border-b border-line bg-bad-soft px-3 py-1 text-xs text-bad">{exportBruno.error.message}</div>
+      {exportTo.error && (
+        <div className="border-b border-line bg-bad-soft px-3 py-1 text-xs text-bad">{exportTo.error.message}</div>
       )}
-      {exportBruno.data && (
+      {exportTo.data && (
         <div className="flex items-start gap-2 border-b border-line bg-surface-2 px-3 py-1 text-xs text-muted">
           <div className="min-w-0 flex-1">
             <div>
-              Exported to <span className="break-all font-mono text-ink">{exportBruno.data.dir}</span>. Open that
-              folder in Bruno.
+              Exported to <span className="break-all font-mono text-ink">{exportTo.data.target}</span>.{" "}
+              {exportTo.data.next}
             </div>
-            {exportBruno.data.warnings.length > 0 && (
+            {exportTo.data.warnings.length > 0 && (
               <ul className="mt-0.5 list-disc pl-4 text-warn">
-                {exportBruno.data.warnings.map((w) => (
+                {exportTo.data.warnings.map((w) => (
                   <li key={w}>{w}</li>
                 ))}
               </ul>
@@ -773,7 +947,7 @@ function TestFileView({
           <button
             type="button"
             aria-label="Dismiss"
-            onClick={() => exportBruno.reset()}
+            onClick={() => exportTo.reset()}
             className="rounded p-0.5 hover:bg-surface hover:text-ink"
           >
             <X size="0.75rem" />
@@ -795,24 +969,15 @@ function TestFileView({
               test={shown}
               onChange={editSteps}
               lastRun={run.data ?? null}
-              onOpenStep={(i) => {
-                setTab("steps");
-                // Once the Steps tab has rendered, bring that step into view.
-                requestAnimationFrame(() =>
-                  document.getElementById(`step-${i}`)?.scrollIntoView({ block: "start", behavior: "smooth" }),
-                );
-              }}
+              onOpenStep={openStep}
             />
           </VariablesContext.Provider>
         </div>
       ) : shown ? (
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1">
           <VariablesContext.Provider value={variables}>
-            <StepsEditor test={shown} onChange={editSteps} />
+            <StepsEditor test={shown} onChange={editSteps} selected={selectedStep} onSelect={setSelectedStep} />
           </VariablesContext.Provider>
-          <p className="px-4 pb-4 text-xs text-subtle">
-            Editing here rewrites the YAML, so comments in it are dropped.
-          </p>
         </div>
       ) : (
         <div className="p-4 text-muted">
@@ -825,65 +990,119 @@ function TestFileView({
       )}
     </>
   );
-  const resultsPane = (
-    <>
-      {result?.parseError ? (
+  // The results panel's tabs: what is wrong with the file, the last run, and what the file does.
+  const problemErrors =
+    (result?.parseError ? 1 : 0) +
+    (envError ? 1 : 0) +
+    (importFrom.error ? 1 : 0) +
+    (result?.issues.filter((i) => i.severity === "error").length ?? 0);
+  const problemCount =
+    problemErrors +
+    (restoreNote ? 1 : 0) +
+    (imported && imported.warnings.length > 0 ? 1 : 0) +
+    (result?.issues.filter((i) => i.severity !== "error").length ?? 0);
+  const runFailed =
+    !!(run.error ?? load.error) ||
+    !!run.data?.steps.some((st) => !st.skipped && !stepPassed(st)) ||
+    !!load.data?.thresholds.some((t) => !t.passed);
+  const hasRun = busy || !!run.data || !!load.data || !!(run.error ?? load.error);
+  const problemsPane = (
+    <div className="space-y-4">
+      {result?.parseError && (
         <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="The file does not parse">
           <pre className="mono whitespace-pre-wrap text-xs">{result.parseError}</pre>
         </Banner>
-      ) : result?.test ? (
-        <>
-          {restoreNote && (
-            <div className="mb-4">
-              <Banner tone="warn" icon={<TriangleAlert size="1rem" />} title="Workspace">
-                {restoreNote}
-              </Banner>
-            </div>
-          )}
-          {envError && (
-            <div className="mb-4">
-              <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="Environment">
-                {envError}
-              </Banner>
-            </div>
-          )}
-          {importFrom.error && (
-            <div className="mb-4">
-              <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="The collection could not be imported">
-                {importFrom.error.message}
-              </Banner>
-            </div>
-          )}
-          {imported && imported.warnings.length > 0 && (
-            <div className="mb-4">
-              <Banner
-                tone="warn"
-                icon={<TriangleAlert size="1rem" />}
-                title={`${count(imported.warnings.length, "thing")} did not carry over`}
-              >
-                <ul className="space-y-1">
-                  {imported.warnings.map((w, i) => (
-                    <li key={i}>{w}</li>
-                  ))}
-                </ul>
-              </Banner>
-            </div>
-          )}
-          <Issues issues={result.issues} />
-          {(run.error ?? load.error) && (
-            <div className="mt-4">
-              <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="The run could not start">
-                {(run.error ?? load.error)?.message}
-              </Banner>
-            </div>
-          )}
-          {run.isPending && <RunLive name={result.test.flow.name} progress={runStep} />}
-          {run.data && <RunResult result={run.data} diagnose={diagnoseIn(run.variables)} />}
-          {load.isPending && <LoadLive points={points} />}
-          {load.data && <LoadResult report={load.data} diagnose={diagnoseIn(load.variables)} />}
-          <Summary test={result.test} />
-        </>
-      ) : null}
+      )}
+      {restoreNote && (
+        <Banner tone="warn" icon={<TriangleAlert size="1rem" />} title="Workspace">
+          {restoreNote}
+        </Banner>
+      )}
+      {envError && (
+        <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="Environment">
+          {envError}
+        </Banner>
+      )}
+      {importFrom.error && (
+        <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="The collection could not be imported">
+          {importFrom.error.message}
+        </Banner>
+      )}
+      {imported && imported.warnings.length > 0 && (
+        <Banner
+          tone="warn"
+          icon={<TriangleAlert size="1rem" />}
+          title={`${count(imported.warnings.length, "thing")} did not carry over`}
+        >
+          <ul className="space-y-1">
+            {imported.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </Banner>
+      )}
+      {result?.test && <Issues issues={result.issues} />}
+    </div>
+  );
+  const runPane = (
+    <>
+      {(run.error ?? load.error) && (
+        <div className="mb-4">
+          <Banner tone="bad" icon={<CircleAlert size="1rem" />} title="The run could not start">
+            {(run.error ?? load.error)?.message}
+          </Banner>
+        </div>
+      )}
+      {run.isPending && <RunLive name={result?.test?.flow.name ?? "the flow"} progress={runStep} />}
+      {run.data && <RunResult result={run.data} diagnose={diagnoseIn(run.variables)} />}
+      {load.isPending && <LoadLive points={points} />}
+      {load.data && <LoadResult report={load.data} diagnose={diagnoseIn(load.variables)} />}
+      {!hasRun && (
+        <p className="rounded-lg border border-dashed border-line px-4 py-6 text-center text-xs text-muted">
+          Nothing run since the last change. <b className="font-semibold text-ink">Run once</b> sends every step one
+          time; <b className="font-semibold text-ink">Load test</b> replays them under load. The results show here.
+        </p>
+      )}
+    </>
+  );
+  const resultsPane = (
+    <>
+      <div
+        role="tablist"
+        aria-label="Results"
+        className="sticky -top-4 z-10 -mx-4 -mt-4 mb-4 flex gap-1 border-b border-line bg-bg px-3 pt-2"
+      >
+        <ResultsTab
+          active={resultsTab === "problems"}
+          onClick={() => setResultsTab("problems")}
+          label="Problems"
+          badge={
+            problemCount > 0 ? (
+              <span className={problemErrors > 0 ? "text-bad" : "text-warn"}>{problemCount}</span>
+            ) : (
+              <CircleCheck size="0.75rem" className="text-ok" />
+            )
+          }
+        />
+        <ResultsTab
+          active={resultsTab === "run"}
+          onClick={() => setResultsTab("run")}
+          label="Last run"
+          badge={
+            busy ? (
+              <LoaderCircle size="0.75rem" className="animate-spin text-accent" />
+            ) : hasRun ? (
+              runFailed ? (
+                <CircleAlert size="0.75rem" className="text-bad" />
+              ) : (
+                <CircleCheck size="0.75rem" className="text-ok" />
+              )
+            ) : null
+          }
+        />
+        <ResultsTab active={resultsTab === "summary"} onClick={() => setResultsTab("summary")} label="Summary" />
+      </div>
+      {resultsTab === "problems" ? problemsPane : resultsTab === "run" ? runPane : result?.test ? <Summary test={result.test} /> : null}
     </>
   );
 
@@ -933,6 +1152,7 @@ function TestFileView({
     });
   };
   const changedCount = Object.keys(overrides[envName] ?? {}).length;
+  const missingSecrets = env ? env.secrets.filter((n) => !secretValues[n]).length : 0;
   // Where an environment without a file of its own would be saved.
   const besidePath = useQuery({
     queryKey: ["env-path", path, envName],
@@ -961,150 +1181,181 @@ function TestFileView({
   return (
     <div className="flex h-full flex-col">
       {/* Wraps onto more lines when the window is narrow or the text is large. */}
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 whitespace-nowrap border-b border-line bg-surface px-5 py-3">
-        <div className="flex min-w-0 flex-1 basis-48 items-baseline gap-3">
-          <h1 className="shrink-0 text-[0.9375rem] font-semibold">Test file</h1>
+      <header className="flex flex-wrap items-center gap-x-2 gap-y-2 whitespace-nowrap border-b border-line bg-surface px-4 py-2.5">
+        <div className="flex min-w-0 flex-1 basis-72 items-center gap-2">
+          <Menu label="File" icon={<MenuIcon size="0.8125rem" />} width="w-72">
+            {(close) => (
+              <>
+                <MenuItem icon={<FilePlus size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), newFromExample())}>
+                  New from example
+                </MenuItem>
+                <MenuItem
+                  icon={<FolderOpen size="0.8125rem" />}
+                  hint={shortcut("O")}
+                  disabled={fileBusy}
+                  onClick={() => (close(), file.mutate("open"))}
+                >
+                  Open…
+                </MenuItem>
+                <MenuItem
+                  icon={<Save size="0.8125rem" />}
+                  hint={shortcut("S")}
+                  disabled={fileBusy}
+                  onClick={() => (close(), file.mutate("save"))}
+                >
+                  Save
+                </MenuItem>
+                <MenuItem icon={null} hint={shortcut("S", true)} disabled={fileBusy} onClick={() => (close(), file.mutate("saveAs"))}>
+                  Save as…
+                </MenuItem>
+                <MenuSeparator />
+                <MenuLabel>Import a collection</MenuLabel>
+                <MenuItem icon={<FileJson size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), importFrom.mutate("postman"))}>
+                  Postman collection…
+                </MenuItem>
+                <MenuItem icon={<FolderOpen size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), importFrom.mutate("bruno"))}>
+                  Bruno folder…
+                </MenuItem>
+                <MenuItem
+                  icon={<FileCode size="0.8125rem" />}
+                  disabled={fileBusy}
+                  onClick={() => (close(), importFrom.mutate("opencollection"))}
+                >
+                  OpenCollection file…
+                </MenuItem>
+                <MenuSeparator />
+                <MenuLabel>Export as</MenuLabel>
+                <MenuItem icon={<FolderOutput size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), exportTo.mutate("bruno"))}>
+                  Bruno folder…
+                </MenuItem>
+                <MenuItem icon={<FileCode size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), exportTo.mutate("opencollection"))}>
+                  OpenCollection file…
+                </MenuItem>
+                <MenuItem icon={<FileJson size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), exportTo.mutate("postman"))}>
+                  Postman collection…
+                </MenuItem>
+              </>
+            )}
+          </Menu>
           <button
             type="button"
             onClick={onWorkspaces}
             title="This workspace is saved as you work. Open the list to switch or rename."
-            className="flex min-w-0 items-center gap-1 self-center rounded-md border border-line px-2 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-ink"
+            className="flex min-w-0 shrink items-center gap-1 rounded-md px-1.5 py-1 text-[0.8125rem] font-semibold hover:bg-surface-2"
           >
-            <Layers size="0.75rem" className="shrink-0" />
+            <Layers size="0.8125rem" className="shrink-0 text-muted" />
             <span className="truncate">{workspaceName}</span>
-            <ChevronDown size="0.75rem" className="shrink-0" />
+            <ChevronDown size="0.75rem" className="shrink-0 text-muted" />
           </button>
+          <span className="mono min-w-0 shrink truncate text-xs text-muted" title={path ?? undefined}>
+            {fileLabel}
+            {dirty && <span className="text-warn" title="Not saved yet"> ●</span>}
+          </span>
+          {justSaved && !dirty && (
+            <span className="inline-flex shrink-0 items-center gap-1 text-xs text-ok">
+              <CircleCheck size="0.75rem" />
+              Saved
+            </span>
+          )}
         </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <span className="text-xs text-muted">Import</span>
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            disabled={fileBusy}
-            aria-busy={importFrom.isPending && importFrom.variables === "postman"}
-            onClick={() => importFrom.mutate("postman")}
-            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100 disabled:hover:bg-transparent"
+            onClick={() => setPaletteOpen(true)}
+            title="Search every action, environment and step"
+            className="flex items-center gap-2 rounded-md border border-line px-2.5 py-1 text-xs text-subtle hover:bg-surface-2 hover:text-ink"
           >
-            <BusyIcon busy={importFrom.isPending && importFrom.variables === "postman"} icon={<FileJson size="0.8125rem" />} />
-            Postman
+            <Search size="0.8125rem" />
+            Search
+            <kbd className="font-sans text-[0.6875rem]">{shortcut("K")}</kbd>
           </button>
-          <button
-            type="button"
-            disabled={fileBusy}
-            aria-busy={importFrom.isPending && importFrom.variables === "bruno"}
-            onClick={() => importFrom.mutate("bruno")}
-            title="A Bruno collection folder, in .bru files or OpenCollection YAML"
-            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100 disabled:hover:bg-transparent"
+          <Menu
+            label={
+              <>
+                <span className="max-w-40 truncate">{env ? envName : "No environment"}</span>
+                {changedCount > 0 && <span className="font-semibold text-warn">· {changedCount} changed</span>}
+              </>
+            }
+            icon={importEnv.isPending ? <LoaderCircle size="0.8125rem" className="animate-spin" /> : <SlidersHorizontal size="0.8125rem" />}
+            tone={missingSecrets > 0 ? "warn" : "muted"}
+            title={
+              missingSecrets > 0
+                ? `${count(missingSecrets, "secret")} without a value yet`
+                : "Choose the environment, and see or change its variables"
+            }
+            align="right"
           >
-            <BusyIcon busy={importFrom.isPending && importFrom.variables === "bruno"} icon={<FolderOpen size="0.8125rem" />} />
-            Bruno
-          </button>
-          <button
-            type="button"
-            disabled={fileBusy}
-            aria-busy={importFrom.isPending && importFrom.variables === "opencollection"}
-            onClick={() => importFrom.mutate("opencollection")}
-            title="An OpenCollection file: a collection's opencollection.yml, or a bundled .yml holding the whole collection"
-            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100 disabled:hover:bg-transparent"
-          >
-            <BusyIcon
-              busy={importFrom.isPending && importFrom.variables === "opencollection"}
-              icon={<FileCode size="0.8125rem" />}
-            />
-            OpenCollection
-          </button>
-          <div className="flex items-center rounded-md border border-line">
-            {envNames.length > 0 && (
-              <select
-                aria-label="Environment"
-                value={envName}
-                onChange={(e) => {
-                  setEnvName(e.target.value);
-                  run.reset();
-                }}
-                className="max-w-40 rounded-l-md border-r border-line bg-surface px-2 py-1 text-xs"
-              >
-                <option value="">No environment</option>
-                {envNames.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            )}
-            {env && (
-              <button
-                type="button"
-                onClick={() => setEnvEditorOpen(true)}
-                title={
-                  changedCount
-                    ? `${changedCount} variable${changedCount === 1 ? "" : "s"} changed for this session only`
-                    : "See and change this environment's variables"
-                }
-                className={`flex items-center gap-1.5 border-r border-line px-2 py-1 text-xs hover:bg-surface-2 ${
-                  changedCount ? "text-warn" : "text-muted"
-                }`}
-              >
-                <SlidersHorizontal size="0.8125rem" />
-                Variables
-                {changedCount > 0 && (
-                  <span className="rounded-full bg-warn-soft px-1.5 text-[0.6875rem] font-semibold">{changedCount}</span>
+            {(close) => (
+              <>
+                {envNames.length > 0 && (
+                  <>
+                    <MenuLabel>Environment</MenuLabel>
+                    <MenuItem
+                      icon={envName === "" ? <Check size="0.8125rem" /> : null}
+                      checked={envName === ""}
+                      onClick={() => (close(), chooseEnv(""))}
+                    >
+                      No environment
+                    </MenuItem>
+                    {envNames.map((name) => (
+                      <MenuItem
+                        key={name}
+                        icon={envName === name ? <Check size="0.8125rem" /> : null}
+                        checked={envName === name}
+                        onClick={() => (close(), chooseEnv(name))}
+                      >
+                        {name}
+                      </MenuItem>
+                    ))}
+                    <MenuSeparator />
+                  </>
                 )}
-              </button>
+                {env && (
+                  <>
+                    <MenuItem
+                      icon={<SlidersHorizontal size="0.8125rem" />}
+                      hint={
+                        changedCount > 0 ? (
+                          <span className="rounded-full bg-warn-soft px-1.5 font-semibold text-warn">{changedCount} changed</span>
+                        ) : undefined
+                      }
+                      onClick={() => (close(), setEnvEditorOpen(true))}
+                    >
+                      Variables…
+                    </MenuItem>
+                    {env.secrets.length > 0 && (
+                      <MenuItem
+                        icon={<KeyRound size="0.8125rem" />}
+                        hint={
+                          <span className={missingSecrets > 0 ? "text-warn" : undefined}>
+                            {env.secrets.length - missingSecrets} of {env.secrets.length} set
+                          </span>
+                        }
+                        onClick={() => (close(), setEnvEditorOpen(true))}
+                      >
+                        Secrets…
+                      </MenuItem>
+                    )}
+                    <MenuSeparator />
+                  </>
+                )}
+                <MenuItem icon={<FileUp size="0.8125rem" />} disabled={fileBusy} onClick={() => (close(), importEnv.mutate())}>
+                  Import environment…
+                </MenuItem>
+                {env && (
+                  <MenuItem icon={<X size="0.8125rem" />} tone="bad" onClick={() => (close(), removeEnv(envName))}>
+                    Remove {envName} from the list
+                  </MenuItem>
+                )}
+              </>
             )}
-            {env && env.secrets.length > 0 && (
-              <EnvSecrets
-                names={env.secrets}
-                values={secretValues}
-                onChange={(name, value) => {
-                  setSecretValues((v) => ({ ...v, [name]: value }));
-                  run.reset();
-                }}
-              />
-            )}
-            {env && (
-              <button
-                type="button"
-                aria-label={`Remove the ${envName} environment`}
-                title="Remove this environment from the list"
-                onClick={() => removeEnv(envName)}
-                className="border-r border-line px-1.5 py-1 text-muted hover:bg-surface-2 hover:text-ink"
-              >
-                <X size="0.8125rem" />
-              </button>
-            )}
-            <button
-              type="button"
-              disabled={fileBusy}
-              aria-busy={importEnv.isPending}
-              onClick={() => importEnv.mutate()}
-              title="Import an environment file: YAML or JSON variables, a Postman environment export or a Bruno environment (.bru or OpenCollection .yml)"
-              className="flex items-center gap-1.5 rounded-r-md px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100"
-            >
-              <BusyIcon busy={importEnv.isPending} icon={<FileUp size="0.8125rem" />} />
-              {envNames.length > 0 ? "Env" : "Import env"}
-            </button>
-          </div>
-          <button
-            type="button"
-            disabled={fileBusy}
-            onClick={() => {
-              setImported(null);
-              setPath(null);
-              edit(null);
-            }}
-            className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100"
-          >
-            <FilePlus size="0.8125rem" />
-            New from example
-          </button>
+          </Menu>
+          <ProxyButton />
+          <span className="mx-0.5 h-5 w-px bg-line" aria-hidden />
           <button
             type="button"
             disabled={!canRun || busy || fileBusy}
-            onClick={() => {
-              load.reset();
-              panel.setOpen(true);
-              run.mutate(source);
-            }}
+            onClick={runOnce}
             aria-busy={run.isPending}
             className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 aria-busy:opacity-100"
           >
@@ -1143,6 +1394,7 @@ function TestFileView({
           onClose={() => setEnvEditorOpen(false)}
         />
       )}
+      {paletteOpen && <CommandPalette commands={paletteCommands()} onClose={() => setPaletteOpen(false)} />}
       {setupOpen && result?.test && (
         <LoadSetup
           test={result.test}
@@ -1153,6 +1405,33 @@ function TestFileView({
       )}
       <SplitView open={panel.open} width={panel.width} onWidth={panel.setWidth} main={editorPane} panel={resultsPane} />
     </div>
+  );
+}
+
+function ResultsTab({
+  active,
+  onClick,
+  label,
+  badge,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  badge?: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`-mb-px flex items-center gap-1.5 border-b-2 px-2.5 pb-1.5 pt-1 text-xs font-medium ${
+        active ? "border-accent text-accent" : "border-transparent text-muted hover:text-ink"
+      }`}
+    >
+      {label}
+      {badge && <span className="flex items-center text-[0.6875rem] font-semibold">{badge}</span>}
+    </button>
   );
 }
 
@@ -1172,36 +1451,6 @@ function PanelToggle({ open, onClick, alert }: { open: boolean; onClick: () => v
       {!open && alert && (
         <span className={`absolute right-0.5 top-0.5 size-1.5 rounded-full ${alert === "bad" ? "bg-bad" : "bg-warn"}`} />
       )}
-    </button>
-  );
-}
-
-function FileButton({
-  label,
-  title,
-  icon,
-  busy,
-  disabled,
-  onClick,
-}: {
-  label: string;
-  title?: string;
-  icon?: ReactNode;
-  busy?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      disabled={disabled}
-      aria-busy={busy}
-      className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-ink disabled:cursor-default disabled:opacity-60 aria-busy:opacity-100 disabled:hover:bg-transparent disabled:hover:text-muted"
-    >
-      <BusyIcon busy={busy} icon={icon} />
-      {label}
     </button>
   );
 }
@@ -1239,7 +1488,7 @@ function Summary({ test }: { test: TestFile }) {
   const running = flow.steps.filter((s) => s.enabled !== false);
   const skipped = flow.steps.length - running.length;
   return (
-    <section className="mt-4 rounded-lg border border-line bg-surface">
+    <section className="rounded-lg border border-line bg-surface">
       <div className="border-b border-line px-4 py-3">
         <div className="font-semibold">{flow.name}</div>
         <div className="text-xs text-muted">{describeLoad(test.load)}</div>

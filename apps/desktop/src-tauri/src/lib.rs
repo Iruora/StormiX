@@ -32,6 +32,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::diff_runs,
             commands::export_run,
             commands::export_open_collection,
+            commands::export_open_collection_file,
+            commands::export_postman,
             commands::read_text_file,
             commands::write_text_file,
             commands::test_file_to_yaml,

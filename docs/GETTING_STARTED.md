@@ -27,7 +27,7 @@ What you have open is kept in a **workspace**, saved as you work: the test file 
 
 ## 2. A load test
 
-Pick a profile in **Load profile** on the Steps tab (or write a `load:` section in YAML), add thresholds such as `p95 < 300ms` and `errors < 1%`, and click **Load test**. The chart shows requests per second, failures and p95 latency each second. At the end you get percentiles, each threshold with its measured value, a per-step table and the most common failures.
+Pick a profile in **Load profile** under **Flow settings** on the Steps tab (or write a `load:` section in YAML), add thresholds such as `p95 < 300ms` and `errors < 1%`, and click **Load test**. The chart shows requests per second, failures and p95 latency each second. At the end you get percentiles, each threshold with its measured value, a per-step table and the most common failures.
 
 See [Test files](TEST_FILE.md#load-profiles) for the three load models and when to use each.
 

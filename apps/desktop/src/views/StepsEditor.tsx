@@ -1,5 +1,5 @@
-import { ArrowDown, ArrowUp, Copy, Eraser, Plus, Trash2, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { ArrowDown, ArrowUp, Copy, Eraser, Plus, Settings2, Trash2, X } from "lucide-react";
+import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { Assertion, Body, CachedStep, GraphqlBody, Header, KeyValue, LoadProfile, Method, Step, TestFile } from "../bindings";
 import { cachedTitle, useResponseCache } from "../lib/cache";
@@ -12,79 +12,202 @@ const METHODS: Method[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPT
 const input =
   "rounded-md border border-line bg-surface px-2 py-1 text-[0.8125rem] outline-none focus:border-accent";
 
+/** What the editor shows: one step, by index, or the flow's own settings. */
+export type StepsSelection = number | "flow";
+
 /**
- * Edits the parsed test file as forms: the flow's steps, the load profile and
- * the thresholds. Every change hands back a whole new file.
+ * Edits the parsed test file as forms, like Bruno: the steps listed on the
+ * left, and the one picked edited on the right. "Flow settings" holds the
+ * flow's name, tracing, load profile and thresholds. Every change hands
+ * back a whole new file.
  */
-export function StepsEditor({ test, onChange }: { test: TestFile; onChange: (next: TestFile) => void }) {
+export function StepsEditor({
+  test,
+  onChange,
+  selected,
+  onSelect,
+}: {
+  test: TestFile;
+  onChange: (next: TestFile) => void;
+  selected: StepsSelection;
+  onSelect: (next: StepsSelection) => void;
+}) {
   const steps = test.flow.steps;
   const cache = useResponseCache(test.flow.name);
+  const listRef = useRef<HTMLDivElement>(null);
+  // A step that no longer exists falls back to the last one.
+  const current: StepsSelection =
+    selected === "flow" ? "flow" : steps.length === 0 ? "flow" : Math.min(selected, steps.length - 1);
   const setSteps = (next: Step[]) => onChange({ ...test, flow: { ...test.flow, steps: next } });
   const move = (from: number, to: number) => {
     const next = [...steps];
     const [step] = next.splice(from, 1);
     next.splice(to, 0, step);
     setSteps(next);
+    onSelect(to);
   };
+  const add = () => {
+    setSteps([
+      ...steps,
+      { name: `Step ${steps.length + 1}`, request: { method: "GET", url: "{{baseUrl}}/" }, assert: [{ status: 200 }] },
+    ]);
+    onSelect(steps.length);
+  };
+  // Up and down move through the list, as in Bruno's sidebar.
+  const order: StepsSelection[] = ["flow", ...steps.map((_, i) => i)];
+  const onListKey = (e: KeyboardEvent) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const at = order.indexOf(current);
+    const next = order[Math.min(order.length - 1, Math.max(0, at + (e.key === "ArrowDown" ? 1 : -1)))];
+    onSelect(next);
+    requestAnimationFrame(() =>
+      listRef.current?.querySelector<HTMLElement>(`[data-item="${next}"]`)?.focus(),
+    );
+  };
+  const step = current === "flow" ? null : steps[current];
+  const setAside = test.flow.set_aside?.length ?? 0;
 
   return (
-    <div className="space-y-4 p-4">
-      <label className="block">
-        <span className="text-xs font-medium text-subtle">Flow name</span>
-        <input
-          aria-label="Flow name"
-          value={test.flow.name}
-          onChange={(e) => onChange({ ...test, flow: { ...test.flow, name: e.target.value } })}
-          className={`${input} mt-1 w-full font-semibold`}
-        />
-      </label>
-      <TraceSetting
-        compact
-        value={test.flow.trace ?? null}
-        onChange={(trace) => onChange({ ...test, flow: { ...test.flow, trace } })}
-      />
+    <div className="@container h-full">
+      <div className="flex h-full flex-col @xl:flex-row">
+        <div
+          ref={listRef}
+          role="listbox"
+          aria-label="Steps"
+          onKeyDown={onListKey}
+          className="max-h-44 shrink-0 overflow-y-auto border-b border-line bg-surface p-1.5 @xl:max-h-none @xl:w-56 @xl:border-b-0 @xl:border-r"
+        >
+          <ListItem id="flow" active={current === "flow"} onClick={() => onSelect("flow")}>
+            <Settings2 size="0.8125rem" className="shrink-0 text-muted" />
+            <span className="min-w-0 flex-1 truncate">Flow settings</span>
+          </ListItem>
+          <div className="px-2 pb-0.5 pt-2.5 text-[0.625rem] font-semibold uppercase tracking-wider text-subtle">
+            Steps <span className="font-normal normal-case tracking-normal">· {steps.length}</span>
+          </div>
+          {steps.map((s, i) => {
+            const off = s.enabled === false;
+            return (
+              <ListItem key={i} id={String(i)} active={current === i} onClick={() => onSelect(i)} dim={off}>
+                <span className={`mono w-12 shrink-0 text-[0.6875rem] font-semibold ${methodText(s.request.method)}`}>
+                  {s.request.method}
+                </span>
+                <span className={`min-w-0 flex-1 truncate ${off ? "line-through decoration-subtle" : ""}`} title={s.name}>
+                  {s.name}
+                </span>
+                {cache.steps.has(s.name) && (
+                  <span title="A response is cached for this step" className="size-1.5 shrink-0 rounded-full bg-accent" />
+                )}
+              </ListItem>
+            );
+          })}
+          <button
+            type="button"
+            onClick={add}
+            className="mt-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs text-muted hover:bg-surface-2 hover:text-accent"
+          >
+            <Plus size="0.8125rem" /> Add a step
+          </button>
+          {setAside > 0 && (
+            <p className="px-2 pt-1 text-[0.6875rem] text-subtle">
+              {setAside} more set aside; see the Flow tab.
+            </p>
+          )}
+        </div>
 
-      {(test.flow.set_aside?.length ?? 0) > 0 && (
-        <p className="text-xs text-subtle">
-          {test.flow.set_aside!.length} more step{test.flow.set_aside!.length === 1 ? " is" : "s are"} set aside, out of
-          the flow; see the Flow tab.
-        </p>
-      )}
-      <ol className="space-y-3">
-        {steps.map((step, i) => (
-          <StepCard
-            key={i}
-            index={i}
-            step={step}
-            last={i === steps.length - 1}
-            cached={cache.steps.get(step.name)}
-            onClearCache={() => cache.clear(step.name)}
-            onChange={(s) => setSteps(steps.map((x, j) => (j === i ? s : x)))}
-            onMove={(to) => move(i, to)}
-            onDuplicate={() => setSteps([...steps.slice(0, i + 1), { ...step, name: `${step.name} (copy)` }, ...steps.slice(i + 1)])}
-            onDelete={() => setSteps(steps.filter((_, j) => j !== i))}
-          />
-        ))}
-      </ol>
-      <button
-        type="button"
-        onClick={() =>
-          setSteps([
-            ...steps,
-            { name: `Step ${steps.length + 1}`, request: { method: "GET", url: "{{baseUrl}}/" }, assert: [{ status: 200 }] },
-          ])
-        }
-        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-line py-2 text-[0.8125rem] text-muted hover:border-accent hover:text-accent"
-      >
-        <Plus size="0.875rem" /> Add a step
-      </button>
-
-      <LoadEditor load={test.load ?? null} onChange={(load) => onChange({ ...test, load })} />
-      <ThresholdsEditor
-        thresholds={test.thresholds ?? []}
-        onChange={(thresholds) => onChange({ ...test, thresholds })}
-      />
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+          {step ? (
+            <div className="space-y-3 p-4">
+              <ol>
+                <StepCard
+                  key={current}
+                  index={current as number}
+                  step={step}
+                  last={current === steps.length - 1}
+                  cached={cache.steps.get(step.name)}
+                  onClearCache={() => cache.clear(step.name)}
+                  onChange={(next) => setSteps(steps.map((x, j) => (j === current ? next : x)))}
+                  onMove={(to) => move(current as number, to)}
+                  onDuplicate={() => {
+                    const i = current as number;
+                    setSteps([...steps.slice(0, i + 1), { ...step, name: `${step.name} (copy)` }, ...steps.slice(i + 1)]);
+                    onSelect(i + 1);
+                  }}
+                  onDelete={() => {
+                    const i = current as number;
+                    setSteps(steps.filter((_, j) => j !== i));
+                    onSelect(steps.length > 1 ? Math.max(0, i - 1) : "flow");
+                  }}
+                />
+              </ol>
+              <p className="text-xs text-subtle">Editing here rewrites the YAML, so comments in it are dropped.</p>
+            </div>
+          ) : (
+            <div className="space-y-4 p-4">
+              <label className="block">
+                <span className="text-xs font-medium text-subtle">Flow name</span>
+                <input
+                  aria-label="Flow name"
+                  value={test.flow.name}
+                  onChange={(e) => onChange({ ...test, flow: { ...test.flow, name: e.target.value } })}
+                  className={`${input} mt-1 w-full font-semibold`}
+                />
+              </label>
+              <TraceSetting
+                compact
+                value={test.flow.trace ?? null}
+                onChange={(trace) => onChange({ ...test, flow: { ...test.flow, trace } })}
+              />
+              <LoadEditor load={test.load ?? null} onChange={(load) => onChange({ ...test, load })} />
+              <ThresholdsEditor
+                thresholds={test.thresholds ?? []}
+                onChange={(thresholds) => onChange({ ...test, thresholds })}
+              />
+              {steps.length === 0 && (
+                <button
+                  type="button"
+                  onClick={add}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-line py-2 text-[0.8125rem] text-muted hover:border-accent hover:text-accent"
+                >
+                  <Plus size="0.875rem" /> Add the first step
+                </button>
+              )}
+              <p className="text-xs text-subtle">Editing here rewrites the YAML, so comments in it are dropped.</p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
+  );
+}
+
+function ListItem({
+  id,
+  active,
+  dim,
+  onClick,
+  children,
+}: {
+  id: string;
+  active: boolean;
+  dim?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={active}
+      data-item={id}
+      tabIndex={active ? 0 : -1}
+      onClick={onClick}
+      className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
+        active ? "bg-accent-soft text-accent" : "text-ink hover:bg-surface-2"
+      } ${dim ? "opacity-60" : ""}`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -740,7 +863,7 @@ function IconButton({
   label: string;
   disabled?: boolean;
   onClick: () => void;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <button
