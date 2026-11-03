@@ -1,9 +1,10 @@
-import { ArrowDown, ArrowUp, Copy, Eraser, Plus, Settings2, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, Eraser, FileCode2, Plus, Settings2, Trash2, X } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { Assertion, Body, CachedStep, GraphqlBody, Header, KeyValue, LoadProfile, Method, Step, TestFile } from "../bindings";
 import { cachedTitle, useResponseCache } from "../lib/cache";
 import { methodText, methodTone } from "../lib/methods";
+import { ScriptsDialog, withScripts } from "./ScriptsDialog";
 import { TraceSetting } from "./TraceSetting";
 import { VarField } from "./VarField";
 
@@ -243,8 +244,9 @@ function StepCard({
   const kept = [
     others.length > 0 && `${others.length} more assertion${others.length === 1 ? "" : "s"}`,
     step.extract && Object.keys(step.extract).length > 0 && `extracts ${Object.keys(step.extract).join(", ")}`,
-    (step.scripts?.pre_request || step.scripts?.test) && "scripts",
   ].filter(Boolean);
+  const [scriptsOpen, setScriptsOpen] = useState(false);
+  const scriptCount = [step.scripts?.pre_request, step.scripts?.test].filter((s) => s?.trim()).length;
 
   return (
     <li
@@ -295,6 +297,16 @@ function StepCard({
               <Eraser size="0.6875rem" /> clear cached
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setScriptsOpen(true)}
+            title="Edit the pre-request and post-response scripts"
+            className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[0.6875rem] ${
+              scriptCount ? "bg-accent-soft text-accent hover:bg-accent hover:text-white" : "text-subtle hover:bg-surface-2 hover:text-ink"
+            }`}
+          >
+            <FileCode2 size="0.75rem" /> {scriptCount ? `scripts (${scriptCount})` : "scripts"}
+          </button>
           <IconButton label="Move up" disabled={index === 0} onClick={() => onMove(index - 1)}>
             <ArrowUp size="0.875rem" />
           </IconButton>
@@ -357,6 +369,13 @@ function StepCard({
           <div className="text-xs text-subtle">Also {kept.join(", ")}; edit those in YAML.</div>
         )}
       </div>
+      {scriptsOpen && (
+        <ScriptsDialog
+          step={step}
+          onSave={(scripts) => onChange(withScripts(step, scripts))}
+          onClose={() => setScriptsOpen(false)}
+        />
+      )}
     </li>
   );
 }

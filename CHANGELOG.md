@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.10.0 (2026-11-03)
+
+### Edit variables and scripts where you see them
+
+- **Edit a variable from its hover**, like Bruno: hovering a `{{variable}}` in a Flow card or a Steps field shows an **Edit** button (**Set** when nothing defines it yet). An environment value changes for this session at once, or **Save to file** writes it to the environment's file; **Reset** goes back to the file's value. A secret stays in memory, and a flow variable is changed in the test file.
+- **Edit a step's scripts in a code editor.** The script button on each Flow card (and **scripts** in the Steps tab) opens the step's **Pre-request** and **Post-response** scripts in a JavaScript editor, with suggestions for `bru`, `req`, `res`, `pm` and `expect(...)`, your variable names inside `bru.getVar("…")` and `{{…}}`, ready-made snippets, and syntax errors underlined as you type. Ctrl S saves. Scripts from imported Bruno and Postman collections, including collection and folder ones, are there to edit.
+
 ## 1.9.1 (2026-11-03)
 
 ### Fixes

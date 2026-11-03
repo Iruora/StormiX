@@ -1,6 +1,7 @@
-Stormix 1.9.1 fixes the variables list on a Flow step card.
+Stormix 1.10.0 lets you edit variables and scripts right where you see them.
 
-- **Flow tab:** a step's "sets" list stays inside its card. It shows one line with **+N more** to open the whole list, and a long name is cut with the full name on hover.
+- **Edit a variable from its hover**, like Bruno: an **Edit** button next to the value, for this session or saved to the environment's file.
+- **Script editor:** each Flow step's pre-request and post-response scripts open in a JavaScript editor with suggestions for `bru`, `req`, `res`, `pm` and your variable names, plus syntax errors as you type. Imported Bruno and Postman scripts show there.
 
 If you are on 1.1 or later, the app offers this update by itself. On 1.0, download it once from the table below.
 

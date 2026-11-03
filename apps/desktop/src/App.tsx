@@ -47,6 +47,7 @@ import { YamlEditor } from "./editor/YamlEditor";
 import { CACHE_KEY } from "./lib/cache";
 import { describeLoad } from "./lib/describe";
 import { methodText } from "./lib/methods";
+import { VariableEditContext, type VariableEditing } from "./lib/variableEdit";
 import { VariablesContext, variableTable } from "./lib/variables";
 import { newWorkspace, WORKSPACES_KEY, workspaceTitle } from "./lib/workspace";
 import { type Activity, ActivityStrip, Loading } from "./views/Busy";
@@ -903,6 +904,31 @@ function TestFileView({
     return () => window.removeEventListener("keydown", listener);
   }, []);
 
+  // Where an environment without a file of its own would be saved.
+  const besidePath = useQuery({
+    queryKey: ["env-path", path, envName],
+    queryFn: () => commands.environmentPathBeside(path!, envName),
+    enabled: !!path && !!env && !env.path,
+  });
+  // What a variable's hover card uses to change a value in place. The
+  // functions it calls are defined further down, so it calls them late.
+  const variableEditing: VariableEditing = {
+    envName: env ? envName : null,
+    fileValues: env?.variables ?? {},
+    secrets: env?.secrets ?? [],
+    overrides: overrides[envName] ?? {},
+    savesTo: env?.path ?? (path ? (besidePath.data ?? null) : null),
+    setEnvVar: (name, value) => overrideVar(name, value),
+    resetEnvVar: (name) => resetVar(name),
+    saveEnvVar: (name, value) => saveVars([name], { [name]: value }),
+    setSecret: (name, value) => {
+      setSecretValues((v) => ({ ...v, [name]: value }));
+      run.reset();
+    },
+    setFlowVar: (name, value) => {
+      if (shown) editSteps({ ...shown, flow: { ...shown.flow, variables: { ...shown.flow.variables, [name]: value } } });
+    },
+  };
   const editorPane = (
     <>
       <div className="flex flex-wrap items-center gap-1 whitespace-nowrap border-b border-line bg-surface px-3 py-1.5">
@@ -965,18 +991,22 @@ function TestFileView({
       ) : shown && tab === "flow" ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <VariablesContext.Provider value={variables}>
-            <FlowView
-              test={shown}
-              onChange={editSteps}
-              lastRun={run.data ?? null}
-              onOpenStep={openStep}
-            />
+            <VariableEditContext.Provider value={variableEditing}>
+              <FlowView
+                test={shown}
+                onChange={editSteps}
+                lastRun={run.data ?? null}
+                onOpenStep={openStep}
+              />
+            </VariableEditContext.Provider>
           </VariablesContext.Provider>
         </div>
       ) : shown ? (
         <div className="min-h-0 flex-1">
           <VariablesContext.Provider value={variables}>
-            <StepsEditor test={shown} onChange={editSteps} selected={selectedStep} onSelect={setSelectedStep} />
+            <VariableEditContext.Provider value={variableEditing}>
+              <StepsEditor test={shown} onChange={editSteps} selected={selectedStep} onSelect={setSelectedStep} />
+            </VariableEditContext.Provider>
           </VariablesContext.Provider>
         </div>
       ) : (
@@ -1127,9 +1157,10 @@ function TestFileView({
     run.reset();
   };
   /** Writes this session's changes to these variables (all when null) to the environment's file. */
-  const saveVars = async (names: string[] | null) => {
+  const saveVars = async (names: string[] | null, values?: EnvOverrides) => {
     if (!env) return;
-    const changes = overrides[envName] ?? {};
+    // Values passed in win over this session's: the hover saves what was just typed.
+    const changes = { ...overrides[envName], ...values };
     const chosen = names ?? Object.keys(changes);
     let target = env.path;
     if (!target && path) target = await commands.environmentPathBeside(path, envName);
@@ -1153,12 +1184,6 @@ function TestFileView({
   };
   const changedCount = Object.keys(overrides[envName] ?? {}).length;
   const missingSecrets = env ? env.secrets.filter((n) => !secretValues[n]).length : 0;
-  // Where an environment without a file of its own would be saved.
-  const besidePath = useQuery({
-    queryKey: ["env-path", path, envName],
-    queryFn: () => commands.environmentPathBeside(path!, envName),
-    enabled: !!path && !!env && !env.path,
-  });
   const envNames = Object.keys(envs);
   // Runs show in the strip too, for when the results panel is hidden.
   const lastPoint = points[points.length - 1];

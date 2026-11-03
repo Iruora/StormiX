@@ -1,7 +1,7 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 
-import { describeVariable, useVariables, VARIABLE, type VariableTable } from "../lib/variables";
+import { useVariables, VARIABLE, type VariableTable } from "../lib/variables";
+import { useVariableTip } from "./VariableTip";
 
 type Props = {
   value: string;
@@ -19,7 +19,8 @@ type Props = {
 /**
  * A text input or textarea that colours its `{{variables}}`: known ones in
  * the accent colour, ones only a run can fill in another, unknown ones in
- * the warning colour. Hovering one shows its value and where it comes from.
+ * the warning colour. Hovering one shows its value and where it comes from,
+ * with a button to change it.
  *
  * The field's own text is transparent; a copy behind it, kept scrolled in
  * step, draws the colours. The variable marks sit above the field so they
@@ -29,7 +30,7 @@ export function VarField({ value, onChange, wrap = "", className = "", multiline
   const variables = useVariables();
   const field = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
-  const [hover, setHover] = useState<{ name: string; x: number; y: number; above: boolean } | null>(null);
+  const tip = useVariableTip(variables);
   const hasVariables = value.includes("{{");
 
   const sync = () => {
@@ -66,13 +67,7 @@ export function VarField({ value, onChange, wrap = "", className = "", multiline
           }`}
           style={{ background: "transparent", borderColor: "transparent", resize: "none" }}
         >
-          {paint(value, variables, (name, el) => {
-            if (!el) return setHover(null);
-            const r = el.getBoundingClientRect();
-            // Near the bottom of the window, the tip opens upwards.
-            const above = r.bottom + 72 > window.innerHeight;
-            setHover({ name, x: r.left, y: above ? r.top - 4 : r.bottom + 4, above });
-          }, (index) => {
+          {paint(value, variables, (name, el) => (el ? tip.show(name, el) : tip.leave()), (index) => {
             const f = field.current;
             if (!f) return;
             f.focus();
@@ -82,11 +77,7 @@ export function VarField({ value, onChange, wrap = "", className = "", multiline
           {multiline && "​"}
         </div>
       )}
-      {hover &&
-        createPortal(
-          <VariableTip name={hover.name} variables={variables} x={hover.x} y={hover.y} above={hover.above} />,
-          document.body,
-        )}
+      {tip.element}
     </div>
   );
 }
@@ -131,45 +122,37 @@ export function variableClass(variables: VariableTable, name: string): string {
   return info.kind === "generated" ? "var-generated" : info.kind === "runtime" ? "var-runtime" : "var-defined";
 }
 
-function VariableTip({
-  name,
-  variables,
-  x,
-  y,
-  above,
-}: {
-  name: string;
-  variables: VariableTable;
-  x: number;
-  y: number;
-  above: boolean;
-}) {
-  const info = variables.get(name);
-  const [first, ...more] = describeVariable(name, info).split("\n");
+/**
+ * Read-only text with its `{{variables}}` coloured, each one showing its
+ * value on hover with a button to change it, as in a field.
+ */
+export function VarText({ text, className = "" }: { text: string; className?: string }) {
+  const variables = useVariables();
+  const tip = useVariableTip(variables);
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(VARIABLE)) {
+    const start = m.index!;
+    if (start > last) out.push(text.slice(last, start));
+    const name = m[1];
+    out.push(
+      <span
+        key={start}
+        data-variable={name}
+        className={`rounded-sm ${variableClass(variables, name)}`}
+        onMouseEnter={(e) => tip.show(name, e.currentTarget)}
+        onMouseLeave={tip.leave}
+      >
+        {m[0]}
+      </span>,
+    );
+    last = start + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
   return (
-    <div
-      role="tooltip"
-      className="pointer-events-none fixed z-[60] max-w-[min(24rem,calc(100vw-1rem))] rounded-md border border-line bg-surface px-2.5 py-1.5 text-xs shadow-lg"
-      style={{ left: Math.max(8, Math.min(x, window.innerWidth - tipWidth())), top: y, transform: above ? "translateY(-100%)" : undefined }}
-    >
-      {info?.value != null ? (
-        <>
-          <div className="mono break-all">
-            <span className={variableClass(variables, name)}>{`{{${name}}}`}</span>
-            <span className="text-subtle"> = </span>
-            <span className="text-ink">{info.value}</span>
-          </div>
-          <div className="mt-0.5 text-subtle">{more.join(" ")}</div>
-        </>
-      ) : (
-        <div className={info ? "text-muted" : "text-warn"}>{first}</div>
-      )}
-    </div>
+    <span className={className}>
+      {out}
+      {tip.element}
+    </span>
   );
-}
-
-/** The widest the tooltip gets, in pixels, plus a margin: 24rem at the current text size. */
-function tipWidth(): number {
-  const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-  return Math.min(24 * rem, window.innerWidth - 16) + 8;
 }

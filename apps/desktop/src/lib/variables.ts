@@ -9,6 +9,8 @@ export type VariableInfo = {
   /** Where the value comes from, like `flow variables` or `extracted by "Log in"`. */
   source: string;
   kind: "defined" | "runtime" | "generated";
+  /** For a defined value: whether the flow's own variables or the environment holds it. */
+  origin?: "flow" | "environment";
 };
 
 export type VariableTable = Map<string, VariableInfo>;
@@ -39,11 +41,11 @@ export function variableTable(
     table.set(name, { value: null, source: `generated on each use: ${description}`, kind: "generated" });
   }
   for (const [name, value] of Object.entries(test?.flow.variables ?? {})) {
-    table.set(name, { value, source: "flow variables", kind: "defined" });
+    table.set(name, { value, source: "flow variables", kind: "defined", origin: "flow" });
   }
   for (const [name, value] of Object.entries(environment)) {
     const changed = sessionOnly?.has(name) ? ", changed for this session" : "";
-    table.set(name, { value, source: `environment "${envName}"${changed}`, kind: "defined" });
+    table.set(name, { value, source: `environment "${envName}"${changed}`, kind: "defined", origin: "environment" });
   }
   // Disabled steps are not sent, so they set nothing.
   for (const step of (test?.flow.steps ?? []).filter((s) => s.enabled !== false)) {
