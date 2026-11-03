@@ -484,16 +484,7 @@ function FlowNode({
                 </button>
               </div>
             )}
-            {sets.length > 0 && (
-              <div className="text-subtle">
-                sets{" "}
-                {sets.map((n) => (
-                  <span key={n} className="mono mr-1 rounded bg-surface-2 px-1 text-muted">
-                    {n}
-                  </span>
-                ))}
-              </div>
-            )}
+            {sets.length > 0 && <SetsList names={sets} />}
             {notes.map((n) => (
               <div key={n} className="flex items-start gap-1 text-warn">
                 <TriangleAlert size="0.75rem" className="mt-px shrink-0" /> {n}
@@ -502,6 +493,63 @@ function FlowNode({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The variables a step sets, as chips that wrap to the card's width. Folded,
+ * the list keeps to one line and a button shows how many are hidden; the
+ * button opens the full list.
+ */
+function SetsList({ names }: { names: string[] }) {
+  const [open, setOpen] = useState(false);
+  const [hidden, setHidden] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Count the chips that fall below the first line, whenever the card resizes.
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const measure = () => {
+      const chips = Array.from(list.children) as HTMLElement[];
+      const top = chips[0]?.offsetTop ?? 0;
+      setHidden(chips.filter((c) => c.offsetTop > top + 2).length);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [names]);
+
+  return (
+    <div className="flex min-w-0 items-start gap-1.5 text-subtle">
+      <span className="shrink-0 leading-5">sets</span>
+      <div
+        ref={listRef}
+        className={`flex min-w-0 flex-1 flex-wrap gap-1 ${open ? "" : "max-h-5 overflow-hidden"}`}
+      >
+        {names.map((n) => (
+          <span
+            key={n}
+            title={n}
+            className="mono max-w-full truncate rounded bg-surface-2 px-1 leading-5 text-muted"
+          >
+            {n}
+          </span>
+        ))}
+      </div>
+      {(hidden > 0 || open) && (
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          title={open ? "Show one line" : `Show all ${names.length} variables`}
+          className="shrink-0 whitespace-nowrap rounded px-1 font-medium leading-5 text-accent hover:bg-accent-soft"
+        >
+          {open ? "Show less" : `+${hidden} more`}
+        </button>
+      )}
     </div>
   );
 }

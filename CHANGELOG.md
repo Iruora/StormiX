@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.9.1 (2026-11-03)
+
+### Fixes
+
+- **Flow tab:** a step's "sets" list no longer runs past its card. The variables wrap to the card's width on one line, a long name is cut with its full name on hover, and **+N more** shows the whole list (**Show less** folds it again).
+
 ## 1.9.0 (2026-11-02)
 
 ### A tidier header

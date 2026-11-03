@@ -1,12 +1,6 @@
-Stormix 1.9.0 tidies the header into menus, lists the steps beside the editor, and exports to Postman.
+Stormix 1.9.1 fixes the variables list on a Flow step card.
 
-- **File menu**: New, Open, Save, Save as, every import and every export in one place, with Ctrl O, Ctrl S and Ctrl Shift S.
-- **Environment menu**: one button with the environment in use, its changed variables and missing secrets; the list, Variables, Secrets, Import and Remove inside.
-- **Ctrl K search** for every action, environment, proxy mode, step and workspace.
-- **Settings** at the bottom of the sidebar, with the proxy and the keyboard shortcuts.
-- **Steps listed beside the editor**, like Bruno: click a step to edit it; **Flow settings** holds the name, tracing, load profile and thresholds.
-- **Results panel tabs**: Problems, Last run and Summary.
-- **Export to Postman and OpenCollection**: **File › Export as** writes a Bruno folder, one OpenCollection file, or a Postman collection with its environments. `stormix export FILE -o NAME.json` does the same from the command line.
+- **Flow tab:** a step's "sets" list stays inside its card. It shows one line with **+N more** to open the whole list, and a long name is cut with the full name on hover.
 
 If you are on 1.1 or later, the app offers this update by itself. On 1.0, download it once from the table below.
 
