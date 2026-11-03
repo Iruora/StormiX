@@ -8,6 +8,7 @@ import {
   CornerUpLeft,
   Database,
   Eraser,
+  FileCode2,
   Flag,
   GripVertical,
   Play,
@@ -23,6 +24,8 @@ import { cachedTitle, storedAgo, useResponseCache } from "../lib/cache";
 import { methodTone } from "../lib/methods";
 import { useVariables, variablesSetBy, variablesUsedBy } from "../lib/variables";
 import { stepPassed } from "./RunResult";
+import { ScriptsDialog, withScripts } from "./ScriptsDialog";
+import { VarText } from "./VarField";
 
 type List = "steps" | "aside";
 type Place = { list: List; index: number };
@@ -54,6 +57,8 @@ export function FlowView({
   const [drag, setDrag] = useState<Drag | null>(null);
   const [target, setTarget] = useState<Place | null>(null);
   const [removed, setRemoved] = useState<Removed | null>(null);
+  // The step whose scripts are open in the editor.
+  const [scripting, setScripting] = useState<Place | null>(null);
   const flowRef = useRef<HTMLOListElement>(null);
   const trayRef = useRef<HTMLDivElement>(null);
 
@@ -248,6 +253,7 @@ export function FlowView({
                   onToggle={() => update({ list: "steps", index: i }, { ...step, enabled: !isOn(step) })}
                   onCacheToggle={() => update({ list: "steps", index: i }, { ...step, cache: !step.cache })}
                   onClearCache={() => cache.clear(step.name)}
+                  onScripts={() => setScripting({ list: "steps", index: i })}
                   onMove={(to) => move({ list: "steps", index: i }, { list: "steps", index: to > i ? to + 1 : to })}
                   onDuplicate={() => duplicate({ list: "steps", index: i })}
                   onSetAside={() => move({ list: "steps", index: i }, { list: "aside", index: aside.length })}
@@ -306,6 +312,16 @@ export function FlowView({
             {gapActive("aside", aside.length) && <DropLine />}
           </ul>
         </aside>
+
+        {scripting && (scripting.list === "steps" ? steps : aside)[scripting.index] && (
+          <ScriptsDialog
+            step={(scripting.list === "steps" ? steps : aside)[scripting.index]}
+            onSave={(scripts) =>
+              update(scripting, withScripts((scripting.list === "steps" ? steps : aside)[scripting.index], scripts))
+            }
+            onClose={() => setScripting(null)}
+          />
+        )}
 
         {dragged && drag && (
           <div
@@ -372,6 +388,7 @@ function FlowNode({
   onToggle,
   onCacheToggle,
   onClearCache,
+  onScripts,
   onMove,
   onDuplicate,
   onSetAside,
@@ -390,6 +407,7 @@ function FlowNode({
   onToggle: () => void;
   onCacheToggle: () => void;
   onClearCache: () => void;
+  onScripts: () => void;
   onMove: (to: number) => void;
   onDuplicate: () => void;
   onSetAside: () => void;
@@ -431,7 +449,7 @@ function FlowNode({
             <span className={`block truncate font-medium hover:text-accent ${on ? "" : "line-through decoration-subtle"}`}>
               {step.name || <i className="text-subtle">unnamed</i>}
             </span>
-            <span className="mono block truncate text-[0.6875rem] text-subtle">{step.request.url}</span>
+            <VarText text={step.request.url} className="mono block truncate text-[0.6875rem] text-subtle" />
           </button>
           {result && !result.skipped && (
             <span
@@ -463,6 +481,7 @@ function FlowNode({
                 <Trash2 size="0.8125rem" />
               </IconButton>
             </div>
+            <ScriptsButton step={step} onClick={onScripts} />
             <CacheToggle on={!!step.cache} onClick={onCacheToggle} />
             <Toggle on={on} label={on ? "Turn this step off" : "Turn this step on"} onClick={onToggle} />
           </div>
@@ -632,6 +651,30 @@ function Toggle({ on, label, onClick }: { on: boolean; label: string; onClick: (
       <span
         className={`absolute top-0.5 size-3 rounded-full bg-white shadow transition-all ${on ? "left-3.5" : "left-0.5"}`}
       />
+    </button>
+  );
+}
+
+/** Opens the step's scripts; stays visible when the step has one. */
+function ScriptsButton({ step, onClick }: { step: Step; onClick: () => void }) {
+  const which = [step.scripts?.pre_request?.trim() && "pre-request", step.scripts?.test?.trim() && "post-response"].filter(
+    Boolean,
+  );
+  const label = which.length ? `Edit the scripts (${which.join(" and ")})` : "Add a pre-request or post-response script";
+  return (
+    <button
+      type="button"
+      aria-label="Scripts"
+      title={label}
+      onClick={onClick}
+      className={`flex shrink-0 items-center gap-0.5 rounded p-1 text-[0.6875rem] ${
+        which.length
+          ? "bg-accent-soft text-accent"
+          : "text-subtle opacity-60 hover:bg-surface-2 hover:text-ink group-hover:opacity-100"
+      }`}
+    >
+      <FileCode2 size="0.8125rem" />
+      {which.length > 0 && <span className="font-semibold">{which.length === 2 ? "2" : which[0] === "pre-request" ? "pre" : "post"}</span>}
     </button>
   );
 }

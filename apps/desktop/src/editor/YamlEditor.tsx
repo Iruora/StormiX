@@ -212,16 +212,21 @@ function count(n: number, noun: string): string {
   return n === 0 ? "" : `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
-const highlight = HighlightStyle.define([
+/** Colours shared by the YAML and script editors. */
+export const highlight = HighlightStyle.define([
   { tag: [t.propertyName, t.definition(t.propertyName)], color: "var(--syn-key)" },
   { tag: [t.string, t.special(t.string), t.content], color: "var(--syn-string)" },
   { tag: [t.number, t.bool, t.null, t.atom], color: "var(--syn-number)" },
   { tag: [t.comment, t.lineComment, t.blockComment], color: "var(--syn-comment)", fontStyle: "italic" },
   { tag: [t.keyword, t.typeName, t.labelName, t.meta], color: "var(--syn-meta)" },
   { tag: [t.punctuation, t.separator, t.squareBracket, t.brace], color: "var(--muted)" },
+  { tag: [t.controlKeyword, t.definitionKeyword, t.moduleKeyword, t.operatorKeyword], color: "var(--syn-meta)" },
+  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: "var(--syn-key)" },
+  { tag: [t.regexp, t.escape], color: "var(--syn-string)" },
 ]);
 
-const theme = EditorView.theme({
+/** The look shared by the YAML and script editors. */
+export const theme = EditorView.theme({
   "&": { height: "100%", backgroundColor: "var(--surface)", color: "var(--ink)", fontSize: "0.8125rem" },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": { fontFamily: "var(--font-mono)", lineHeight: "1.54" },
