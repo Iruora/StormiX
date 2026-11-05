@@ -19,6 +19,8 @@ Download the desktop app (`.dmg`, `.exe`/`.msi`, `.AppImage`/`.deb`/`.rpm`) or t
 
 ## Documentation
 
+The full documentation, with a guide to every part of the desktop app, is on the website: **[iruora.github.io/StormiX](https://iruora.github.io/StormiX/)**. The reference pages are also here in [`docs/`](docs/):
+
 | | |
 |---|---|
 | [Getting started](docs/GETTING_STARTED.md) | From install to a regression run, a load test and CI, in ten minutes |
@@ -172,6 +174,8 @@ cargo test --workspace         # also regenerates apps/desktop/src/bindings.ts
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+The website lives in [`docs/`](docs/) (VitePress): `cd docs && pnpm install && pnpm dev` serves it locally, and the **Docs site** workflow publishes it to GitHub Pages on each push to `main`.
+
 ## Repository layout
 
 ```
@@ -184,6 +188,7 @@ crates/collections/  Postman, Bruno and OpenCollection importers, OpenCollection
 crates/store/        run history (SQLite) and run-to-run diffs
 crates/report/       self-contained HTML reports
 crates/cli/          `stormix`, the command line for CI and quick runs
+docs/                user docs and the website (VitePress), published to GitHub Pages
 examples/            example test files, and fixture collections CI runs against the demo API
 bench/               the k6 comparison
 ```
