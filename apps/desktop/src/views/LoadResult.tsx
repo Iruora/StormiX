@@ -15,6 +15,7 @@ import { useMemo, useState } from "react";
 
 import type { LoadProgress, LoadReport, Second, SlowRequest, StepResult, StepSummary, ThresholdResult } from "../bindings";
 import { ProgressBar } from "./Busy";
+import { ApiResources, liveResources, reportResources, wentUnhealthy } from "./Resources";
 import { DetailsButton, stepPassed } from "./RunResult";
 import { CopyButton, StepDetails, type Diagnose } from "./StepDetails";
 
@@ -51,6 +52,7 @@ export function LoadLive({ points, onStop, stopping }: { points: LoadProgress[];
         <Stat label="in flight" value={last ? String(last.active) : "–"} />
       </div>
       <Timeline seconds={points.map((p) => ({ t: p.elapsedS, requests: p.requests, failed: p.failed, p95Ms: p.p95Ms }))} />
+      <ApiResources series={liveResources(points)} duration={total} live />
     </section>
   );
 }
@@ -114,6 +116,11 @@ export function LoadResult({
                 ? "Thresholds held"
                 : "Thresholds failed"}
         </span>
+        {wentUnhealthy(reportResources(report)) && (
+          <span className="rounded bg-bad-soft px-1.5 py-0.5 text-xs font-medium text-bad" title="See API resources below">
+            API went unhealthy
+          </span>
+        )}
         <span className="ml-auto text-xs text-muted">
           {s.iterations} iterations · {formatMs(s.durationMs ?? 0)}
         </span>
@@ -177,6 +184,7 @@ export function LoadResult({
       )}
 
       <Timeline seconds={s.timeline} />
+      <ApiResources series={reportResources(report)} duration={(s.durationMs ?? 0) / 1000} />
 
       {s.steps.length > 0 && <StepTable steps={s.steps} />}
 

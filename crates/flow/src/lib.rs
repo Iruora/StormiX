@@ -11,6 +11,7 @@ mod duration;
 pub mod graphql;
 mod load;
 mod model;
+mod monitor;
 mod template;
 mod test_file;
 mod threshold;
@@ -22,6 +23,7 @@ pub use model::{
     Assertion, Body, ExtractSource, Flow, GraphqlBody, Header, HeaderAssertion, JsonAssertion,
     KeyValue, Method, Request, Scripts, Step, TraceMode,
 };
+pub use monitor::{Monitor, MonitorTarget};
 pub use template::{render, variable_refs, Rendered};
 pub use test_file::{ParseError, TestFile, CURRENT_VERSION};
 pub use threshold::{Comparison, Metric, Threshold, ThresholdError};

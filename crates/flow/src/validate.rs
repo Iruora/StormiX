@@ -223,6 +223,40 @@ impl TestFile {
             }
         }
 
+        for (m, monitor) in self.monitor.iter().enumerate() {
+            let at = format!("monitor[{m}].{}", monitor.kind());
+            let url = monitor.target().url.trim();
+            if url.is_empty() {
+                issues.error(&format!("{at}.url"), "the URL is empty");
+            } else if !(url.starts_with("http://")
+                || url.starts_with("https://")
+                || url.starts_with("{{"))
+            {
+                issues.warning(
+                    &format!("{at}.url"),
+                    "the URL does not start with http:// or https://",
+                );
+            }
+            if let Some(health) = &monitor.target().health {
+                let health = health.trim();
+                if !(health.starts_with("http://")
+                    || health.starts_with("https://")
+                    || health.starts_with("{{"))
+                {
+                    issues.warning(
+                        &format!("{at}.health"),
+                        "the health URL does not start with http:// or https://",
+                    );
+                }
+            }
+        }
+        if !self.monitor.is_empty() && self.load.is_none() {
+            issues.warning(
+                "monitor",
+                "the API's CPU and memory are only read during a load test; add a `load` section",
+            );
+        }
+
         issues.0
     }
 }

@@ -80,6 +80,7 @@ fn load_report_has_thresholds_timeline_and_steps() {
         setup: Vec::new(),
         slowest: Vec::new(),
         aborted: false,
+        resources: Vec::new(),
     };
     let html = load_report(&report);
     assert!(html.contains("Thresholds failed"));
@@ -92,4 +93,90 @@ fn load_report_has_thresholds_timeline_and_steps() {
     );
     assert!(html.contains("<td>Log in</td><td>30</td>"));
     assert!(html.contains("Most common failures"));
+}
+
+#[test]
+fn load_report_shows_the_apis_resources() {
+    use stormix_engine::{ResourceSample, ResourceSeries};
+    let recorder = stormix_metrics::Recorder::new();
+    let sample = |t: f64, cpu: Option<f64>, mem: f64| ResourceSample {
+        t,
+        cpu_percent: cpu,
+        memory_bytes: Some(mem),
+        heap_bytes: Some(mem / 2.0),
+        gc_ms_per_s: cpu.map(|_| 4.0),
+    };
+    let report = LoadReport {
+        name: "Watched".into(),
+        summary: recorder.summary(Duration::from_secs(2)),
+        thresholds: Vec::new(),
+        samples: Vec::new(),
+        setup: Vec::new(),
+        slowest: Vec::new(),
+        aborted: false,
+        resources: vec![
+            ResourceSeries {
+                name: "orders-api".into(),
+                url: "http://api/actuator/prometheus".into(),
+                format: "prometheus".into(),
+                cpu_cores: Some(4.0),
+                heap_max_bytes: Some(512.0 * 1_048_576.0),
+                memory_kind: Some("jvm".into()),
+                samples: vec![
+                    sample(0.0, None, 200.0 * 1_048_576.0),
+                    sample(1.0, Some(80.0), 300.0 * 1_048_576.0),
+                    sample(2.0, Some(120.0), 250.0 * 1_048_576.0),
+                ],
+                failed_reads: 0,
+                error: None,
+                health_url: Some("http://api/actuator/health".into()),
+                health: vec![
+                    stormix_engine::HealthChange {
+                        t: 0.0,
+                        status: "UP".into(),
+                        detail: None,
+                    },
+                    stormix_engine::HealthChange {
+                        t: 1.0,
+                        status: "DOWN".into(),
+                        detail: Some("db: DOWN".into()),
+                    },
+                    stormix_engine::HealthChange {
+                        t: 1.5,
+                        status: "UP".into(),
+                        detail: None,
+                    },
+                ],
+                health_error: None,
+                failing: false,
+            },
+            ResourceSeries {
+                name: "<down>".into(),
+                url: "http://down/metrics".into(),
+                format: "prometheus".into(),
+                cpu_cores: None,
+                heap_max_bytes: None,
+                memory_kind: None,
+                samples: Vec::new(),
+                failed_reads: 3,
+                error: Some("401 Unauthorized".into()),
+                health_url: None,
+                health: Vec::new(),
+                health_error: None,
+                failing: false,
+            },
+        ],
+    };
+    let html = load_report(&report);
+    assert!(html.contains("API resources · orders-api"));
+    assert!(html.contains(">100%<"), "CPU average");
+    assert!(html.contains(">120%<"), "CPU peak");
+    assert!(html.contains("300.0 MB"));
+    assert!(html.contains("150.0 MB / 512.0 MB"), "heap peak of max");
+    assert!(html.contains("of 4 cores"));
+    assert!(html.contains(r#"class="cpu""#));
+    assert!(html.contains("API resources · &lt;down&gt;"));
+    assert!(html.contains("Could not read it: 401 Unauthorized"));
+    assert!(html.contains("<b>DOWN</b> at 1.0 s (db: DOWN), healthy again at 1.5 s, after 0.5 s"));
+    assert_eq!(html.matches(r#"class="down""#).count(), 1);
 }

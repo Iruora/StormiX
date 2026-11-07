@@ -10,11 +10,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use stormix_flow::{Flow, LoadProfile, Threshold};
+use stormix_flow::{Flow, LoadProfile, Monitor, Threshold};
 use stormix_metrics::{check_thresholds, Recorder, Sample, Second, Summary, ThresholdResult};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 
+use crate::monitor::{self, ResourceSeries};
 use crate::{Exchanges, FlowResult, Runner, StepResult, Variables};
 
 #[derive(Debug, Clone)]
@@ -29,6 +30,9 @@ pub struct LoadOptions {
     /// After a stop, how long iterations still running may take to finish.
     /// Shorter than `grace`, since whoever stopped the test wants it over.
     pub stop_grace: Duration,
+    /// Metrics endpoints of the API, read throughout the test for its CPU
+    /// and memory use: the test file's `monitor` section.
+    pub monitor: Vec<Monitor>,
 }
 
 impl Default for LoadOptions {
@@ -38,6 +42,7 @@ impl Default for LoadOptions {
             grace: Duration::from_secs(30),
             stop: StopSignal::default(),
             stop_grace: Duration::from_secs(3),
+            monitor: Vec::new(),
         }
     }
 }
@@ -89,6 +94,8 @@ pub struct Progress<'a> {
     pub requests: u64,
     /// The rate (open models) or user count (closed model) aimed for now.
     pub target: f64,
+    /// The API's CPU and memory so far, one series per `monitor` entry.
+    pub resources: &'a [ResourceSeries],
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -118,6 +125,10 @@ pub struct LoadReport {
     /// cover only the time it ran, and the test does not pass.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub aborted: bool,
+    /// The API's own CPU and memory over the test, one series per
+    /// `monitor` entry. Empty when the file has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resources: Vec<ResourceSeries>,
 }
 
 /// One traced request from a load test.
@@ -149,6 +160,9 @@ impl LoadReport {
 
 /// Runs `flow` under `profile` and checks `thresholds` at the end.
 /// `on_second` is called once a second with live figures.
+/// Configured monitors read a baseline before load begins, waiting up to ten
+/// seconds or until stopped. Monitor failures are recorded in the returned
+/// resource series and do not stop the load test.
 pub async fn run_load(
     runner: &Runner,
     flow: &Flow,
@@ -174,7 +188,45 @@ pub async fn run_load(
         active: AtomicU32::new(0),
     });
     let total: Duration = profile.total_duration().into();
+    let (set_origin, origin) = tokio::sync::watch::channel(None);
+    let (monitor_tx, mut monitor_rx) = mpsc::unbounded_channel();
+    let (mut resources, mut monitors) = if options.monitor.is_empty() {
+        (Vec::new(), JoinSet::new())
+    } else {
+        let mut vars = Variables::new();
+        vars.extend(flow.variables.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        vars.extend(overrides.entries());
+        monitor::start(
+            &options.monitor,
+            &vars,
+            &runner.client,
+            &origin,
+            &monitor_tx,
+        )
+    };
+    drop(monitor_tx);
+    // The first reads are the baseline, so the load waits for them: every
+    // running monitor's first answer or failure. A read gives up within
+    // 10 s, so a slow or unreachable API cannot hold the test any longer.
+    let mut waiting = monitors.len();
+    let baseline = tokio::time::sleep(Duration::from_secs(10));
+    tokio::pin!(baseline);
+    let mut first = vec![false; resources.len()];
+    while waiting > 0 {
+        tokio::select! {
+            Some(update) = monitor_rx.recv() => {
+                if !std::mem::replace(&mut first[update.index], true) {
+                    waiting -= 1;
+                }
+                resources[update.index].apply(update);
+            }
+            () = &mut baseline => break,
+            () = stop.stopped() => break,
+            else => break,
+        }
+    }
     let started = Instant::now();
+    set_origin.send_replace(Some(started));
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut driver = tokio::spawn(drive(
         shared.clone(),
@@ -194,17 +246,22 @@ pub async fn run_load(
     let outcome = loop {
         tokio::select! {
             Some(result) = rx.recv() => record(&mut recorder, &mut samples, &mut slowest, result),
+            Some(update) = monitor_rx.recv() => resources[update.index].apply(update),
             _ = tick.tick() => {
                 let elapsed = started.elapsed();
                 let target = target(profile, elapsed.min(total));
                 let requests = recorder.requests();
                 let second = recorder.close_second(shared.active.load(Ordering::Relaxed));
-                on_second(&Progress { elapsed, total, second, requests, target });
+                on_second(&Progress { elapsed, total, second, requests, target, resources: &resources });
             }
             outcome = &mut driver => break outcome.unwrap_or_default(),
         }
     };
     let elapsed = started.elapsed();
+    monitors.abort_all();
+    while let Ok(update) = monitor_rx.try_recv() {
+        resources[update.index].apply(update);
+    }
     while let Ok(result) = rx.try_recv() {
         record(&mut recorder, &mut samples, &mut slowest, result);
     }
@@ -222,6 +279,7 @@ pub async fn run_load(
         setup,
         slowest: slowest.into_list(),
         aborted: outcome.aborted,
+        resources,
     }
 }
 

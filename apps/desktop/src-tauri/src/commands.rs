@@ -226,6 +226,30 @@ pub struct LoadProgress {
     pub failed: u32,
     pub p95_ms: f64,
     pub active: u32,
+    /// The API's latest CPU and memory, one per `monitor` entry.
+    pub resources: Vec<LiveResource>,
+}
+
+/// A monitored API's latest reading while a load test runs.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveResource {
+    pub name: String,
+    /// Seconds since the load started, of the latest successful read. None
+    /// until one succeeds.
+    pub t: Option<f64>,
+    /// 100 is one full core.
+    pub cpu_percent: Option<f64>,
+    pub memory_bytes: Option<f64>,
+    /// Why the latest read failed.
+    pub error: Option<String>,
+    pub cpu_cores: Option<f64>,
+    pub memory_kind: Option<String>,
+    /// The latest health status, like `UP`, `DOWN` or `UNREACHABLE`. None
+    /// without a health check.
+    pub health: Option<String>,
+    /// What is not up, or why it did not answer.
+    pub health_detail: Option<String>,
 }
 
 /// The load test running now, so [`stop_load_test`] can stop it.
@@ -281,7 +305,10 @@ pub async fn run_load_test(
     };
     let mut vars = Variables::new();
     vars.extend(variables);
-    let options = LoadOptions::default();
+    let options = LoadOptions {
+        monitor: test.monitor.clone(),
+        ..LoadOptions::default()
+    };
     running.start(options.stop.clone());
     let report = run_load(
         &runner.get(),
@@ -298,6 +325,21 @@ pub async fn run_load_test(
                 failed: p.second.failed,
                 p95_ms: p.second.p95_ms,
                 active: p.second.active,
+                resources: p
+                    .resources
+                    .iter()
+                    .map(|r| LiveResource {
+                        name: r.name.clone(),
+                        t: r.samples.last().map(|s| s.t),
+                        cpu_percent: r.samples.last().and_then(|s| s.cpu_percent),
+                        memory_bytes: r.samples.last().and_then(|s| s.memory_bytes),
+                        error: r.failing.then(|| r.error.clone()).flatten(),
+                        cpu_cores: r.cpu_cores,
+                        memory_kind: r.memory_kind.clone(),
+                        health: r.health.last().map(|h| h.status.clone()),
+                        health_detail: r.health.last().and_then(|h| h.detail.clone()),
+                    })
+                    .collect(),
             }
             .emit(&app);
         },

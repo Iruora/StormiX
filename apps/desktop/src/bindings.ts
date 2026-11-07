@@ -122,7 +122,7 @@ export const commands = {
 /** Events */
 export const events = {
 	importProgress: makeEvent<ImportProgress, ImportProgress>("import-progress"),
-	loadProgress: makeEvent<LoadProgress, LoadProgress>("load-progress"),
+	loadProgress: makeEvent<LoadProgress_Serialize, LoadProgress_Deserialize>("load-progress"),
 	runProgress: makeEvent<RunProgress, RunProgress>("run-progress"),
 };
 
@@ -546,6 +546,43 @@ export type HeaderPair = {
 	value: string,
 };
 
+/**  The API's health from a moment on, until the next change. */
+export type HealthChange = HealthChange_Serialize | HealthChange_Deserialize;
+
+/**  The API's health from a moment on, until the next change. */
+export type HealthChange_Deserialize = {
+	/**  Seconds since the load started. */
+	t: number | null,
+	/**
+	 *  `UP`, `DOWN`, `OUT_OF_SERVICE` or `UNKNOWN` as the API reports it;
+	 *  `UNREACHABLE` when it did not answer; `HTTP 503` for an error
+	 *  status without a JSON `status`.
+	 */
+	status: string,
+	/**
+	 *  What is not up, like `db: DOWN, diskSpace: DOWN`, or why it did not
+	 *  answer.
+	 */
+	detail?: string | null,
+};
+
+/**  The API's health from a moment on, until the next change. */
+export type HealthChange_Serialize = {
+	/**  Seconds since the load started. */
+	t: number | null,
+	/**
+	 *  `UP`, `DOWN`, `OUT_OF_SERVICE` or `UNKNOWN` as the API reports it;
+	 *  `UNREACHABLE` when it did not answer; `HTTP 503` for an error
+	 *  status without a JSON `status`.
+	 */
+	status: string,
+	/**
+	 *  What is not up, like `db: DOWN, diskSpace: DOWN`, or why it did not
+	 *  answer.
+	 */
+	detail?: string,
+};
+
 /**
  *  Sent while a Bruno folder is imported, at most every 50 ms and for the
  *  last file.
@@ -608,6 +645,57 @@ export type Latency = {
 	max: number | null,
 };
 
+/**  A monitored API's latest reading while a load test runs. */
+export type LiveResource = LiveResource_Serialize | LiveResource_Deserialize;
+
+/**  A monitored API's latest reading while a load test runs. */
+export type LiveResource_Deserialize = {
+	name: string,
+	/**
+	 *  Seconds since the load started, of the latest successful read. None
+	 *  until one succeeds.
+	 */
+	t?: number | null,
+	/**  100 is one full core. */
+	cpuPercent?: number | null,
+	memoryBytes?: number | null,
+	/**  Why the latest read failed. */
+	error?: string | null,
+	cpuCores?: number | null,
+	memoryKind?: string | null,
+	/**
+	 *  The latest health status, like `UP`, `DOWN` or `UNREACHABLE`. None
+	 *  without a health check.
+	 */
+	health?: string | null,
+	/**  What is not up, or why it did not answer. */
+	healthDetail?: string | null,
+};
+
+/**  A monitored API's latest reading while a load test runs. */
+export type LiveResource_Serialize = {
+	name: string,
+	/**
+	 *  Seconds since the load started, of the latest successful read. None
+	 *  until one succeeds.
+	 */
+	t: number | null,
+	/**  100 is one full core. */
+	cpuPercent: number | null,
+	memoryBytes: number | null,
+	/**  Why the latest read failed. */
+	error: string | null,
+	cpuCores: number | null,
+	memoryKind: string | null,
+	/**
+	 *  The latest health status, like `UP`, `DOWN` or `UNREACHABLE`. None
+	 *  without a health check.
+	 */
+	health: string | null,
+	/**  What is not up, or why it did not answer. */
+	healthDetail: string | null,
+};
+
 export type LoadDiff = LoadDiff_Serialize | LoadDiff_Deserialize;
 
 export type LoadDiff_Deserialize = {
@@ -668,13 +756,30 @@ export type LoadProfile_Serialize = ({ constant_rate: {
 } }) & { constant_rate?: never; ramping?: never };
 
 /**  Sent once a second while a load test runs. */
-export type LoadProgress = {
+export type LoadProgress = LoadProgress_Serialize | LoadProgress_Deserialize;
+
+/**  Sent once a second while a load test runs. */
+export type LoadProgress_Deserialize = {
 	elapsedS: number,
 	totalS: number,
 	requests: number,
 	failed: number,
 	p95Ms: number | null,
 	active: number,
+	/**  The API's latest CPU and memory, one per `monitor` entry. */
+	resources: LiveResource_Deserialize[],
+};
+
+/**  Sent once a second while a load test runs. */
+export type LoadProgress_Serialize = {
+	elapsedS: number,
+	totalS: number,
+	requests: number,
+	failed: number,
+	p95Ms: number | null,
+	active: number,
+	/**  The API's latest CPU and memory, one per `monitor` entry. */
+	resources: LiveResource_Serialize[],
 };
 
 export type LoadReport = LoadReport_Serialize | LoadReport_Deserialize;
@@ -707,6 +812,11 @@ export type LoadReport_Deserialize = {
 	 *  cover only the time it ran, and the test does not pass.
 	 */
 	aborted?: boolean,
+	/**
+	 *  The API's own CPU and memory over the test, one series per
+	 *  `monitor` entry. Empty when the file has none.
+	 */
+	resources?: ResourceSeries_Deserialize[],
 };
 
 export type LoadReport_Serialize = {
@@ -737,6 +847,11 @@ export type LoadReport_Serialize = {
 	 *  cover only the time it ran, and the test does not pass.
 	 */
 	aborted?: boolean,
+	/**
+	 *  The API's own CPU and memory over the test, one series per
+	 *  `monitor` entry. Empty when the file has none.
+	 */
+	resources?: ResourceSeries_Serialize[],
 };
 
 /**  An environment read from a file of its own. */
@@ -764,6 +879,96 @@ export type Metric = {
 	/**  Moved the right way by more than 10%. */
 	better: boolean,
 };
+
+/**
+ *  A metrics endpoint the API serves, read throughout a load test so its
+ *  CPU and memory show beside the latency they cause.
+ */
+export type Monitor = Monitor_Serialize | Monitor_Deserialize;
+
+export type MonitorTarget = MonitorTarget_Serialize | MonitorTarget_Deserialize;
+
+export type MonitorTarget_Deserialize = {
+	/**  Can use `{{variables}}`, filled in from the flow and environment. */
+	url: string,
+	/**
+	 *  What to call it in results, like `orders-api`. The URL's host when
+	 *  left out.
+	 */
+	name?: string | null,
+	/**
+	 *  Sent with every read, for an endpoint behind a token. Values can
+	 *  use `{{variables}}`, so the token can stay a secret.
+	 */
+	headers?: Header[],
+	/**  Time between reads. 1s when left out. */
+	interval?: string | null,
+	/**
+	 *  A health check read at the same time, like `/actuator/health` or
+	 *  `/healthz`, to spot the API going down during the test. Actuator
+	 *  reads `/health` under its URL when this is left out. `{{variables}}`
+	 *  work, and the headers above are sent with it too.
+	 */
+	health?: string | null,
+};
+
+export type MonitorTarget_Serialize = {
+	/**  Can use `{{variables}}`, filled in from the flow and environment. */
+	url: string,
+	/**
+	 *  What to call it in results, like `orders-api`. The URL's host when
+	 *  left out.
+	 */
+	name?: string,
+	/**
+	 *  Sent with every read, for an endpoint behind a token. Values can
+	 *  use `{{variables}}`, so the token can stay a secret.
+	 */
+	headers?: Header[],
+	/**  Time between reads. 1s when left out. */
+	interval?: string,
+	/**
+	 *  A health check read at the same time, like `/actuator/health` or
+	 *  `/healthz`, to spot the API going down during the test. Actuator
+	 *  reads `/health` under its URL when this is left out. `{{variables}}`
+	 *  work, and the headers above are sent with it too.
+	 */
+	health?: string,
+};
+
+/**
+ *  A metrics endpoint the API serves, read throughout a load test so its
+ *  CPU and memory show beside the latency they cause.
+ */
+export type Monitor_Deserialize = 
+/**
+ *  A Prometheus text endpoint, like `/actuator/prometheus` (Spring
+ *  Boot with Micrometer), `/metrics` (prometheus-net, prom-client,
+ *  client_golang) or `/q/metrics` (Quarkus).
+ */
+({ prometheus: MonitorTarget_Deserialize }) & { actuator?: never } | 
+/**
+ *  Spring Boot Actuator's base URL, like `https://api/actuator`. Reads
+ *  `/prometheus` under it when exposed, else the JSON at `/metrics`.
+ */
+({ actuator: MonitorTarget_Deserialize }) & { prometheus?: never };
+
+/**
+ *  A metrics endpoint the API serves, read throughout a load test so its
+ *  CPU and memory show beside the latency they cause.
+ */
+export type Monitor_Serialize = 
+/**
+ *  A Prometheus text endpoint, like `/actuator/prometheus` (Spring
+ *  Boot with Micrometer), `/metrics` (prometheus-net, prom-client,
+ *  client_golang) or `/q/metrics` (Quarkus).
+ */
+({ prometheus: MonitorTarget_Serialize }) & { actuator?: never } | 
+/**
+ *  Spring Boot Actuator's base URL, like `https://api/actuator`. Reads
+ *  `/prometheus` under it when exposed, else the JSON at `/metrics`.
+ */
+({ actuator: MonitorTarget_Serialize }) & { prometheus?: never };
 
 /**  A body, as text. Binary bodies are described rather than kept. */
 export type Payload = {
@@ -807,6 +1012,126 @@ export type Request_Serialize = {
 	url: string,
 	headers?: Header[],
 	body?: Body_Serialize,
+};
+
+/**  The API's resource use at one moment. */
+export type ResourceSample = ResourceSample_Serialize | ResourceSample_Deserialize;
+
+/**  The API's resource use at one moment. */
+export type ResourceSample_Deserialize = {
+	/**  Seconds since the load started (0 for the read just before it). */
+	t: number | null,
+	/**
+	 *  CPU in use, where 100 is one full core (as `top` shows it). Empty on
+	 *  the first read when only a CPU-time counter is available.
+	 */
+	cpuPercent?: number | null,
+	/**  See [`ResourceSeries::memory_kind`]. */
+	memoryBytes?: number | null,
+	/**  JVM only: heap in use. */
+	heapBytes?: number | null,
+	/**  Garbage collection pauses, in milliseconds per second (JVM, Node). */
+	gcMsPerS?: number | null,
+};
+
+/**  The API's resource use at one moment. */
+export type ResourceSample_Serialize = {
+	/**  Seconds since the load started (0 for the read just before it). */
+	t: number | null,
+	/**
+	 *  CPU in use, where 100 is one full core (as `top` shows it). Empty on
+	 *  the first read when only a CPU-time counter is available.
+	 */
+	cpuPercent?: number | null,
+	/**  See [`ResourceSeries::memory_kind`]. */
+	memoryBytes?: number | null,
+	/**  JVM only: heap in use. */
+	heapBytes?: number | null,
+	/**  Garbage collection pauses, in milliseconds per second (JVM, Node). */
+	gcMsPerS?: number | null,
+};
+
+/**  What one endpoint reported over a load test. */
+export type ResourceSeries = ResourceSeries_Serialize | ResourceSeries_Deserialize;
+
+/**  What one endpoint reported over a load test. */
+export type ResourceSeries_Deserialize = {
+	/**  The monitor's `name`, else the URL's host. */
+	name: string,
+	/**  The URL read, without its query string or any password. */
+	url: string,
+	/**
+	 *  How the figures were read: `prometheus`, or `actuator` for
+	 *  Actuator's JSON `/metrics`.
+	 */
+	format: string,
+	/**  CPU cores the API's machine or container has, when it says. */
+	cpuCores?: number | null,
+	/**  JVM only: the most heap the API may use. */
+	heapMaxBytes?: number | null,
+	/**
+	 *  What `memoryBytes` measures: `resident` (the process's resident
+	 *  memory, RSS) or `jvm` (JVM heap and non-heap in use).
+	 */
+	memoryKind?: string | null,
+	/**  One per read, oldest first. The first is read before the load starts. */
+	samples: ResourceSample_Deserialize[],
+	/**  Reads that failed. */
+	failedReads: number,
+	/**  Why the latest failed read failed, like `404 Not Found`. */
+	error?: string | null,
+	/**
+	 *  The health check read beside the metrics, shown without its query
+	 *  string or password. None without one.
+	 */
+	healthUrl?: string | null,
+	/**  The API's health over the test: its first reading, then each change. */
+	health?: HealthChange_Deserialize[],
+	/**
+	 *  Why the health check could not be read at all (left alone after
+	 *  that), like `404 Not Found` when it is not exposed.
+	 */
+	healthError?: string | null,
+};
+
+/**  What one endpoint reported over a load test. */
+export type ResourceSeries_Serialize = {
+	/**  The monitor's `name`, else the URL's host. */
+	name: string,
+	/**  The URL read, without its query string or any password. */
+	url: string,
+	/**
+	 *  How the figures were read: `prometheus`, or `actuator` for
+	 *  Actuator's JSON `/metrics`.
+	 */
+	format: string,
+	/**  CPU cores the API's machine or container has, when it says. */
+	cpuCores?: number | null,
+	/**  JVM only: the most heap the API may use. */
+	heapMaxBytes?: number | null,
+	/**
+	 *  What `memoryBytes` measures: `resident` (the process's resident
+	 *  memory, RSS) or `jvm` (JVM heap and non-heap in use).
+	 */
+	memoryKind?: string,
+	/**  One per read, oldest first. The first is read before the load starts. */
+	samples: ResourceSample_Serialize[],
+	/**  Reads that failed. */
+	failedReads: number,
+	/**  Why the latest failed read failed, like `404 Not Found`. */
+	error?: string,
+	/**
+	 *  The health check read beside the metrics, shown without its query
+	 *  string or password. None without one.
+	 */
+	healthUrl?: string,
+	/**  The API's health over the test: its first reading, then each change. */
+	health?: HealthChange_Serialize[],
+	/**
+	 *  Why the health check could not be read at all (left alone after
+	 *  that), like `404 Not Found` when it is not exposed.
+	 */
+	healthError?: string,
 };
 
 export type ResponseRecord = ResponseRecord_Serialize | ResponseRecord_Deserialize;
@@ -1290,6 +1615,11 @@ export type TestFile_Deserialize = {
 	/**  Without a load profile the flow runs once, as a functional test. */
 	load?: LoadProfile_Deserialize | null,
 	thresholds?: string[],
+	/**
+	 *  Metrics endpoints the API serves, read during a load test to show
+	 *  its CPU and memory beside the latency.
+	 */
+	monitor?: Monitor_Deserialize[],
 };
 
 export type TestFile_Serialize = {
@@ -1298,6 +1628,11 @@ export type TestFile_Serialize = {
 	/**  Without a load profile the flow runs once, as a functional test. */
 	load?: LoadProfile_Serialize,
 	thresholds?: string[],
+	/**
+	 *  Metrics endpoints the API serves, read during a load test to show
+	 *  its CPU and memory beside the latency.
+	 */
+	monitor?: Monitor_Serialize[],
 };
 
 export type ThresholdResult = {

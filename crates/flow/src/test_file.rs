@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Flow, LoadProfile, Threshold};
+use crate::{Flow, LoadProfile, Monitor, Threshold};
 
 /// The only format version so far. A file with a newer one is refused rather
 /// than half-read.
@@ -20,6 +20,10 @@ pub struct TestFile {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "specta", specta(type = Vec<String>))]
     pub thresholds: Vec<Threshold>,
+    /// Metrics endpoints the API serves, read during a load test to show
+    /// its CPU and memory beside the latency.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub monitor: Vec<Monitor>,
 }
 
 #[derive(Debug, thiserror::Error)]
