@@ -110,6 +110,16 @@ export const commands = {
 	/**  Makes a workspace the one to reopen on launch. */
 	selectWorkspace: (id: string) => typedError<null, string>(__TAURI_INVOKE("select_workspace", { id })),
 	deleteWorkspace: (id: string) => typedError<null, string>(__TAURI_INVOKE("delete_workspace", { id })),
+	/**  The providers installed on this machine. */
+	aiProviders: (paths: AiPath[]) => __TAURI_INVOKE<Found_Serialize[]>("ai_providers", { paths }),
+	/**
+	 *  Builds the prompt for `question` with `secrets` and anything that looks
+	 *  like a credential hidden, then asks the chosen provider unless `send` is
+	 *  false (to show the user what would be sent).
+	 */
+	aiExplain: (question: AiQuestion_Deserialize, secrets: string[], choice: AiChoice_Deserialize, send: boolean) => typedError<AiReply_Serialize, string>(__TAURI_INVOKE("ai_explain", { question, secrets, choice, send })),
+	/**  Stops every AI call in flight. */
+	aiCancel: () => __TAURI_INVOKE<void>("ai_cancel"),
 };
 
 /** Events */
@@ -120,6 +130,70 @@ export const events = {
 };
 
 /* Types */
+/**  Which provider to ask, and how. */
+export type AiChoice = AiChoice_Serialize | AiChoice_Deserialize;
+
+/**  Which provider to ask, and how. */
+export type AiChoice_Deserialize = {
+	/**  `None` asks the first provider found. */
+	provider?: Provider | null,
+	paths?: AiPath[],
+	model?: string | null,
+};
+
+/**  Which provider to ask, and how. */
+export type AiChoice_Serialize = {
+	/**  `None` asks the first provider found. */
+	provider: Provider | null,
+	paths: AiPath[],
+	model: string | null,
+};
+
+/**  A program path the user set by hand, for a provider not on `PATH`. */
+export type AiPath = {
+	provider: Provider,
+	path: string,
+};
+
+/**  What to explain. */
+export type AiQuestion = AiQuestion_Serialize | AiQuestion_Deserialize;
+
+/**  What to explain. */
+export type AiQuestion_Deserialize = 
+/**  One step of a run or a load test sample. */
+{ kind: "step"; step: StepResult_Deserialize; 
+/**  The test file the step came from. */
+file?: string | null; diagnosis?: Diagnosis_Deserialize | null } | { kind: "load"; report: LoadReport_Deserialize; file?: string | null };
+
+/**  What to explain. */
+export type AiQuestion_Serialize = 
+/**  One step of a run or a load test sample. */
+{ kind: "step"; step: StepResult_Serialize; 
+/**  The test file the step came from. */
+file: string | null; diagnosis: Diagnosis_Serialize | null } | { kind: "load"; report: LoadReport_Serialize; file: string | null };
+
+/**  The prompt as sent, with secrets hidden, and the answer when one was asked for. */
+export type AiReply = AiReply_Serialize | AiReply_Deserialize;
+
+/**  The prompt as sent, with secrets hidden, and the answer when one was asked for. */
+export type AiReply_Deserialize = {
+	prompt: string,
+	answer?: Answer | null,
+};
+
+/**  The prompt as sent, with secrets hidden, and the answer when one was asked for. */
+export type AiReply_Serialize = {
+	prompt: string,
+	answer: Answer | null,
+};
+
+/**  What came back. */
+export type Answer = {
+	provider: Provider,
+	text: string,
+	durationMs: number | null,
+};
+
 export type AppInfo = {
 	version: string,
 };
@@ -457,6 +531,33 @@ export type Flow_Serialize = {
 	trace?: TraceMode,
 };
 
+/**  A provider found on this machine. */
+export type Found = Found_Serialize | Found_Deserialize;
+
+/**  A provider found on this machine. */
+export type Found_Deserialize = {
+	provider: Provider,
+	/**  The program that runs, as found or as the user set it. */
+	path: string,
+	/**
+	 *  The first line `--version` printed, like `2.1.0 (Claude Code)`.
+	 *  `None` when it did not answer.
+	 */
+	version?: string | null,
+};
+
+/**  A provider found on this machine. */
+export type Found_Serialize = {
+	provider: Provider,
+	/**  The program that runs, as found or as the user set it. */
+	path: string,
+	/**
+	 *  The first line `--version` printed, like `2.1.0 (Claude Code)`.
+	 *  `None` when it did not answer.
+	 */
+	version: string | null,
+};
+
 /**
  *  A GraphQL request. Unless `allow_errors` is set, a response with an
  *  `errors` array fails the step.
@@ -758,6 +859,13 @@ export type Payload = {
 	/**  Not UTF-8; `text` only describes it. */
 	binary: boolean,
 };
+
+/**  An AI command line Stormix can use. */
+export type Provider = 
+/**  Anthropic's Claude Code, `claude`. */
+"claude" | 
+/**  GitHub Copilot CLI, `copilot`. */
+"copilot";
 
 /**  Which proxy requests go through. */
 export type ProxyChoice = 

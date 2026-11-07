@@ -56,6 +56,7 @@ import { LoadSetup, type LoadSetupChoice } from "./views/LoadSetup";
 import { RunLive, RunResult, stepPassed } from "./views/RunResult";
 import type { Diagnose } from "./views/StepDetails";
 import { useProxy, useRestoreProxy } from "./lib/proxy";
+import { AiContext, isSecretName } from "./lib/ai";
 import { RUNS_KEY, RunsView } from "./views/Runs";
 import { SplitView, usePanel } from "./views/SidePanel";
 import { applyOverrides, EnvEditor, type EnvOverrides } from "./views/EnvEditor";
@@ -137,6 +138,12 @@ export function App() {
       persist({ ...latest.current, view: next });
     }
   };
+  // The Explain panels link to the AI settings.
+  useEffect(() => {
+    const open = () => setView("settings");
+    window.addEventListener("stormix-open-settings", open);
+    return () => window.removeEventListener("stormix-open-settings", open);
+  }, []);
   const onSnapshot = (snap: Snapshot) => {
     const base = latest.current;
     if (!base) return;
@@ -376,6 +383,16 @@ function TestFileView({
     }
     return vars;
   }, [env, envName, overrides, secretValues]);
+  // Values the AI must not see: the environment's secrets, and any
+  // variable named like a credential.
+  const aiSecrets = useMemo(() => {
+    const values = new Set<string>();
+    for (const name of env?.secrets ?? []) if (secretValues[name]) values.add(secretValues[name]);
+    for (const [name, value] of Object.entries(envVars)) if (isSecretName(name) && value) values.add(value);
+    for (const [name, value] of Object.entries(validation.data?.test?.flow.variables ?? {}))
+      if (isSecretName(name) && typeof value === "string" && value) values.add(value);
+    return [...values];
+  }, [env, secretValues, envVars, validation.data]);
   const sessionOnly = useMemo(() => new Set(Object.keys(overrides[envName] ?? {})), [overrides, envName]);
   // The validator does not know the chosen environment; drop its warnings
   // about variables that environment provides.
@@ -1084,9 +1101,17 @@ function TestFileView({
         </div>
       )}
       {run.isPending && <RunLive name={result?.test?.flow.name ?? "the flow"} progress={runStep} />}
-      {run.data && <RunResult result={run.data} diagnose={diagnoseIn(run.variables)} />}
+      {run.data && (
+        <AiContext.Provider value={{ file: run.variables ?? null, secrets: aiSecrets }}>
+          <RunResult result={run.data} diagnose={diagnoseIn(run.variables)} />
+        </AiContext.Provider>
+      )}
       {load.isPending && <LoadLive points={points} />}
-      {load.data && <LoadResult report={load.data} diagnose={diagnoseIn(load.variables)} />}
+      {load.data && (
+        <AiContext.Provider value={{ file: load.variables ?? null, secrets: aiSecrets }}>
+          <LoadResult report={load.data} diagnose={diagnoseIn(load.variables)} />
+        </AiContext.Provider>
+      )}
       {!hasRun && (
         <p className="rounded-lg border border-dashed border-line px-4 py-6 text-center text-xs text-muted">
           Nothing run since the last change. <b className="font-semibold text-ink">Run once</b> sends every step one

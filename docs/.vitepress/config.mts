@@ -117,6 +117,7 @@ export default defineConfig({
           { text: 'Response cache', link: '/features/cache' },
           { text: 'Tracing in Dynatrace and APM tools', link: '/features/tracing' },
           { text: 'Proxies', link: '/features/proxies' },
+          { text: 'Explain results with AI', link: '/features/ai' },
           { text: 'Import and export collections', link: '/features/import-export' },
         ],
       },

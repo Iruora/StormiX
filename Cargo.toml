@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "apps/desktop/src-tauri",
+    "crates/ai",
     "crates/cli",
     "crates/collections",
     "crates/engine",
@@ -19,6 +20,7 @@ repository = "https://github.com/Iruora/StormiX"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+stormix-ai = { path = "crates/ai" }
 stormix-collections = { path = "crates/collections" }
 stormix-engine = { path = "crates/engine" }
 stormix-flow = { path = "crates/flow" }

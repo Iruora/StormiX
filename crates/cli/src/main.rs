@@ -9,6 +9,7 @@ use stormix_flow::Severity;
 use stormix_flow::TestFile;
 
 mod diagnose;
+mod explain;
 mod load;
 mod run;
 mod source;
@@ -46,6 +47,10 @@ enum Command {
     /// Send one step's request and check each stage on the way: proxy,
     /// name lookup, connection, TLS and the response, to tell where it fails.
     Diagnose(diagnose::DiagnoseArgs),
+    /// Ask the AI command line on this machine (Claude Code or GitHub
+    /// Copilot CLI) what a saved run or load test result means. Secrets
+    /// are hidden first; Stormix holds no API key.
+    Explain(explain::ExplainArgs),
     /// Convert a Postman collection (.json), Bruno collection (folder) or
     /// OpenCollection (folder or bundled .yml) into a Stormix test file.
     Import {
@@ -98,6 +103,7 @@ fn main() -> ExitCode {
         Command::Run(args) => run::run(args),
         Command::Load(args) => load::load(args),
         Command::Diagnose(args) => diagnose::diagnose(args),
+        Command::Explain(args) => explain::explain(args),
         Command::Import {
             collection,
             output,

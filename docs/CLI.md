@@ -8,6 +8,7 @@ stormix validate FILE               # check a file without sending anything
 stormix run FILE                    # run the flow once, as a functional test
 stormix load FILE                   # run it under load and check thresholds
 stormix diagnose FILE --step NAME   # find where one step's request fails
+stormix explain RESULT.json         # ask Claude Code or Copilot CLI what a result means
 stormix import COLLECTION -o FILE   # turn a Postman or Bruno collection into a test file
 stormix export FILE -o DIR          # write a test file as an OpenCollection for Bruno (-o x.json: Postman)
 ```
@@ -136,6 +137,28 @@ The 403 Forbidden seems to come from Zscaler, a corporate proxy, not from the AP
 ```
 
 In the desktop app, **Diagnose** in a step's Details does the same, and the **Connection** tab shows the route every request took.
+
+## `explain`
+
+`stormix explain RESULT.json` asks the AI command line on this machine, Claude Code (`claude`) or GitHub Copilot CLI (`copilot`), what a result saved with `run --format json` or `load --format json` means. Stormix holds no API key: the program uses its own sign-in. Secrets are hidden first, as the docs site's "Explain results with AI" page describes.
+
+| Option | |
+|---|---|
+| `--file FILE` | The test file the result came from, so the AI sees how the steps are written. |
+| `--step NAME` | For a run, the step to explain. Defaults to the first that failed. |
+| `--provider claude\|copilot` | Defaults to the first one found. |
+| `--provider-path PATH` | The program, when it is not on `PATH`. |
+| `--model NAME` | The model, as the provider names it. |
+| `--secret VALUE` | A value to hide; repeat for several. Credentials in headers and token-like strings are always hidden. |
+| `--show-prompt` | Print what would be sent and stop. |
+| `--timeout SECONDS` | Default 120. |
+
+```sh
+stormix load api.stormix.yaml --format json > load.json
+stormix explain load.json --file api.stormix.yaml --provider copilot
+```
+
+It exits with 0 when an answer came back, 2 otherwise.
 
 ## `validate`
 

@@ -1,3 +1,4 @@
+mod ai;
 mod commands;
 mod workspaces;
 
@@ -41,6 +42,9 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::save_workspace,
             commands::select_workspace,
             commands::delete_workspace,
+            ai::ai_providers,
+            ai::ai_explain,
+            ai::ai_cancel,
         ])
         .events(collect_events![
             commands::LoadProgress,
@@ -80,6 +84,7 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
+            app.manage(ai::AiCalls::default());
             app.manage(commands::SharedRunner::new(Runner::new(
                 RunOptions::default(),
             )?));

@@ -1,10 +1,12 @@
-import { ArrowDown, ArrowUp, ChevronsUpDown, CircleCheck, CircleX, LoaderCircle, Search, Waypoints } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronsUpDown, CircleCheck, CircleX, LoaderCircle, Search, Sparkles, Waypoints } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { LoadProgress, LoadReport, Second, SlowRequest, StepResult, StepSummary, ThresholdResult } from "../bindings";
 import { ProgressBar } from "./Busy";
 import { DetailsButton, stepPassed } from "./RunResult";
 import { CopyButton, StepDetails, type Diagnose } from "./StepDetails";
+import { ExplainPanel } from "./Explain";
+import { useAiContext, useAiProviders } from "../lib/ai";
 
 /** Live figures while a load test runs: progress, the current second and a throughput chart. */
 export function LoadLive({ points }: { points: LoadProgress[] }) {
@@ -41,6 +43,9 @@ export function LoadResult({ report, diagnose }: { report: LoadReport; diagnose?
   const l = s.latency;
   const samples = report.samples ?? [];
   const [open, setOpen] = useState<StepResult | null>(null);
+  const ai = useAiProviders();
+  const { file } = useAiContext();
+  const [explaining, setExplaining] = useState(false);
   // Reasons are `step: check`, `step: status N`, or a connection error.
   const sampleFor = (reason: string) =>
     samples.find((x) => reason.startsWith(`${x.name}: `) || (x.error != null && reason === x.error));
@@ -54,7 +59,28 @@ export function LoadResult({ report, diagnose }: { report: LoadReport; diagnose?
         <span className="ml-auto text-xs text-muted">
           {s.iterations} iterations · {formatMs(s.durationMs ?? 0)}
         </span>
+        {ai.settings.enabled && (
+          <button
+            type="button"
+            onClick={() => setExplaining((x) => !x)}
+            aria-expanded={explaining}
+            className={`flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium ${
+              explaining ? "border-accent bg-accent-soft text-accent" : "border-line bg-surface text-muted hover:text-ink"
+            }`}
+          >
+            <Sparkles size="0.75rem" /> Explain
+          </button>
+        )}
       </div>
+      {explaining && (
+        <div className="border-b border-line px-4 py-3">
+          <ExplainPanel
+            what="what this load test shows"
+            autoStart
+            question={() => ({ kind: "load", report, file })}
+          />
+        </div>
+      )}
 
       {(report.setup ?? []).length > 0 && (
         <div className="border-b border-line px-4 py-2 text-xs">
