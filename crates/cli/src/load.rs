@@ -170,7 +170,10 @@ struct Overrides {
 }
 
 impl Overrides {
-    /// Command-line load options win over the file's `load` section.
+    /// Applies command-line load overrides and appends thresholds and monitors.
+    /// Returns an error if `--vus` or `--rate` lacks a duration, a duration alone
+    /// would change a ramping profile, or no load profile remains. Thresholds
+    /// and monitors are appended even when a later load override fails.
     fn apply(self, test: &mut TestFile) -> Result<(), String> {
         test.thresholds.extend(self.thresholds);
         test.monitor
@@ -597,7 +600,8 @@ fn render_health(out: &mut String, series: &stormix_engine::ResourceSeries) {
     }
 }
 
-/// A memory size in MB, or GB from 1 GB up.
+/// Formats bytes using powers of 1024, labeled MB or GB from 1024 MB up.
+/// MB is rounded to a whole number; GB is shown with two decimal places.
 fn bytes(value: f64) -> String {
     const MB: f64 = 1024.0 * 1024.0;
     if value >= 1024.0 * MB {

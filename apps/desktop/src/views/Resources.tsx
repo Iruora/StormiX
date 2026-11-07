@@ -44,7 +44,12 @@ export function reportResources(report: LoadReport): ResourceView[] {
   return (report.resources ?? []).map((r) => ({ ...r }));
 }
 
-/** Series built from the live events: each carries every API's latest read. */
+/**
+ * Builds series by monitor index from events in time order, using the latest
+ * event's monitor list and metadata. Repeated sample timestamps are omitted;
+ * health changes use the event's elapsed seconds. Returns no series without
+ * monitors in the latest event.
+ */
 export function liveResources(points: LoadProgress[]): ResourceView[] {
   const last = points[points.length - 1];
   return (last?.resources ?? []).map((r, i) => {
@@ -285,7 +290,10 @@ function pct(v: number | undefined): string {
   return v == null ? "–" : `${Math.round(v)}%`;
 }
 
-/** A memory size in MB, or GB from 1 GB up. */
+/**
+ * Formats bytes using powers of 1024, labeled MB or GB from 1024 MB up.
+ * MB is rounded to a whole number, GB has two decimals, and missing values show a dash.
+ */
 export function bytes(v: number | null | undefined): string {
   if (v == null) return "–";
   const mb = v / 1024 / 1024;

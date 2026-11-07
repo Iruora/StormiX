@@ -428,7 +428,9 @@ fn health_html(out: &mut String, series: &ResourceSeries) {
     out.push_str("</ul>");
 }
 
-/// CPU and memory as two lines over the test's own time axis.
+/// Returns CPU and memory lines, each scaled to its own peak, with unhealthy
+/// periods shaded. `duration_s` is the test duration in seconds; the time axis
+/// extends to at least the last sample and one second.
 fn resources_svg(series: &ResourceSeries, duration_s: f64) -> String {
     const W: f64 = 800.0;
     const H: f64 = 160.0;
@@ -566,6 +568,8 @@ fn ms(v: f64) -> String {
     }
 }
 
+/// Formats bytes in B, KB, MB, or GB using powers of 1024.
+/// Uses whole bytes, one decimal place for KB/MB, and two for GB.
 fn bytes(b: f64) -> String {
     if b >= 1_073_741_824.0 {
         format!("{:.2} GB", b / 1_073_741_824.0)

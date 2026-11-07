@@ -63,7 +63,7 @@ impl Monitor {
 }
 
 impl MonitorTarget {
-    /// The time between reads, at least 250 ms.
+    /// The time between reads: 1 second by default, clamped to at least 250 ms.
     pub fn every(&self) -> std::time::Duration {
         let millis = self.interval.map_or(1000, |d| d.as_millis()).max(250);
         std::time::Duration::from_millis(millis)

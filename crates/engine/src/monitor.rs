@@ -128,7 +128,10 @@ pub struct ResourceStats {
 }
 
 impl ResourceSeries {
-    /// Each time the API was unhealthy, in order.
+    /// Each time the API was unhealthy, in recorded order, with times in seconds.
+    /// Consecutive unhealthy states form one period with the first state's
+    /// status and detail. `UP` or `UNKNOWN` ends it; `to` is `None` if neither
+    /// follows.
     pub fn unhealthy_periods(&self) -> Vec<UnhealthyPeriod> {
         let mut periods: Vec<UnhealthyPeriod> = Vec::new();
         for (i, change) in self.health.iter().enumerate() {
@@ -153,7 +156,10 @@ impl ResourceSeries {
         periods
     }
 
-    /// Averages and peaks over the whole test.
+    /// Averages and peaks of available readings, including the baseline.
+    /// Averages give each present value equal weight, regardless of sample
+    /// spacing. Missing values are skipped; fields with no readings are `None`.
+    /// Memory start and end are the first and last available memory readings.
     pub fn stats(&self) -> ResourceStats {
         let values = |f: fn(&ResourceSample) -> Option<f64>| -> Vec<f64> {
             self.samples.iter().filter_map(f).collect()
@@ -552,7 +558,9 @@ fn not_up(json: &serde_json::Value, prefix: &str, out: &mut Vec<String>) {
 
 impl Reader {
     /// One reading. For Actuator, the first success decides between its
-    /// `/prometheus` and its JSON `/metrics`.
+    /// `/prometheus` and its JSON `/metrics`; later reads keep that mode.
+    /// Returns request or metric errors as strings. If both Actuator formats
+    /// fail during discovery, the error includes both failures.
     async fn read(&self, mode: &mut Option<Mode>) -> Result<Figures, String> {
         if !self.actuator {
             *mode = Some(Mode::Prometheus);
@@ -582,7 +590,10 @@ impl Reader {
         }
     }
 
-    /// One read of the health check, when there is one.
+    /// Reads the configured health check, or returns `None` without one.
+    /// Request failures become `Unreachable`; 401, 403, and 404 become `Refused`.
+    /// A body read failure is treated as an empty body, so the HTTP status
+    /// determines health in that case.
     async fn health(&self) -> Option<HealthOutcome> {
         let url = self.health.clone()?;
         let mut request = self
@@ -614,7 +625,9 @@ impl Reader {
         })
     }
 
-    /// One GET with the monitor's headers; errors never carry the URL.
+    /// One GET with the monitor's headers and timeout.
+    /// Returns an error string for request failures, non-success HTTP statuses,
+    /// or body read failures, removing the request URL from reqwest errors.
     async fn get(&self, url: reqwest::Url, accept: &str) -> Result<String, String> {
         let mut request = self
             .client
@@ -638,7 +651,9 @@ impl Reader {
             .map_err(|e| describe(&e.without_url()))
     }
 
-    /// One read of a Prometheus text endpoint.
+    /// Reads a Prometheus text endpoint, skipping lines that cannot be parsed.
+    /// Propagates request errors and returns an error if no supported CPU or
+    /// memory metric is found.
     async fn prometheus(&self, url: reqwest::Url) -> Result<Figures, String> {
         let text = self
             .get(url, "text/plain;version=0.0.4;q=1,*/*;q=0.1")
@@ -651,7 +666,10 @@ impl Reader {
         }
     }
 
-    /// Actuator's `/metrics/{name}` JSON, one call per metric, together.
+    /// Reads Actuator's `/metrics/{name}` JSON endpoints concurrently.
+    /// A request or measurement error for `process.cpu.usage` fails the read;
+    /// errors for other metrics leave their values absent. Without non-heap
+    /// memory, JVM memory falls back to heap alone.
     async fn actuator_json(&self, base: &reqwest::Url) -> Result<Figures, String> {
         let get = |path: &'static str| {
             let url = under(base, &format!("metrics/{path}"));
@@ -708,6 +726,8 @@ fn describe(err: &reqwest::Error) -> String {
 }
 
 /// A measurement from Actuator's `{"measurements":[{"statistic":..,"value":..}]}`.
+/// Selects the requested statistic, falling back to the first entry if absent.
+/// Returns an error for invalid JSON or if the selected entry has no numeric value.
 fn actuator_value(text: &str, statistic: &str) -> Result<f64, String> {
     let json: serde_json::Value =
         serde_json::from_str(text).map_err(|_| "the response is not JSON".to_owned())?;
@@ -799,8 +819,12 @@ impl Figures {
         f
     }
 
-    /// The sample for this read, `since` being the time since the previous
-    /// read and that read's counters.
+    /// Builds a sample at `t` seconds since load start. `since` holds elapsed
+    /// seconds since the previous successful read and that read's counters.
+    /// Counter rates are absent without a prior value, with nonpositive elapsed
+    /// time, or after a counter decreases. A CPU counter takes precedence over
+    /// the usage gauge, even when its rate is absent. CPU uses 100% per core;
+    /// GC uses milliseconds per second. Memory prefers RSS over JVM memory.
     fn to_read(&self, t: f64, since: Option<(f64, &Counters)>, mode: Mode) -> Read {
         let rate = |now: Option<f64>, before: fn(&Counters) -> Option<f64>| {
             let (secs, counters) = since?;
