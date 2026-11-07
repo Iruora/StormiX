@@ -61,6 +61,11 @@ impl StopSignal {
         self.0.send_replace(true);
     }
 
+    /// Whether `other` is a clone of this signal, not just another one.
+    pub fn same_as(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
     pub fn is_stopped(&self) -> bool {
         *self.0.borrow()
     }

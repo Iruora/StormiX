@@ -233,8 +233,16 @@ pub struct LoadProgress {
 pub struct RunningLoad(Mutex<Option<StopSignal>>);
 
 impl RunningLoad {
-    fn set(&self, stop: Option<StopSignal>) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = stop;
+    fn start(&self, stop: StopSignal) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(stop);
+    }
+
+    /// Forgets `stop`, unless a newer test has taken its place.
+    fn finish(&self, stop: &StopSignal) {
+        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.as_ref().is_some_and(|s| s.same_as(stop)) {
+            *slot = None;
+        }
     }
 }
 
@@ -274,7 +282,7 @@ pub async fn run_load_test(
     let mut vars = Variables::new();
     vars.extend(variables);
     let options = LoadOptions::default();
-    running.set(Some(options.stop.clone()));
+    running.start(options.stop.clone());
     let report = run_load(
         &runner.get(),
         &test.flow,
@@ -295,7 +303,7 @@ pub async fn run_load_test(
         },
     )
     .await;
-    running.set(None);
+    running.finish(&options.stop);
     save(&store, RunData::Load(report.clone()), source.as_deref());
     Ok(report)
 }

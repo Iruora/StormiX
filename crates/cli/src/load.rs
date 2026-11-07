@@ -5,6 +5,8 @@ use std::fmt::Write as _;
 use std::io::{IsTerminal, Write as _};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use clap::Args;
 use stormix_engine::{junit_load_report, run_load, LoadOptions, LoadReport, Progress};
@@ -88,11 +90,16 @@ pub fn load(args: LoadArgs) -> Result<ExitCode, String> {
         eprintln!("{} · {}", test.flow.name, describe(&profile));
     }
     // The first Ctrl+C stops the test and still reports what it measured;
-    // a second one quits at once.
+    // a second one, or any once the test is over, quits at once.
     let stop = options.stop.clone();
+    let over = Arc::new(AtomicBool::new(false));
+    let over_seen = over.clone();
     runtime.spawn(async move {
         if tokio::signal::ctrl_c().await.is_err() {
             return;
+        }
+        if over_seen.load(Ordering::Relaxed) {
+            std::process::exit(130);
         }
         eprintln!("\nStopping: letting running iterations finish (Ctrl+C again to quit now)");
         stop.stop();
@@ -114,6 +121,7 @@ pub fn load(args: LoadArgs) -> Result<ExitCode, String> {
             }
         },
     ));
+    over.store(true, Ordering::Relaxed);
     progress.finish();
 
     if let Some(path) = &args.out {

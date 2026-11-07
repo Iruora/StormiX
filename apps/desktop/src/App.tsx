@@ -451,7 +451,10 @@ function TestFileView({
   const stopLoad = () => {
     if (!load.isPending || stopping) return;
     setStopping(true);
-    void commands.stopLoadTest();
+    // False when the backend has not started the test yet: let Stop be pressed again.
+    void commands.stopLoadTest().then((stopped) => {
+      if (!stopped) setStopping(false);
+    }, () => setStopping(false));
   };
   // A run that starts shows its progress.
   useEffect(() => {
