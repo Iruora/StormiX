@@ -60,20 +60,6 @@ impl Monitor {
     }
 }
 
-impl Monitor {
-    /// The health check to read, before `{{variables}}` are filled in.
-    pub fn health_url(&self) -> Option<String> {
-        match self {
-            Self::Prometheus(t) => t.health.clone(),
-            Self::Actuator(t) => Some(
-                t.health
-                    .clone()
-                    .unwrap_or_else(|| format!("{}/health", t.url.trim().trim_end_matches('/'))),
-            ),
-        }
-    }
-}
-
 impl MonitorTarget {
     /// The time between reads, at least 250 ms.
     pub fn every(&self) -> std::time::Duration {

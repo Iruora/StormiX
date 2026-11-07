@@ -286,14 +286,22 @@ pub(crate) fn start(
                 health_error: None,
                 failing: false,
             };
-            let health = monitor.health_url().map(|h| fill(&h));
+            let health = target.health.as_deref().map(fill);
             if let Some(name) = missing.first() {
                 series.error = Some(format!("`{{{{{name}}}}}` has no value"));
                 series.failing = true;
             } else {
                 match parsed {
                     Ok(url) => {
+                        // Actuator's own check sits under its URL, beside
+                        // `/metrics`, keeping any query (like a token).
                         let health = match health.map(|h| reqwest::Url::parse(h.trim())) {
+                            None if matches!(monitor, Monitor::Actuator(_)) => {
+                                Some(Ok(under(&url, "health")))
+                            }
+                            other => other,
+                        };
+                        let health = match health {
                             Some(Ok(h)) => {
                                 series.health_url = Some(shown(&h));
                                 Some(h)
@@ -332,6 +340,20 @@ fn timeout(target: &MonitorTarget) -> Duration {
         .every()
         .max(Duration::from_secs(2))
         .min(Duration::from_secs(10))
+}
+
+/// `path` (which may carry `?name=value` pairs) under `base`'s path. The
+/// base's own query, like `?token=…`, is kept and the pairs are added to it.
+fn under(base: &reqwest::Url, path: &str) -> reqwest::Url {
+    let (path, query) = path.split_once('?').unwrap_or((path, ""));
+    let mut url = base.clone();
+    let joined = format!("{}/{path}", base.path().trim_end_matches('/'));
+    url.set_path(&joined);
+    for pair in query.split('&').filter(|p| !p.is_empty()) {
+        let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+        url.query_pairs_mut().append_pair(name, value);
+    }
+    url
 }
 
 /// The URL as reports show it: no password, no query (it may hold a token).
@@ -510,17 +532,17 @@ impl Reader {
             *mode = Some(Mode::Prometheus);
             return self.prometheus(self.url.clone()).await;
         }
-        let base = self.url.as_str().trim_end_matches('/').to_owned();
-        let prometheus = format!("{base}/prometheus");
+        let base = &self.url;
+        let prometheus = under(base, "prometheus");
         match mode {
-            Some(Mode::Prometheus) => self.prometheus(parse(&prometheus)?).await,
-            Some(Mode::ActuatorJson) => self.actuator_json(&base).await,
-            None => match self.prometheus(parse(&prometheus)?).await {
+            Some(Mode::Prometheus) => self.prometheus(prometheus).await,
+            Some(Mode::ActuatorJson) => self.actuator_json(base).await,
+            None => match self.prometheus(prometheus).await {
                 Ok(figures) if figures.found_any() => {
                     *mode = Some(Mode::Prometheus);
                     Ok(figures)
                 }
-                first => match self.actuator_json(&base).await {
+                first => match self.actuator_json(base).await {
                     Ok(figures) => {
                         *mode = Some(Mode::ActuatorJson);
                         Ok(figures)
@@ -602,16 +624,16 @@ impl Reader {
     }
 
     /// Actuator's `/metrics/{name}` JSON, one call per metric, together.
-    async fn actuator_json(&self, base: &str) -> Result<Figures, String> {
+    async fn actuator_json(&self, base: &reqwest::Url) -> Result<Figures, String> {
         let get = |path: &'static str| {
-            let url = format!("{base}/metrics/{path}");
+            let url = under(base, &format!("metrics/{path}"));
             let statistic = if path.starts_with("jvm.gc") {
                 "TOTAL_TIME"
             } else {
                 "VALUE"
             };
             async move {
-                let text = self.get(parse(&url)?, "application/json").await?;
+                let text = self.get(url, "application/json").await?;
                 actuator_value(&text, statistic)
             }
         };
@@ -639,10 +661,6 @@ impl Reader {
             ..Figures::default()
         })
     }
-}
-
-fn parse(url: &str) -> Result<reqwest::Url, String> {
-    reqwest::Url::parse(url).map_err(|e| format!("the URL is not valid: {e}"))
 }
 
 fn describe(err: &reqwest::Error) -> String {
@@ -1051,6 +1069,24 @@ http_server_requests_seconds_count{method="GET",uri="/a \"b\"",} 3.0
         assert_eq!((periods[0].from, periods[0].to), (3.0, Some(6.0)));
         assert_eq!(periods[0].status, "DOWN");
         assert_eq!((periods[1].from, periods[1].to), (9.0, None));
+    }
+
+    #[test]
+    fn paths_go_under_the_url_and_keep_its_query() {
+        let base = reqwest::Url::parse("https://api.test/actuator/?token=x").unwrap();
+        assert_eq!(
+            under(&base, "health").as_str(),
+            "https://api.test/actuator/health?token=x"
+        );
+        assert_eq!(
+            under(&base, "metrics/jvm.memory.used?tag=area:heap").as_str(),
+            "https://api.test/actuator/metrics/jvm.memory.used?token=x&tag=area%3Aheap"
+        );
+        let bare = reqwest::Url::parse("http://api.test/actuator").unwrap();
+        assert_eq!(
+            under(&bare, "prometheus").as_str(),
+            "http://api.test/actuator/prometheus"
+        );
     }
 
     #[test]
