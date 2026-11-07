@@ -70,8 +70,10 @@ export function MonitorSetting({ value, onChange }: { value: Monitor[]; onChange
                   onChange={(e) => {
                     const next = e.target.value as MonitorKind;
                     // Dynatrace's entity and token mean nothing to an
-                    // endpoint (and the token must not be sent to one).
-                    const { entity: _e, token: _t, ...rest } = target;
+                    // endpoint (and the token must not be sent to one), and
+                    // its interval (30s by default, 10s at least) is not an
+                    // endpoint's (1s), so the new kind starts on its default.
+                    const { entity: _e, token: _t, interval: _i, ...rest } = target;
                     set(i, make(next, (next === "dynatrace") === (kind === "dynatrace") ? target : rest));
                   }}
                   className="rounded-md border border-line bg-surface px-1.5 py-1 text-xs"
