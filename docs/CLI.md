@@ -77,7 +77,7 @@ Without overrides, `load` uses the file's `load` profile. A collection has no pr
 | `--duration 1m` | How long to run with `--vus` or `--rate`, or a new length for a constant-rate or virtual-user profile |
 | `--think-time 1s` | Pause between a virtual user's iterations |
 | `--threshold RULE` | Add a threshold such as `"p95 < 300ms"`. Repeatable; adds to the file's |
-| `--monitor URL` | Read the API's CPU and memory from this metrics endpoint during the test: Prometheus text (like `/actuator/prometheus` or `/metrics`), or a Spring Boot Actuator base URL ending in `/actuator`. Repeatable; adds to the file's `monitor` section. The live line shows the first API's CPU and memory, and the report sums each one up |
+| `--monitor URL` | Read the API's CPU and memory from this metrics endpoint during the test: Prometheus text (like `/actuator/prometheus` or `/metrics`), or a Spring Boot Actuator base URL ending in `/actuator`. Repeatable; adds to the file's `monitor` section. The live line shows the first API's CPU and memory and names any API that is down, and the report sums each one up, health included. Actuator's `/health` is read too |
 | `--max-in-flight 1000` | Open models: the most iterations running at once; more are dropped and counted |
 | `--grace 30s` | How long iterations still running at the end may take to finish |
 | `--out FILE` | Also write the full report as JSON |

@@ -81,6 +81,17 @@ export function MonitorSetting({ value, onChange }: { value: Monitor[]; onChange
                   }}
                   className="min-w-[6rem] flex-1 rounded-md border border-line bg-surface px-2 py-1 text-xs"
                 />
+                <input
+                  aria-label="Health check URL"
+                  value={target.health ?? ""}
+                  placeholder={kind === "actuator" ? "health: …/actuator/health (automatic)" : "health URL (optional)"}
+                  title="Read with the metrics to spot the API going down. Actuator reads /health under its URL when this is empty."
+                  onChange={(e) => {
+                    const { health: _old, ...rest } = target;
+                    set(i, make(kind, e.target.value ? { ...rest, health: e.target.value } : rest));
+                  }}
+                  className="mono min-w-[10rem] flex-[2] rounded-md border border-line bg-surface px-2 py-1 text-xs"
+                />
                 {headers > 0 && (
                   <span className="text-[0.6875rem] text-subtle" title="Edit headers in the YAML">
                     + {headers} header{headers === 1 ? "" : "s"}
@@ -104,7 +115,9 @@ export function MonitorSetting({ value, onChange }: { value: Monitor[]; onChange
         micrometer-registry-prometheus), <span className="mono">/q/metrics</span> (Quarkus) and{" "}
         <span className="mono">/metrics</span> (prometheus-net, prom-client, Go). Spring Boot Actuator takes the{" "}
         <span className="mono">/actuator</span> base URL and also works without the Prometheus registry. URLs can use{" "}
-        <span className="mono">{"{{variables}}"}</span>.
+        <span className="mono">{"{{variables}}"}</span>. A health check (like{" "}
+        <span className="mono">/actuator/health</span> or <span className="mono">/healthz</span>) is read at the same
+        time to spot the API going down; Actuator reads its own <span className="mono">/health</span>.
       </p>
     </div>
   );

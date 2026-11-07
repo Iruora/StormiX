@@ -11,13 +11,13 @@ Click **Load test** in the header. A setup dialog opens first, then the test run
 - **Load profile**: constant rate, ramping rate with stages, or virtual users.
 - **Thresholds**: such as `p95 < 300ms` or `errors < 1%`.
 - **Trace requests**: send a `traceparent` header for [APM tools](/features/tracing).
-- **API CPU and memory**: metrics endpoints of the API, such as `/actuator/prometheus`, to read its [CPU and memory](/features/api-resources) from during the test.
+- **API CPU and memory**: metrics endpoints of the API, such as `/actuator/prometheus`, to read its [CPU, memory and health](/features/api-resources) from during the test.
 
 The load profile and thresholds are saved into the test file. A file without a load profile starts from 10 iterations a second for 30 seconds. **Run** starts the test with the selected steps; **Cancel** closes the dialog.
 
 ## While it runs
 
-The panel says the test is starting (setup steps and warm-up) until its first second is in, then draws a chart of requests per second, failures and p95 latency for each second. With a metrics endpoint set up, the API's current CPU and memory and their chart show below it.
+The panel says the test is starting (setup steps and warm-up) until its first second is in, then draws a chart of requests per second, failures and p95 latency for each second. With a metrics endpoint set up, the API's current CPU and memory and their chart show below it, and a red banner as soon as its health check says it is down.
 
 <Shot name="load-running" alt="A load test running, with its live chart" />
 
@@ -36,7 +36,7 @@ At the end the panel shows:
 - a **per-step table**;
 - the **most common failures**, each with a **Details** button that opens the first failing request and its response;
 - the **slowest traced requests**, with tracing on;
-- the **API's CPU and memory**: average and peak CPU, memory before, at its peak and at the end, JVM heap and GC pauses, and a chart, for each metrics endpoint set up.
+- the **API's CPU and memory**: average and peak CPU, memory before, at its peak and at the end, JVM heap and GC pauses, a chart, and whether it stayed healthy (with **API went unhealthy** in the header when it did not), for each metrics endpoint set up.
 
 **Replay** runs the same steps again with the same load profile and thresholds, without going through the setup dialog. It uses the environment selected now. Editing the file clears the result, and with it Replay; use **Load test** to start from the setup again.
 

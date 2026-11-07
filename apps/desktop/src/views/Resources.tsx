@@ -1,4 +1,4 @@
-import { Cpu, TriangleAlert } from "lucide-react";
+import { Cpu, HeartPulse, TriangleAlert } from "lucide-react";
 
 import type { LoadProgress, LoadReport } from "../bindings";
 
@@ -12,7 +12,32 @@ export type ResourceView = {
   cpuCores?: number | null;
   memoryKind?: string | null;
   heapMaxBytes?: number | null;
+  healthUrl?: string | null;
+  /** The first health reading, then each change. */
+  health?: HealthChange[];
+  healthError?: string | null;
 };
+
+export type HealthChange = { t: number | null; status: string; detail?: string | null };
+
+/** `UP` and `UNKNOWN` are not counted against the API. */
+const unhealthy = (h: HealthChange) => h.status !== "UP" && h.status !== "UNKNOWN";
+
+/** Each stretch the API was not healthy; `to` is null when it lasted until the end. */
+export function unhealthyPeriods(health: HealthChange[] = []) {
+  const periods: { from: number; to: number | null; status: string; detail?: string | null }[] = [];
+  health.forEach((h, i) => {
+    if (!unhealthy(h) || (i > 0 && unhealthy(health[i - 1]))) return;
+    const back = health.slice(i + 1).find((c) => !unhealthy(c));
+    periods.push({ from: h.t ?? 0, to: back?.t ?? null, status: h.status, detail: h.detail });
+  });
+  return periods;
+}
+
+/** Whether any monitored API was unhealthy at some point of the test. */
+export function wentUnhealthy(series: ResourceView[]): boolean {
+  return series.some((s) => unhealthyPeriods(s.health).length > 0);
+}
 
 /** A finished report's series. */
 export function reportResources(report: LoadReport): ResourceView[] {
@@ -25,13 +50,20 @@ export function liveResources(points: LoadProgress[]): ResourceView[] {
   return (last?.resources ?? []).map((r, i) => {
     const seen = new Set<number>();
     const samples: ResourceView["samples"] = [];
+    const health: HealthChange[] = [];
     for (const p of points) {
       const now = p.resources?.[i];
+      if (now?.health) {
+        const last = health[health.length - 1];
+        if (!last || last.status !== now.health || last.detail !== now.healthDetail) {
+          health.push({ t: p.elapsedS, status: now.health, detail: now.healthDetail });
+        }
+      }
       if (now?.t == null || seen.has(now.t)) continue;
       seen.add(now.t);
       samples.push({ t: now.t, cpuPercent: now.cpuPercent, memoryBytes: now.memoryBytes });
     }
-    return { name: r.name, samples, error: r.error, cpuCores: r.cpuCores, memoryKind: r.memoryKind };
+    return { name: r.name, samples, error: r.error, cpuCores: r.cpuCores, memoryKind: r.memoryKind, health };
   });
 }
 
@@ -72,6 +104,7 @@ function OneApi({ series, duration, live }: { series: ResourceView; duration: nu
           </span>
         )}
       </div>
+      <Health series={series} live={live} />
       {series.error && (
         <div className="mb-2 flex items-start gap-1.5 text-xs text-warn">
           <TriangleAlert size="0.8125rem" className="mt-px shrink-0" />
@@ -123,6 +156,49 @@ function OneApi({ series, duration, live }: { series: ResourceView; duration: nu
   );
 }
 
+/** Healthy throughout, or each time it was not; live, the status now. */
+function Health({ series, live }: { series: ResourceView; live: boolean }) {
+  const health = series.health ?? [];
+  if (series.healthError) {
+    return <div className="mb-2 text-xs text-muted">Health not checked: {series.healthError}</div>;
+  }
+  if (health.length === 0) return null;
+  const now = health[health.length - 1];
+  const periods = unhealthyPeriods(health);
+  if (live && unhealthy(now)) {
+    return (
+      <div role="status" className="mb-2 flex items-start gap-1.5 rounded-md bg-bad-soft px-2 py-1 text-xs text-bad">
+        <HeartPulse size="0.8125rem" className="mt-px shrink-0" />
+        <span>
+          <b>{now.status}</b> since {periods.at(-1)?.from ?? 0}s{now.detail ? ` · ${now.detail}` : ""}
+        </span>
+      </div>
+    );
+  }
+  if (periods.length === 0) {
+    return (
+      <div className="mb-2 flex items-center gap-1.5 text-xs text-ok">
+        <HeartPulse size="0.8125rem" /> {live ? "Healthy" : "Healthy throughout"}
+      </div>
+    );
+  }
+  return (
+    <ul className="mb-2 space-y-0.5 rounded-md bg-bad-soft px-2 py-1 text-xs text-bad">
+      {periods.map((p, i) => (
+        <li key={i} className="flex items-start gap-1.5">
+          <HeartPulse size="0.8125rem" className="mt-px shrink-0" />
+          <span>
+            <b>{p.status}</b> at {p.from.toFixed(1)} s{p.detail ? ` (${p.detail})` : ""}
+            {p.to == null
+              ? ", still at the end"
+              : `, healthy again at ${p.to.toFixed(1)} s, after ${(p.to - p.from).toFixed(1)} s`}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Chart({ series, duration }: { series: ResourceView; duration: number }) {
   const points = series.samples.filter((s) => s.t != null) as (ResourceView["samples"][number] & { t: number })[];
   if (points.length < 2) return null;
@@ -142,6 +218,7 @@ function Chart({ series, duration }: { series: ResourceView; duration: number })
   };
   const cpu = line((s) => s.cpuPercent);
   const memory = line((s) => s.memoryBytes);
+  const bands = unhealthyPeriods(series.health);
   return (
     <div className="mt-2">
       <div className="mb-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-subtle">
@@ -151,6 +228,11 @@ function Chart({ series, duration }: { series: ResourceView; duration: number })
         <span className="flex items-center gap-1">
           <span className="inline-block h-0.5 w-3 bg-ok" /> memory (max {bytes(memory.top)})
         </span>
+        {bands.length > 0 && (
+          <span className="flex items-center gap-1">
+            <span className="inline-block size-2 rounded-sm bg-bad/30" /> unhealthy
+          </span>
+        )}
       </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
@@ -159,6 +241,10 @@ function Chart({ series, duration }: { series: ResourceView; duration: number })
         role="img"
         aria-label={`${series.name}: CPU and memory over time`}
       >
+        {bands.map((b, i) => {
+          const x = (b.from / end) * width;
+          return <rect key={i} x={x} y={0} width={Math.max(2, ((b.to ?? points[points.length - 1].t) / end) * width - x)} height={height} className="fill-bad/15" />;
+        })}
         <polyline points={cpu.points} fill="none" className="stroke-accent" strokeWidth={2} vectorEffect="non-scaling-stroke" />
         <polyline points={memory.points} fill="none" className="stroke-ok" strokeWidth={2} vectorEffect="non-scaling-stroke" />
       </svg>

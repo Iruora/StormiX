@@ -546,6 +546,43 @@ export type HeaderPair = {
 	value: string,
 };
 
+/**  The API's health from a moment on, until the next change. */
+export type HealthChange = HealthChange_Serialize | HealthChange_Deserialize;
+
+/**  The API's health from a moment on, until the next change. */
+export type HealthChange_Deserialize = {
+	/**  Seconds since the load started. */
+	t: number | null,
+	/**
+	 *  `UP`, `DOWN`, `OUT_OF_SERVICE` or `UNKNOWN` as the API reports it;
+	 *  `UNREACHABLE` when it did not answer; `HTTP 503` for an error
+	 *  status without a JSON `status`.
+	 */
+	status: string,
+	/**
+	 *  What is not up, like `db: DOWN, diskSpace: DOWN`, or why it did not
+	 *  answer.
+	 */
+	detail?: string | null,
+};
+
+/**  The API's health from a moment on, until the next change. */
+export type HealthChange_Serialize = {
+	/**  Seconds since the load started. */
+	t: number | null,
+	/**
+	 *  `UP`, `DOWN`, `OUT_OF_SERVICE` or `UNKNOWN` as the API reports it;
+	 *  `UNREACHABLE` when it did not answer; `HTTP 503` for an error
+	 *  status without a JSON `status`.
+	 */
+	status: string,
+	/**
+	 *  What is not up, like `db: DOWN, diskSpace: DOWN`, or why it did not
+	 *  answer.
+	 */
+	detail?: string,
+};
+
 /**
  *  Sent while a Bruno folder is imported, at most every 50 ms and for the
  *  last file.
@@ -626,6 +663,13 @@ export type LiveResource_Deserialize = {
 	error?: string | null,
 	cpuCores?: number | null,
 	memoryKind?: string | null,
+	/**
+	 *  The latest health status, like `UP`, `DOWN` or `UNREACHABLE`. None
+	 *  without a health check.
+	 */
+	health?: string | null,
+	/**  What is not up, or why it did not answer. */
+	healthDetail?: string | null,
 };
 
 /**  A monitored API's latest reading while a load test runs. */
@@ -643,6 +687,13 @@ export type LiveResource_Serialize = {
 	error: string | null,
 	cpuCores: number | null,
 	memoryKind: string | null,
+	/**
+	 *  The latest health status, like `UP`, `DOWN` or `UNREACHABLE`. None
+	 *  without a health check.
+	 */
+	health: string | null,
+	/**  What is not up, or why it did not answer. */
+	healthDetail: string | null,
 };
 
 export type LoadDiff = LoadDiff_Serialize | LoadDiff_Deserialize;
@@ -852,6 +903,13 @@ export type MonitorTarget_Deserialize = {
 	headers?: Header[],
 	/**  Time between reads. 1s when left out. */
 	interval?: string | null,
+	/**
+	 *  A health check read at the same time, like `/actuator/health` or
+	 *  `/healthz`, to spot the API going down during the test. Actuator
+	 *  reads `/health` under its URL when this is left out. `{{variables}}`
+	 *  work, and the headers above are sent with it too.
+	 */
+	health?: string | null,
 };
 
 export type MonitorTarget_Serialize = {
@@ -869,6 +927,13 @@ export type MonitorTarget_Serialize = {
 	headers?: Header[],
 	/**  Time between reads. 1s when left out. */
 	interval?: string,
+	/**
+	 *  A health check read at the same time, like `/actuator/health` or
+	 *  `/healthz`, to spot the API going down during the test. Actuator
+	 *  reads `/health` under its URL when this is left out. `{{variables}}`
+	 *  work, and the headers above are sent with it too.
+	 */
+	health?: string,
 };
 
 /**
@@ -1015,6 +1080,18 @@ export type ResourceSeries_Deserialize = {
 	failedReads: number,
 	/**  Why the latest failed read failed, like `404 Not Found`. */
 	error?: string | null,
+	/**
+	 *  The health check read beside the metrics, shown without its query
+	 *  string or password. None without one.
+	 */
+	healthUrl?: string | null,
+	/**  The API's health over the test: its first reading, then each change. */
+	health?: HealthChange_Deserialize[],
+	/**
+	 *  Why the health check could not be read at all (left alone after
+	 *  that), like `404 Not Found` when it is not exposed.
+	 */
+	healthError?: string | null,
 };
 
 /**  What one endpoint reported over a load test. */
@@ -1043,6 +1120,18 @@ export type ResourceSeries_Serialize = {
 	failedReads: number,
 	/**  Why the latest failed read failed, like `404 Not Found`. */
 	error?: string,
+	/**
+	 *  The health check read beside the metrics, shown without its query
+	 *  string or password. None without one.
+	 */
+	healthUrl?: string,
+	/**  The API's health over the test: its first reading, then each change. */
+	health?: HealthChange_Serialize[],
+	/**
+	 *  Why the health check could not be read at all (left alone after
+	 *  that), like `404 Not Found` when it is not exposed.
+	 */
+	healthError?: string,
 };
 
 export type ResponseRecord = ResponseRecord_Serialize | ResponseRecord_Deserialize;

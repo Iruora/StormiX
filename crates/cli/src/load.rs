@@ -223,6 +223,7 @@ fn monitor_for(url: String) -> Monitor {
         name: None,
         headers: Vec::new(),
         interval: None,
+        health: None,
     };
     if actuator {
         Monitor::Actuator(target)
@@ -295,6 +296,12 @@ impl ProgressLine {
             }
             if let Some(memory) = latest.memory_bytes {
                 let _ = write!(line, "  mem {}", bytes(memory));
+            }
+        }
+        // Any monitored API that is not healthy right now.
+        for series in p.resources {
+            if let Some(now) = series.health.last().filter(|h| h.unhealthy()) {
+                let _ = write!(line, "  {} {}", series.name, now.status);
             }
         }
         let mut err = std::io::stderr();
@@ -501,6 +508,7 @@ fn render_text(report: &LoadReport, title: Option<String>) -> String {
 
 fn render_resources(out: &mut String, series: &stormix_engine::ResourceSeries) {
     let _ = writeln!(out, "\n  api resources  {} ({})", series.name, series.url);
+    render_health(out, series);
     if series.samples.is_empty() {
         let reason = series.error.as_deref().unwrap_or("no reads");
         let _ = writeln!(out, "    could not read it: {reason}");
@@ -552,6 +560,38 @@ fn render_resources(out: &mut String, series: &stormix_engine::ResourceSeries) {
             "    {} reads failed, the last with: {}",
             series.failed_reads,
             series.error.as_deref().unwrap_or("?")
+        );
+    }
+}
+
+/// One line when the API stayed healthy, else one per unhealthy stretch.
+fn render_health(out: &mut String, series: &stormix_engine::ResourceSeries) {
+    if let Some(error) = &series.health_error {
+        let _ = writeln!(out, "    health   not checked: {error}");
+        return;
+    }
+    if series.health.is_empty() {
+        return;
+    }
+    let periods = series.unhealthy_periods();
+    if periods.is_empty() {
+        let _ = writeln!(out, "    health   ✓ healthy throughout");
+        return;
+    }
+    for p in &periods {
+        let detail = p
+            .detail
+            .as_deref()
+            .map(|d| format!(" ({d})"))
+            .unwrap_or_default();
+        let back = match p.to {
+            Some(to) => format!(", healthy again at {to:.1} s ({:.1} s)", to - p.from),
+            None => ", still at the end".to_owned(),
+        };
+        let _ = writeln!(
+            out,
+            "    health   ✗ {} at {:.1} s{detail}{back}",
+            p.status, p.from
         );
     }
 }

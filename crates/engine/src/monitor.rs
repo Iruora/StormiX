@@ -41,6 +41,51 @@ pub struct ResourceSeries {
     /// Why the latest failed read failed, like `404 Not Found`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The health check read beside the metrics, shown without its query
+    /// string or password. None without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_url: Option<String>,
+    /// The API's health over the test: its first reading, then each change.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub health: Vec<HealthChange>,
+    /// Why the health check could not be read at all (left alone after
+    /// that), like `404 Not Found` when it is not exposed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_error: Option<String>,
+}
+
+/// The API's health from a moment on, until the next change.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct HealthChange {
+    /// Seconds since the load started.
+    pub t: f64,
+    /// `UP`, `DOWN`, `OUT_OF_SERVICE` or `UNKNOWN` as the API reports it;
+    /// `UNREACHABLE` when it did not answer; `HTTP 503` for an error
+    /// status without a JSON `status`.
+    pub status: String,
+    /// What is not up, like `db: DOWN, diskSpace: DOWN`, or why it did not
+    /// answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl HealthChange {
+    /// `UP` and `UNKNOWN` are not counted against the API.
+    pub fn unhealthy(&self) -> bool {
+        !matches!(self.status.as_str(), "UP" | "UNKNOWN")
+    }
+}
+
+/// A stretch of time the API was not healthy.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnhealthyPeriod {
+    pub from: f64,
+    /// None while it lasted until the end.
+    pub to: Option<f64>,
+    pub status: String,
+    pub detail: Option<String>,
 }
 
 /// The API's resource use at one moment.
@@ -79,6 +124,31 @@ pub struct ResourceStats {
 }
 
 impl ResourceSeries {
+    /// Each time the API was unhealthy, in order.
+    pub fn unhealthy_periods(&self) -> Vec<UnhealthyPeriod> {
+        let mut periods: Vec<UnhealthyPeriod> = Vec::new();
+        for (i, change) in self.health.iter().enumerate() {
+            if !change.unhealthy() {
+                continue;
+            }
+            // A change from one unhealthy state to another continues it.
+            if i > 0 && self.health[i - 1].unhealthy() {
+                continue;
+            }
+            let to = self.health[i + 1..]
+                .iter()
+                .find(|c| !c.unhealthy())
+                .map(|c| c.t);
+            periods.push(UnhealthyPeriod {
+                from: change.t,
+                to,
+                status: change.status.clone(),
+                detail: change.detail.clone(),
+            });
+        }
+        periods
+    }
+
     pub fn stats(&self) -> ResourceStats {
         let values = |f: fn(&ResourceSample) -> Option<f64>| -> Vec<f64> {
             self.samples.iter().filter_map(f).collect()
@@ -105,6 +175,14 @@ impl ResourceSeries {
 pub(crate) struct Update {
     pub index: usize,
     pub outcome: Result<Read, String>,
+    pub health: Option<HealthNews>,
+}
+
+#[derive(Debug)]
+pub(crate) enum HealthNews {
+    Reading(HealthChange),
+    /// The check cannot be read at all, so it is no longer tried.
+    Unavailable(String),
 }
 
 #[derive(Debug)]
@@ -117,8 +195,21 @@ pub(crate) struct Read {
 }
 
 impl ResourceSeries {
-    pub(crate) fn apply(&mut self, outcome: Result<Read, String>) {
-        match outcome {
+    pub(crate) fn apply(&mut self, update: Update) {
+        match update.health {
+            Some(HealthNews::Reading(change)) => {
+                let same = self
+                    .health
+                    .last()
+                    .is_some_and(|l| l.status == change.status && l.detail == change.detail);
+                if !same {
+                    self.health.push(change);
+                }
+            }
+            Some(HealthNews::Unavailable(error)) => self.health_error = Some(error),
+            None => {}
+        }
+        match update.outcome {
             Ok(read) => {
                 self.format = read.format.to_owned();
                 self.cpu_cores = read.cpu_cores.or(self.cpu_cores);
@@ -180,18 +271,35 @@ pub(crate) fn start(
                 samples: Vec::new(),
                 failed_reads: 0,
                 error: None,
+                health_url: None,
+                health: Vec::new(),
+                health_error: None,
             };
+            let health = monitor.health_url().map(|h| fill(&h));
             if let Some(name) = missing.first() {
                 series.error = Some(format!("`{{{{{name}}}}}` has no value"));
             } else {
                 match parsed {
                     Ok(url) => {
+                        let health = match health.map(|h| reqwest::Url::parse(h.trim())) {
+                            Some(Ok(h)) => {
+                                series.health_url = Some(shown(&h));
+                                Some(h)
+                            }
+                            Some(Err(e)) => {
+                                series.health_error =
+                                    Some(format!("the health URL is not valid: {e}"));
+                                None
+                            }
+                            None => None,
+                        };
                         let reader = Reader {
                             client: client.clone(),
                             url,
                             headers,
                             actuator: matches!(monitor, Monitor::Actuator(_)),
                             timeout: timeout(target),
+                            health,
                         };
                         tasks.spawn(watch(index, reader, target.every(), origin, tx.clone()));
                     }
@@ -230,12 +338,33 @@ async fn watch(
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut mode = None;
     let mut previous: Option<(Instant, Counters)> = None;
+    let mut health_on = reader.health.is_some();
+    let mut health_seen = false;
     loop {
         tick.tick().await;
         let at = Instant::now();
-        let outcome = match reader.read(&mut mode).await {
+        let elapsed = at.saturating_duration_since(origin).as_secs_f64();
+        let (metrics, health) = tokio::join!(reader.read(&mut mode), async {
+            if health_on {
+                reader.health().await
+            } else {
+                None
+            }
+        });
+        let health = health.map(|outcome| match outcome {
+            // A check that is not there or not allowed from the start is
+            // left alone, rather than counting the API as unhealthy.
+            HealthOutcome::Refused(error) if !health_seen => {
+                health_on = false;
+                HealthNews::Unavailable(error)
+            }
+            other => {
+                health_seen = true;
+                HealthNews::Reading(other.into_change((elapsed * 10.0).round() / 10.0))
+            }
+        });
+        let outcome = match metrics {
             Ok(figures) => {
-                let elapsed = at.saturating_duration_since(origin).as_secs_f64();
                 let since = previous
                     .as_ref()
                     .map(|(then, counters)| (at.duration_since(*then).as_secs_f64(), counters));
@@ -245,7 +374,14 @@ async fn watch(
             }
             Err(e) => Err(e),
         };
-        if tx.send(Update { index, outcome }).is_err() {
+        if tx
+            .send(Update {
+                index,
+                outcome,
+                health,
+            })
+            .is_err()
+        {
             return;
         }
     }
@@ -264,6 +400,91 @@ struct Reader {
     headers: Vec<(String, String)>,
     actuator: bool,
     timeout: Duration,
+    health: Option<reqwest::Url>,
+}
+
+/// What one read of the health check found.
+#[derive(Debug, PartialEq)]
+enum HealthOutcome {
+    /// It answered, with a status (`UP`, `DOWN`, `HTTP 503`...).
+    Status(String, Option<String>),
+    /// 401, 403 or 404: not exposed, or not for us.
+    Refused(String),
+    Unreachable(String),
+}
+
+impl HealthOutcome {
+    fn into_change(self, t: f64) -> HealthChange {
+        let (status, detail) = match self {
+            Self::Status(status, detail) => (status, detail),
+            Self::Refused(error) => (
+                error
+                    .split(' ')
+                    .next()
+                    .map_or(error.clone(), |code| format!("HTTP {code}")),
+                Some(error),
+            ),
+            Self::Unreachable(error) => ("UNREACHABLE".to_owned(), Some(error)),
+        };
+        HealthChange { t, status, detail }
+    }
+
+    /// From a health check's status code and body: Spring Boot's
+    /// `{"status":"DOWN","components":{...}}`, or any other answer.
+    fn from_response(code: reqwest::StatusCode, body: &str) -> Self {
+        let json: Option<serde_json::Value> = serde_json::from_str(body).ok();
+        let reported = json
+            .as_ref()
+            .and_then(|j| j.get("status"))
+            .and_then(|s| s.as_str())
+            .map(str::to_uppercase);
+        let status = match reported {
+            Some(status) => status,
+            None if code.is_success() => "UP".to_owned(),
+            None => format!("HTTP {}", code.as_u16()),
+        };
+        let mut down = Vec::new();
+        if let Some(json) = &json {
+            not_up(json, "", &mut down);
+        }
+        let detail = if down.is_empty() {
+            (status != "UP" && json.is_none() && !code.is_success()).then(|| code.to_string())
+        } else {
+            Some(down.join(", "))
+        };
+        Self::Status(status, detail)
+    }
+}
+
+/// The components of a Spring Boot health answer that are not `UP`, as
+/// `db: DOWN` or `db.primary: DOWN` for nested ones, deepest only.
+fn not_up(json: &serde_json::Value, prefix: &str, out: &mut Vec<String>) {
+    // Spring Boot 2.2+ says `components`, older versions `details`.
+    let Some(components) = json
+        .get("components")
+        .or_else(|| json.get("details"))
+        .and_then(|c| c.as_object())
+    else {
+        return;
+    };
+    for (name, component) in components {
+        let Some(status) = component.get("status").and_then(|s| s.as_str()) else {
+            continue;
+        };
+        if status.eq_ignore_ascii_case("UP") {
+            continue;
+        }
+        let path = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{prefix}.{name}")
+        };
+        let before = out.len();
+        not_up(component, &path, out);
+        if out.len() == before {
+            out.push(format!("{path}: {status}"));
+        }
+    }
 }
 
 impl Reader {
@@ -296,6 +517,38 @@ impl Reader {
                 },
             },
         }
+    }
+
+    /// One read of the health check, when there is one.
+    async fn health(&self) -> Option<HealthOutcome> {
+        let url = self.health.clone()?;
+        let mut request = self
+            .client
+            .get(url)
+            .timeout(self.timeout)
+            .header(reqwest::header::ACCEPT, "application/json");
+        for (name, value) in &self.headers {
+            request = request.header(name, value);
+        }
+        Some(match request.send().await {
+            // The deepest cause says it best: `Connection refused (os error 111)`.
+            Err(e) => HealthOutcome::Unreachable(
+                describe(&e)
+                    .rsplit(": ")
+                    .next()
+                    .unwrap_or_default()
+                    .to_owned(),
+            ),
+            Ok(response) => {
+                let code = response.status();
+                if matches!(code.as_u16(), 401 | 403 | 404) {
+                    HealthOutcome::Refused(code.to_string())
+                } else {
+                    let body = response.text().await.unwrap_or_default();
+                    HealthOutcome::from_response(code, &body)
+                }
+            }
+        })
     }
 
     async fn get(&self, url: reqwest::Url, accept: &str) -> Result<String, String> {
@@ -707,6 +960,9 @@ http_server_requests_seconds_count{method="GET",uri="/a \"b\"",} 3.0
             ],
             failed_reads: 0,
             error: None,
+            health_url: None,
+            health: Vec::new(),
+            health_error: None,
         };
         let stats = series.stats();
         assert_eq!(stats.cpu_avg, Some(100.0));
@@ -714,6 +970,64 @@ http_server_requests_seconds_count{method="GET",uri="/a \"b\"",} 3.0
         assert_eq!(stats.memory_start, Some(100.0));
         assert_eq!(stats.memory_peak, Some(300.0));
         assert_eq!(stats.memory_end, Some(200.0));
+    }
+
+    #[test]
+    fn health_answers() {
+        use reqwest::StatusCode;
+        let down = r#"{"status":"DOWN","components":{"db":{"status":"DOWN","details":{"error":"timeout"}},"diskSpace":{"status":"UP"},"ping":{"status":"UP"},"redis":{"status":"OUT_OF_SERVICE","components":{"primary":{"status":"DOWN"},"replica":{"status":"UP"}}}}}"#;
+        assert_eq!(
+            HealthOutcome::from_response(StatusCode::SERVICE_UNAVAILABLE, down),
+            HealthOutcome::Status("DOWN".into(), Some("db: DOWN, redis.primary: DOWN".into()))
+        );
+        assert_eq!(
+            HealthOutcome::from_response(StatusCode::OK, r#"{"status":"UP"}"#),
+            HealthOutcome::Status("UP".into(), None)
+        );
+        // Plain health checks: the status code is all there is.
+        assert_eq!(
+            HealthOutcome::from_response(StatusCode::OK, "ok"),
+            HealthOutcome::Status("UP".into(), None)
+        );
+        assert_eq!(
+            HealthOutcome::from_response(StatusCode::BAD_GATEWAY, "<html>"),
+            HealthOutcome::Status("HTTP 502".into(), Some("502 Bad Gateway".into()))
+        );
+    }
+
+    #[test]
+    fn unhealthy_periods_join_unhealthy_states() {
+        let change = |t, status: &str| HealthChange {
+            t,
+            status: status.into(),
+            detail: None,
+        };
+        let series = ResourceSeries {
+            name: "api".into(),
+            url: "http://api/metrics".into(),
+            format: "prometheus".into(),
+            cpu_cores: None,
+            heap_max_bytes: None,
+            memory_kind: None,
+            samples: Vec::new(),
+            failed_reads: 0,
+            error: None,
+            health_url: Some("http://api/health".into()),
+            health: vec![
+                change(0.0, "UP"),
+                change(3.0, "DOWN"),
+                change(4.0, "UNREACHABLE"),
+                change(6.0, "UP"),
+                change(8.0, "UNKNOWN"),
+                change(9.0, "OUT_OF_SERVICE"),
+            ],
+            health_error: None,
+        };
+        let periods = series.unhealthy_periods();
+        assert_eq!(periods.len(), 2);
+        assert_eq!((periods[0].from, periods[0].to), (3.0, Some(6.0)));
+        assert_eq!(periods[0].status, "DOWN");
+        assert_eq!((periods[1].from, periods[1].to), (9.0, None));
     }
 
     #[test]

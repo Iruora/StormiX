@@ -26,6 +26,7 @@ const MONITOR_KEYS: Key[] = [
   { label: "name", info: "What to call it in results; the URL's host by default" },
   { label: "headers", info: "A list of { name, value }, like a bearer token from a secret" },
   { label: "interval", info: "Time between reads (default 1s)", value: "1s" },
+  { label: "health", info: "A health check URL read at the same time, like /actuator/health or /healthz; Actuator reads its own" },
 ];
 
 const HEADER_KEYS: Key[] = [

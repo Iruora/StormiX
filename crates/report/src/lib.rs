@@ -333,6 +333,7 @@ fn resources_html(out: &mut String, series: &ResourceSeries, duration_s: f64) {
         esc(&series.url)
     );
     if series.samples.is_empty() {
+        health_html(out, series);
         let _ = write!(
             out,
             r#"<p class="error">Could not read it: {}</p></section>"#,
@@ -340,6 +341,7 @@ fn resources_html(out: &mut String, series: &ResourceSeries, duration_s: f64) {
         );
         return;
     }
+    health_html(out, series);
     let st = series.stats();
     let pct = |v: Option<f64>| v.map_or("—".to_owned(), |v| format!("{v:.0}%"));
     let mem = |v: Option<f64>| v.map_or("—".to_owned(), bytes);
@@ -387,6 +389,45 @@ fn resources_html(out: &mut String, series: &ResourceSeries, duration_s: f64) {
     out.push_str("</section>");
 }
 
+/// Whether the API stayed healthy, else each time it was not.
+fn health_html(out: &mut String, series: &ResourceSeries) {
+    if let Some(error) = &series.health_error {
+        let _ = write!(
+            out,
+            r#"<p class="muted">Health not checked: {}</p>"#,
+            esc(error)
+        );
+        return;
+    }
+    if series.health.is_empty() {
+        return;
+    }
+    let periods = series.unhealthy_periods();
+    if periods.is_empty() {
+        out.push_str(r#"<p class="health ok">✓ Healthy throughout</p>"#);
+        return;
+    }
+    out.push_str(r#"<ul class="health">"#);
+    for p in &periods {
+        let detail = p
+            .detail
+            .as_deref()
+            .map(|d| format!(" ({})", esc(d)))
+            .unwrap_or_default();
+        let back = match p.to {
+            Some(to) => format!(", healthy again at {to:.1} s, after {:.1} s", to - p.from),
+            None => ", still at the end".to_owned(),
+        };
+        let _ = write!(
+            out,
+            r#"<li class="bad">✗ <b>{}</b> at {:.1} s{detail}{back}</li>"#,
+            esc(&p.status),
+            p.from
+        );
+    }
+    out.push_str("</ul>");
+}
+
 /// CPU and memory as two lines over the test's own time axis.
 fn resources_svg(series: &ResourceSeries, duration_s: f64) -> String {
     const W: f64 = 800.0;
@@ -419,8 +460,25 @@ fn resources_svg(series: &ResourceSeries, duration_s: f64) -> String {
             .filter_map(|s| Some((s.t, s.memory_bytes?)))
             .collect(),
     );
+    let bands: String = series
+        .unhealthy_periods()
+        .iter()
+        .map(|p| {
+            let from = p.from / end * W;
+            let to = p.to.unwrap_or(end) / end * W;
+            format!(
+                r#"<rect class="down" x="{from:.1}" y="0" width="{:.1}" height="{H}"/>"#,
+                (to - from).max(2.0)
+            )
+        })
+        .collect();
+    let down_legend = if bands.is_empty() {
+        ""
+    } else {
+        r#"<span><i class="sw down"></i>unhealthy</span>"#
+    };
     format!(
-        r#"<div class="legend"><span><i class="sw cpu"></i>CPU (max {cpu_max:.0}%)</span><span><i class="sw mem"></i>memory (max {})</span></div><svg viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img" aria-label="The API's CPU and memory over time"><polyline class="cpu" points="{cpu}"/><polyline class="mem" points="{mem}"/></svg><div class="axis mono"><span>0s</span><span>{:.0}s</span><span>{:.0}s</span></div>"#,
+        r#"<div class="legend"><span><i class="sw cpu"></i>CPU (max {cpu_max:.0}%)</span><span><i class="sw mem"></i>memory (max {})</span>{down_legend}</div><svg viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img" aria-label="The API's CPU and memory over time">{bands}<polyline class="cpu" points="{cpu}"/><polyline class="mem" points="{mem}"/></svg><div class="axis mono"><span>0s</span><span>{:.0}s</span><span>{:.0}s</span></div>"#,
         bytes(mem_max),
         end / 2.0,
         end,
@@ -474,6 +532,8 @@ td{text-align:right;padding:6px 8px;border-top:1px solid var(--line);white-space
 svg{width:100%;height:160px;display:block}svg .req{fill:var(--accent);opacity:.55}svg .fail{fill:var(--bad)}svg .p95{fill:none;stroke:var(--warn);stroke-width:2;vector-effect:non-scaling-stroke}
 .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-bottom:6px}.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 svg .cpu{fill:none;stroke:var(--accent);stroke-width:2;vector-effect:non-scaling-stroke}svg .mem{fill:none;stroke:var(--ok);stroke-width:2;vector-effect:non-scaling-stroke}
+svg .down{fill:var(--bad);opacity:.15}.sw.down{background:var(--bad);opacity:.3}
+p.health.ok{color:var(--ok)}ul.health{list-style:none;margin:0 0 8px;padding:0;color:var(--bad)}
 .sw.cpu{height:2px;background:var(--accent);vertical-align:3px}.sw.mem{height:2px;background:var(--ok);vertical-align:3px}
 .sw.req{background:var(--accent);opacity:.55}.sw.fail{background:var(--bad)}.sw.p95{height:2px;background:var(--warn);vertical-align:3px}
 .trace{user-select:all}

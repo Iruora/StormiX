@@ -221,7 +221,7 @@ pub async fn run_load(
     let outcome = loop {
         tokio::select! {
             Some(result) = rx.recv() => record(&mut recorder, &mut samples, &mut slowest, result),
-            Some(update) = monitor_rx.recv() => resources[update.index].apply(update.outcome),
+            Some(update) = monitor_rx.recv() => resources[update.index].apply(update),
             _ = tick.tick() => {
                 let elapsed = started.elapsed();
                 let target = target(profile, elapsed.min(total));
@@ -235,7 +235,7 @@ pub async fn run_load(
     let elapsed = started.elapsed();
     monitors.abort_all();
     while let Ok(update) = monitor_rx.try_recv() {
-        resources[update.index].apply(update.outcome);
+        resources[update.index].apply(update);
     }
     while let Ok(result) = rx.try_recv() {
         record(&mut recorder, &mut samples, &mut slowest, result);

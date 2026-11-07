@@ -245,6 +245,11 @@ pub struct LiveResource {
     pub error: Option<String>,
     pub cpu_cores: Option<f64>,
     pub memory_kind: Option<String>,
+    /// The latest health status, like `UP`, `DOWN` or `UNREACHABLE`. None
+    /// without a health check.
+    pub health: Option<String>,
+    /// What is not up, or why it did not answer.
+    pub health_detail: Option<String>,
 }
 
 /// The load test running now, so [`stop_load_test`] can stop it.
@@ -331,6 +336,8 @@ pub async fn run_load_test(
                         error: r.error.clone(),
                         cpu_cores: r.cpu_cores,
                         memory_kind: r.memory_kind.clone(),
+                        health: r.health.last().map(|h| h.status.clone()),
+                        health_detail: r.health.last().and_then(|h| h.detail.clone()),
                     })
                     .collect(),
             }

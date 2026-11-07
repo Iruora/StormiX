@@ -286,6 +286,7 @@ Metrics endpoints the API serves, read during a load test so that the API's own 
 | `name` | What to call it in results (optional, the URL's host by default) |
 | `headers` | `[{ name, value }]` sent with every read, like a bearer token (optional) |
 | `interval` | Time between reads (optional, `1s` by default) |
+| `health` | A health check read at the same time, like `/actuator/health` or `/healthz`, to spot the API going down (optional; `actuator` reads `/health` under its URL without it) |
 
 ```yaml
 monitor:
@@ -294,4 +295,4 @@ monitor:
       headers: [{ name: Authorization, value: "Bearer {{actuator_token}}" }]
 ```
 
-See [API CPU and memory](/features/api-resources) for which figures are read and how they are shown.
+See [API CPU, memory and health](/features/api-resources) for which figures are read and how they are shown.

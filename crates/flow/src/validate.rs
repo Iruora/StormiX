@@ -237,6 +237,18 @@ impl TestFile {
                     "the URL does not start with http:// or https://",
                 );
             }
+            if let Some(health) = &monitor.target().health {
+                let health = health.trim();
+                if !(health.starts_with("http://")
+                    || health.starts_with("https://")
+                    || health.starts_with("{{"))
+                {
+                    issues.warning(
+                        &format!("{at}.health"),
+                        "the health URL does not start with http:// or https://",
+                    );
+                }
+            }
         }
         if !self.monitor.is_empty() && self.load.is_none() {
             issues.warning(

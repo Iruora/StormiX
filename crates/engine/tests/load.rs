@@ -572,6 +572,21 @@ async fn serve_metrics() -> String {
             }),
         )
         .route(
+            "/health",
+            // Down from 0.8 s to 1.6 s into the test, with its database.
+            get(move || async move {
+                let t = started.elapsed().as_secs_f64();
+                if (0.8..1.6).contains(&t) {
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        r#"{"status":"DOWN","components":{"db":{"status":"DOWN"},"ping":{"status":"UP"}}}"#,
+                    )
+                } else {
+                    (StatusCode::OK, r#"{"status":"UP"}"#)
+                }
+            }),
+        )
+        .route(
             "/actuator/metrics/{name}",
             get(
                 |axum::extract::Path(name): axum::extract::Path<String>| async move {
@@ -611,7 +626,8 @@ monitor:
       url: "{{base}}/metrics?debug=1"
       name: orders-api
       headers: [{ name: Authorization, value: "Bearer {{token}}" }]
-      interval: 500ms
+      interval: 200ms
+      health: "{{base}}/health"
   - actuator: { url: "{{base}}/actuator/" }
   - prometheus: { url: "{{base}}/metrics" }
   - prometheus: { url: "{{nowhere}}/metrics" }
@@ -652,7 +668,7 @@ monitor:
     assert_eq!(prometheus.url, format!("{url}/metrics"));
     assert_eq!(prometheus.format, "prometheus");
     assert_eq!(prometheus.memory_kind.as_deref(), Some("resident"));
-    assert!(prometheus.samples.len() >= 4, "{prometheus:?}");
+    assert!(prometheus.samples.len() >= 8, "{prometheus:?}");
     assert_eq!(prometheus.samples[0].t, 0.0);
     assert_eq!(prometheus.samples[0].cpu_percent, None);
     for sample in &prometheus.samples[1..] {
@@ -662,12 +678,29 @@ monitor:
     }
     assert!(live.last().unwrap()[0] >= 3, "{live:?}");
 
+    // The health check went down and came back.
+    assert_eq!(prometheus.health_url, Some(format!("{url}/health")));
+    let statuses: Vec<&str> = prometheus
+        .health
+        .iter()
+        .map(|h| h.status.as_str())
+        .collect();
+    assert_eq!(statuses, ["UP", "DOWN", "UP"], "{:?}", prometheus.health);
+    assert_eq!(prometheus.health[1].detail.as_deref(), Some("db: DOWN"));
+    let periods = prometheus.unhealthy_periods();
+    assert_eq!(periods.len(), 1);
+    let lasted = periods[0].to.unwrap() - periods[0].from;
+    assert!((0.4..=1.2).contains(&lasted), "{periods:?}");
+
     // No Prometheus registry: Actuator's JSON instead.
     assert_eq!(actuator.format, "actuator");
     assert_eq!(actuator.cpu_cores, Some(8.0));
     assert_eq!(actuator.samples[0].cpu_percent, Some(80.0));
     assert_eq!(actuator.samples[0].memory_bytes, Some(2e8));
     assert_eq!(actuator.memory_kind.as_deref(), Some("jvm"));
+    // Actuator's /health is read without being asked; this API has none.
+    assert!(actuator.health.is_empty());
+    assert_eq!(actuator.health_error.as_deref(), Some("404 Not Found"));
 
     assert!(unauthorized.samples.is_empty());
     assert!(unauthorized.failed_reads >= 2);

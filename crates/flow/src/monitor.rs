@@ -37,6 +37,12 @@ pub struct MonitorTarget {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "specta", specta(type = Option<String>))]
     pub interval: Option<Duration>,
+    /// A health check read at the same time, like `/actuator/health` or
+    /// `/healthz`, to spot the API going down during the test. Actuator
+    /// reads `/health` under its URL when this is left out. `{{variables}}`
+    /// work, and the headers above are sent with it too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<String>,
 }
 
 impl Monitor {
@@ -50,6 +56,20 @@ impl Monitor {
         match self {
             Self::Prometheus(_) => "prometheus",
             Self::Actuator(_) => "actuator",
+        }
+    }
+}
+
+impl Monitor {
+    /// The health check to read, before `{{variables}}` are filled in.
+    pub fn health_url(&self) -> Option<String> {
+        match self {
+            Self::Prometheus(t) => t.health.clone(),
+            Self::Actuator(t) => Some(
+                t.health
+                    .clone()
+                    .unwrap_or_else(|| format!("{}/health", t.url.trim().trim_end_matches('/'))),
+            ),
         }
     }
 }

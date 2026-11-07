@@ -1,6 +1,6 @@
-# API CPU and memory
+# API CPU, memory and health
 
-A load test shows what the clients see: latency, throughput and errors. To see what that load does to the API itself, Stormix can read the API's own metrics endpoint during the test. The API's **CPU** and **memory** then show beside the latency, live while the test runs and in the results, reports and run history.
+A load test shows what the clients see: latency, throughput and errors. To see what that load does to the API itself, Stormix can read the API's own metrics endpoint during the test. The API's **CPU** and **memory** then show beside the latency, live while the test runs and in the results, reports and run history. With a health check, such as `/actuator/health`, Stormix also spots the API **going unhealthy**: when it went down, what was down, and when it came back.
 
 Stormix reads the endpoint once just before the load starts, which gives you a baseline, and then every second until the test ends.
 
@@ -34,8 +34,10 @@ monitor:
       headers:                          # optional
         - { name: Authorization, value: "Bearer {{actuator_token}}" }
       interval: 1s                      # optional, 1s by default
+      health: "{{base_url}}/actuator/health"   # optional, any health check URL
   - actuator:
-      url: "{{billing_url}}/actuator"   # reads /actuator/prometheus if exposed, else /actuator/metrics
+      url: "{{billing_url}}/actuator"   # reads /actuator/prometheus if exposed, else /actuator/metrics,
+                                        # and /actuator/health without being asked
 ```
 
 Keep the token in an environment's `$secrets` so it is never written to a file.
@@ -50,6 +52,14 @@ Keep the token in an environment's `$secrets` so it is never written to a file.
 | **GC pauses** (JVM, Node) | Milliseconds of garbage collection pause per second (`jvm_gc_pause_seconds_sum`, `nodejs_gc_duration_seconds_sum`) |
 
 The results show the average and peak CPU, and the memory before the load, at its peak and at the end. A clear rise from the first value to the last can point to a leak. Both CPU and memory are drawn over the same time axis as the throughput chart, so a spike in latency can be matched to a spike in CPU or a GC storm.
+
+## Health
+
+Each read also reads the health check, when there is one: `health:` on any entry, and `/health` under the URL for Spring Boot Actuator without being asked. The API counts as **unhealthy** while the check says `DOWN` or `OUT_OF_SERVICE`, answers with an error status (like `HTTP 503`), or does not answer at all (`UNREACHABLE`, for example when it crashed or stalled). `UP` and `UNKNOWN` count as healthy.
+
+For Spring Boot, the components that are not up are named, like `db: DOWN` or `redis.primary: DOWN`. That needs `management.endpoint.health.show-components=always` (or `show-details`); without it, only the overall status is shown.
+
+The results say **Healthy throughout**, or list each time the API went unhealthy: `DOWN at 12.0 s (db: DOWN), healthy again at 16.0 s, after 4.0 s`. The result's header shows **API went unhealthy**, and the CPU and memory chart shades those stretches red. While the test runs, the live panel shows the status as soon as it changes, and the CLI's live line names any API that is down. A health check that answers 401, 403 or 404 on its first read is left alone, and the results say why, so an API that doesn't expose it is never shown as unhealthy.
 
 If a read fails, for example with `401 Unauthorized`, `404 Not Found` or a timeout, the load test carries on. The results say how many reads failed and why the last one did.
 

@@ -129,6 +129,25 @@ fn load_report_shows_the_apis_resources() {
                 ],
                 failed_reads: 0,
                 error: None,
+                health_url: Some("http://api/actuator/health".into()),
+                health: vec![
+                    stormix_engine::HealthChange {
+                        t: 0.0,
+                        status: "UP".into(),
+                        detail: None,
+                    },
+                    stormix_engine::HealthChange {
+                        t: 1.0,
+                        status: "DOWN".into(),
+                        detail: Some("db: DOWN".into()),
+                    },
+                    stormix_engine::HealthChange {
+                        t: 1.5,
+                        status: "UP".into(),
+                        detail: None,
+                    },
+                ],
+                health_error: None,
             },
             ResourceSeries {
                 name: "<down>".into(),
@@ -140,6 +159,9 @@ fn load_report_shows_the_apis_resources() {
                 samples: Vec::new(),
                 failed_reads: 3,
                 error: Some("401 Unauthorized".into()),
+                health_url: None,
+                health: Vec::new(),
+                health_error: None,
             },
         ],
     };
@@ -153,4 +175,6 @@ fn load_report_shows_the_apis_resources() {
     assert!(html.contains(r#"class="cpu""#));
     assert!(html.contains("API resources · &lt;down&gt;"));
     assert!(html.contains("Could not read it: 401 Unauthorized"));
+    assert!(html.contains("<b>DOWN</b> at 1.0 s (db: DOWN), healthy again at 1.5 s, after 0.5 s"));
+    assert_eq!(html.matches(r#"class="down""#).count(), 1);
 }
