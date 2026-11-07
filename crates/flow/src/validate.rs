@@ -334,7 +334,8 @@ fn mentioned(scripts: &[&str], name: &str) -> bool {
 /// `127.0.0.1` or `[::1]` exactly, whatever the port or user info.
 fn loopback(url: &str) -> bool {
     let rest = url.strip_prefix("http://").unwrap_or(url);
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    // As URL parsers do for http, `\` ends the authority like `/`.
+    let authority = rest.split(['/', '\\', '?', '#']).next().unwrap_or_default();
     let host = authority.rsplit('@').next().unwrap_or_default();
     let host = if host.starts_with('[') {
         host.split_inclusive(']').next().unwrap_or_default()
@@ -443,6 +444,7 @@ flow:
             );
         }
         assert!(loopback("http://[::1]:9090/metrics"));
+        assert!(!loopback(r"http://evil.example\@localhost/metrics"));
         assert!(loopback("http://user@LOCALHOST:8080"));
     }
 
