@@ -116,7 +116,9 @@ pub fn load_report(report: &LoadReport) -> String {
     let l = &s.latency;
     let passed = report.passed();
     let mut body = String::new();
-    let verdict = if report.thresholds.is_empty() {
+    let verdict = if report.aborted {
+        "Stopped before the end"
+    } else if report.thresholds.is_empty() {
         "Load test finished"
     } else if passed {
         "Thresholds held"
@@ -145,6 +147,14 @@ pub fn load_report(report: &LoadReport) -> String {
         p99 = ms(l.p99),
         max = ms(l.max),
     );
+
+    if report.aborted {
+        let _ = write!(
+            body,
+            "<section><p>Stopped by hand after {}, before the load profile ended. The figures cover only that time.</p></section>",
+            ms(s.duration_ms)
+        );
+    }
 
     if !report.thresholds.is_empty() {
         body.push_str("<section><h2>Thresholds</h2><ul class=\"thresholds\">");

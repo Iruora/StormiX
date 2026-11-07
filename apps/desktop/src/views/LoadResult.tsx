@@ -1,4 +1,16 @@
-import { ArrowDown, ArrowUp, ChevronsUpDown, CircleCheck, CircleX, LoaderCircle, Search, Waypoints } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronsUpDown,
+  CircleCheck,
+  CircleStop,
+  CircleX,
+  LoaderCircle,
+  RotateCcw,
+  Search,
+  Square,
+  Waypoints,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { LoadProgress, LoadReport, Second, SlowRequest, StepResult, StepSummary, ThresholdResult } from "../bindings";
@@ -6,8 +18,11 @@ import { ProgressBar } from "./Busy";
 import { DetailsButton, stepPassed } from "./RunResult";
 import { CopyButton, StepDetails, type Diagnose } from "./StepDetails";
 
-/** Live figures while a load test runs: progress, the current second and a throughput chart. */
-export function LoadLive({ points }: { points: LoadProgress[] }) {
+/**
+ * Live figures while a load test runs: progress, the current second and a throughput chart.
+ * `onStop` ends it early; `stopping` is set while the requests in flight finish.
+ */
+export function LoadLive({ points, onStop, stopping }: { points: LoadProgress[]; onStop?: () => void; stopping?: boolean }) {
   const last = points[points.length - 1];
   const total = last?.totalS ?? 0;
   const elapsed = Math.min(last?.elapsedS ?? 0, total);
@@ -15,10 +30,17 @@ export function LoadLive({ points }: { points: LoadProgress[] }) {
     <section className="mt-4 rounded-lg border border-line bg-surface">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line px-4 py-3">
         <LoaderCircle size="1rem" className="animate-spin text-accent" />
-        <span className="font-semibold">{last ? "Load test running" : "Starting the load test"}</span>
-        <span className="ml-auto text-xs tabular-nums text-muted">
-          {last ? `${elapsed}s of ${total}s` : "Running setup steps and warming up"}
+        <span className="font-semibold">
+          {stopping ? "Stopping the load test" : last ? "Load test running" : "Starting the load test"}
         </span>
+        <span className="ml-auto text-xs tabular-nums text-muted">
+          {stopping
+            ? "Letting the requests in flight finish"
+            : last
+              ? `${elapsed}s of ${total}s`
+              : "Running setup steps and warming up"}
+        </span>
+        {onStop && <StopButton onClick={onStop} stopping={stopping} />}
       </div>
       {/* Until the first second is in, how long it takes is not known. */}
       <ProgressBar className="rounded-none" value={last && total ? elapsed / total : null} />
@@ -33,9 +55,38 @@ export function LoadLive({ points }: { points: LoadProgress[] }) {
   );
 }
 
-/** The outcome of a load test: headline figures, thresholds, a timeline and each step. */
-export function LoadResult({ report, diagnose }: { report: LoadReport; diagnose?: Diagnose }) {
+/** Ends a running load test early, keeping what it measured. */
+export function StopButton({ onClick, stopping }: { onClick: () => void; stopping?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={stopping}
+      aria-busy={stopping}
+      title="Stop starting new iterations and show what was measured so far"
+      className="flex items-center gap-1.5 rounded-md border border-bad px-2.5 py-0.5 text-xs font-semibold text-bad hover:bg-bad-soft disabled:opacity-60"
+    >
+      {stopping ? <LoaderCircle size="0.75rem" className="animate-spin" /> : <Square size="0.6875rem" fill="currentColor" />}
+      {stopping ? "Stopping…" : "Stop"}
+    </button>
+  );
+}
+
+/**
+ * The outcome of a load test: headline figures, thresholds, a timeline and each step.
+ * `onReplay` runs the same steps and load profile again.
+ */
+export function LoadResult({
+  report,
+  diagnose,
+  onReplay,
+}: {
+  report: LoadReport;
+  diagnose?: Diagnose;
+  onReplay?: () => void;
+}) {
   const s = report.summary;
+  const aborted = !!report.aborted;
   const passed = report.thresholds.every((t) => t.passed);
   const errorRate = s.requests ? (s.failedRequests / s.requests) * 100 : 0;
   const l = s.latency;
@@ -47,14 +98,44 @@ export function LoadResult({ report, diagnose }: { report: LoadReport; diagnose?
   return (
     <section className="mt-4 rounded-lg border border-line bg-surface">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line px-4 py-3">
-        {passed ? <CircleCheck size="1rem" className="text-ok" /> : <CircleX size="1rem" className="text-bad" />}
+        {aborted ? (
+          <CircleStop size="1rem" className="text-warn" />
+        ) : passed ? (
+          <CircleCheck size="1rem" className="text-ok" />
+        ) : (
+          <CircleX size="1rem" className="text-bad" />
+        )}
         <span className="font-semibold">
-          {report.thresholds.length === 0 ? "Load test finished" : passed ? "Thresholds held" : "Thresholds failed"}
+          {aborted
+            ? "Stopped before the end"
+            : report.thresholds.length === 0
+              ? "Load test finished"
+              : passed
+                ? "Thresholds held"
+                : "Thresholds failed"}
         </span>
         <span className="ml-auto text-xs text-muted">
           {s.iterations} iterations · {formatMs(s.durationMs ?? 0)}
         </span>
+        {onReplay && (
+          <button
+            type="button"
+            onClick={onReplay}
+            title="Run the same steps with the same load profile again"
+            className="flex items-center gap-1.5 rounded-md border border-accent px-2.5 py-0.5 text-xs font-semibold text-accent hover:bg-accent-soft"
+          >
+            <RotateCcw size="0.75rem" />
+            Replay
+          </button>
+        )}
       </div>
+
+      {aborted && (
+        <div className="border-b border-line bg-warn-soft px-4 py-2 text-xs text-warn">
+          Stopped by hand after {formatMs(s.durationMs ?? 0)}, before the load profile ended. The figures cover only that
+          time, so the test does not count as passed{report.thresholds.length > 0 ? " even where thresholds held" : ""}.
+        </div>
+      )}
 
       {(report.setup ?? []).length > 0 && (
         <div className="border-b border-line px-4 py-2 text-xs">

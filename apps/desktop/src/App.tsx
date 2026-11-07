@@ -51,7 +51,7 @@ import { VariableEditContext, type VariableEditing } from "./lib/variableEdit";
 import { VariablesContext, variableTable } from "./lib/variables";
 import { newWorkspace, WORKSPACES_KEY, workspaceTitle } from "./lib/workspace";
 import { type Activity, ActivityStrip, Loading } from "./views/Busy";
-import { LoadLive, LoadResult } from "./views/LoadResult";
+import { LoadLive, LoadResult, StopButton } from "./views/LoadResult";
 import { LoadSetup, type LoadSetupChoice } from "./views/LoadSetup";
 import { RunLive, RunResult, stepPassed } from "./views/RunResult";
 import type { Diagnose } from "./views/StepDetails";
@@ -442,6 +442,17 @@ function TestFileView({
     },
   });
   const busy = run.isPending || load.isPending;
+  // Set from Stop until the stopped test returns what it measured.
+  const [stopping, setStopping] = useState(false);
+  useEffect(() => {
+    if (!load.isPending) setStopping(false);
+  }, [load.isPending]);
+  /** Stops the running load test; its partial results then show, marked as stopped. */
+  const stopLoad = () => {
+    if (!load.isPending || stopping) return;
+    setStopping(true);
+    void commands.stopLoadTest();
+  };
   // A run that starts shows its progress.
   useEffect(() => {
     if (busy) setResultsTab("run");
@@ -494,6 +505,13 @@ function TestFileView({
     const steps = configured.flow.steps.filter((_, i) => included.includes(i));
     const yaml = await commands.testFileToYaml({ ...configured, flow: { ...configured.flow, steps } } as TestFile_Deserialize);
     run.reset();
+    panel.setOpen(true);
+    load.mutate(yaml);
+  };
+  /** Runs the last load test again: the same steps, load profile and thresholds. */
+  const replayLoad = () => {
+    const yaml = load.variables;
+    if (!yaml || busy || fileBusy || !load.data) return;
     panel.setOpen(true);
     load.mutate(yaml);
   };
@@ -829,6 +847,12 @@ function TestFileView({
       { id: "export-postman", group: "File", label: "Export a Postman collection…", disabled: fileBusy, run: () => exportTo.mutate("postman") },
       { id: "run", group: "Run", label: "Run once", disabled: !canRun || busy || fileBusy, run: runOnce },
       { id: "load", group: "Run", label: "Load test…", disabled: !canRun || busy || fileBusy, run: () => setSetupOpen(true) },
+      ...(load.isPending
+        ? [{ id: "load-stop", group: "Run", label: "Stop the load test", disabled: stopping, run: stopLoad }]
+        : []),
+      ...(load.data
+        ? [{ id: "load-replay", group: "Run", label: "Replay the last load test", disabled: busy || fileBusy, run: replayLoad }]
+        : []),
       ...envNames.map((name) => ({
         id: `env-${name}`,
         group: "Environment",
@@ -1085,8 +1109,14 @@ function TestFileView({
       )}
       {run.isPending && <RunLive name={result?.test?.flow.name ?? "the flow"} progress={runStep} />}
       {run.data && <RunResult result={run.data} diagnose={diagnoseIn(run.variables)} />}
-      {load.isPending && <LoadLive points={points} />}
-      {load.data && <LoadResult report={load.data} diagnose={diagnoseIn(load.variables)} />}
+      {load.isPending && <LoadLive points={points} onStop={stopLoad} stopping={stopping} />}
+      {load.data && !load.isPending && (
+        <LoadResult
+          report={load.data}
+          diagnose={diagnoseIn(load.variables)}
+          onReplay={busy || fileBusy ? undefined : replayLoad}
+        />
+      )}
       {!hasRun && (
         <p className="rounded-lg border border-dashed border-line px-4 py-6 text-center text-xs text-muted">
           Nothing run since the last change. <b className="font-semibold text-ink">Run once</b> sends every step one
@@ -1198,7 +1228,9 @@ function TestFileView({
           unit: "steps done",
         }
       : load.isPending
-        ? lastPoint
+        ? stopping
+          ? { label: "Stopping the load test", detail: "letting the requests in flight finish" }
+          : lastPoint
           ? { label: "Load test running", done: lastPoint.elapsedS, total: lastPoint.totalS, unit: "seconds" }
           : { label: "Starting the load test" }
         : null);
@@ -1398,6 +1430,7 @@ function TestFileView({
             {load.isPending ? <LoaderCircle size="0.8125rem" className="animate-spin" /> : <Gauge size="0.8125rem" />}
             Load test
           </button>
+          {load.isPending && <StopButton onClick={stopLoad} stopping={stopping} />}
         </div>
       </header>
       <ActivityStrip activity={strip} />

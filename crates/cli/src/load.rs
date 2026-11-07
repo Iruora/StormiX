@@ -55,7 +55,8 @@ pub struct LoadArgs {
     quiet: bool,
 }
 
-/// Exit codes: 0 every threshold held, 1 one did not, 2 the test could not start.
+/// Exit codes: 0 every threshold held, 1 one did not or the test was stopped
+/// with Ctrl+C, 2 the test could not start.
 pub fn load(args: LoadArgs) -> Result<ExitCode, String> {
     let overrides = Overrides {
         vus: args.vus,
@@ -75,6 +76,7 @@ pub fn load(args: LoadArgs) -> Result<ExitCode, String> {
     let options = LoadOptions {
         max_in_flight: args.max_in_flight,
         grace: args.grace.into(),
+        ..LoadOptions::default()
     };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -85,6 +87,19 @@ pub fn load(args: LoadArgs) -> Result<ExitCode, String> {
     if live {
         eprintln!("{} · {}", test.flow.name, describe(&profile));
     }
+    // The first Ctrl+C stops the test and still reports what it measured;
+    // a second one quits at once.
+    let stop = options.stop.clone();
+    runtime.spawn(async move {
+        if tokio::signal::ctrl_c().await.is_err() {
+            return;
+        }
+        eprintln!("\nStopping: letting running iterations finish (Ctrl+C again to quit now)");
+        stop.stop();
+        if tokio::signal::ctrl_c().await.is_ok() {
+            std::process::exit(130);
+        }
+    });
     let mut progress = ProgressLine::new(std::io::stderr().is_terminal());
     let report = runtime.block_on(run_load(
         &runner,
@@ -262,6 +277,13 @@ fn render_text(report: &LoadReport, title: Option<String>) -> String {
             let _ = writeln!(out, "{} · {profile}\n", report.name);
         }
         None => out.push('\n'),
+    }
+    if report.aborted {
+        let _ = writeln!(
+            out,
+            "  stopped     after {:.1} s, before the profile ended; figures cover that time only\n",
+            s.duration_ms / 1000.0
+        );
     }
     if !report.setup.is_empty() {
         let _ = writeln!(out, "  set up once, not measured");

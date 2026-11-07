@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use stormix_flow::{Flow, LoadProfile, Threshold};
 use stormix_metrics::{check_thresholds, Recorder, Sample, Second, Summary, ThresholdResult};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 
 use crate::{Exchanges, FlowResult, Runner, StepResult, Variables};
@@ -24,6 +24,11 @@ pub struct LoadOptions {
     pub max_in_flight: u32,
     /// How long iterations still running at the end may take to finish.
     pub grace: Duration,
+    /// Stops the test early when triggered; see [`StopSignal`].
+    pub stop: StopSignal,
+    /// After a stop, how long iterations still running may take to finish.
+    /// Shorter than `grace`, since whoever stopped the test wants it over.
+    pub stop_grace: Duration,
 }
 
 impl Default for LoadOptions {
@@ -31,7 +36,40 @@ impl Default for LoadOptions {
         Self {
             max_in_flight: 1000,
             grace: Duration::from_secs(30),
+            stop: StopSignal::default(),
+            stop_grace: Duration::from_secs(3),
         }
+    }
+}
+
+/// Stops a running load test early, from another task or thread. No new
+/// iterations start once it is triggered; those already running get
+/// [`LoadOptions::stop_grace`] to finish and the rest are cut off. The
+/// report keeps what was measured until then and is marked
+/// [`LoadReport::aborted`]. Clones share one signal.
+#[derive(Debug, Clone)]
+pub struct StopSignal(Arc<watch::Sender<bool>>);
+
+impl Default for StopSignal {
+    fn default() -> Self {
+        Self(Arc::new(watch::Sender::new(false)))
+    }
+}
+
+impl StopSignal {
+    pub fn stop(&self) {
+        self.0.send_replace(true);
+    }
+
+    pub fn is_stopped(&self) -> bool {
+        *self.0.borrow()
+    }
+
+    /// Resolves once [`StopSignal::stop`] has been called.
+    pub async fn stopped(&self) {
+        let mut rx = self.0.subscribe();
+        // The sender lives in `self`, so this cannot fail.
+        let _ = rx.wait_for(|stopped| *stopped).await;
     }
 }
 
@@ -71,6 +109,10 @@ pub struct LoadReport {
     /// when the flow has no `trace`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub slowest: Vec<SlowRequest>,
+    /// Stopped before the profile ended (see [`StopSignal`]): the figures
+    /// cover only the time it ran, and the test does not pass.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub aborted: bool,
 }
 
 /// One traced request from a load test.
@@ -93,9 +135,10 @@ const SLOWEST_PER_STEP: usize = 5;
 const MAX_SAMPLES: usize = 20;
 
 impl LoadReport {
-    /// Every threshold held. A test without thresholds passes.
+    /// It ran to the end and every threshold held. A test without
+    /// thresholds passes unless it was stopped.
     pub fn passed(&self) -> bool {
-        self.thresholds.iter().all(|t| t.passed)
+        !self.aborted && self.thresholds.iter().all(|t| t.passed)
     }
 }
 
@@ -110,8 +153,13 @@ pub async fn run_load(
     options: &LoadOptions,
     mut on_second: impl FnMut(&Progress<'_>),
 ) -> LoadReport {
+    let stop = &options.stop;
     let setup = match setup_flow(flow) {
-        Some(prefix) => runner.run(&prefix, overrides).await.steps,
+        Some(prefix) => tokio::select! {
+            result = runner.run(&prefix, overrides) => result.steps,
+            // The driver sees the stop too and starts nothing.
+            () = stop.stopped() => Vec::new(),
+        },
         None => Vec::new(),
     };
     let shared = Arc::new(Shared {
@@ -168,6 +216,7 @@ pub async fn run_load(
         samples,
         setup,
         slowest: slowest.into_list(),
+        aborted: outcome.aborted,
     }
 }
 
@@ -254,10 +303,11 @@ impl Shared {
 struct Outcome {
     dropped: u32,
     interrupted: u32,
+    aborted: bool,
 }
 
-/// Starts iterations until the profile ends, then gives the ones still
-/// running `grace` to finish.
+/// Starts iterations until the profile ends or the test is stopped, then
+/// gives the ones still running `grace` (or `stop_grace`) to finish.
 async fn drive(
     shared: Arc<Shared>,
     profile: LoadProfile,
@@ -267,34 +317,45 @@ async fn drive(
 ) -> Outcome {
     let total: Duration = profile.total_duration().into();
     let deadline = started + total;
+    let stop = &options.stop;
     let mut tasks = JoinSet::new();
     let mut dropped = 0;
 
     match &profile {
+        _ if stop.is_stopped() => {}
         LoadProfile::VirtualUsers {
             count, think_time, ..
         } => {
             let think: Duration = think_time.map(Into::into).unwrap_or_default();
             for _ in 0..*count {
-                let (shared, tx) = (shared.clone(), tx.clone());
+                let (shared, tx, stop) = (shared.clone(), tx.clone(), stop.clone());
                 tasks.spawn(async move {
-                    while Instant::now() < deadline {
+                    while Instant::now() < deadline && !stop.is_stopped() {
                         let result = shared.iteration().await;
                         if tx.send(result).is_err() {
                             return;
                         }
                         let left = deadline.saturating_duration_since(Instant::now());
                         if !think.is_zero() {
-                            tokio::time::sleep(think.min(left)).await;
+                            tokio::select! {
+                                () = tokio::time::sleep(think.min(left)) => {}
+                                () = stop.stopped() => return,
+                            }
                         }
                     }
                 });
+            }
+            // Users finish their iteration and stop on their own, so the
+            // grace below starts at the stop, not at the planned end.
+            tokio::select! {
+                () = tokio::time::sleep_until(deadline.into()) => {}
+                () = stop.stopped() => {}
             }
         }
         open => {
             let schedule = Schedule::new(open);
             let mut due_started = 0u64;
-            loop {
+            while !stop.is_stopped() {
                 let t = started.elapsed().min(total);
                 while tasks.try_join_next().is_some() {}
                 // Rounded a hair up, so float error cannot lose the last one.
@@ -320,26 +381,47 @@ async fn drive(
                 } else {
                     0.05
                 };
-                tokio::time::sleep(Duration::from_secs_f64(wait)).await;
+                tokio::select! {
+                    () = tokio::time::sleep(Duration::from_secs_f64(wait)) => {}
+                    () = stop.stopped() => {}
+                }
             }
         }
     }
+    // A stop during the grace below still lets the test count as complete.
+    let aborted = stop.is_stopped();
     drop(tx);
 
-    let finish = async { while tasks.join_next().await.is_some() {} };
-    let interrupted = match tokio::time::timeout(options.grace, finish).await {
-        Ok(()) => 0,
-        Err(_) => {
-            let left = tasks.len() as u32;
-            tasks.abort_all();
-            // Virtual users between iterations stop on their own; those
-            // still in the set were mid-iteration.
-            left
+    let finished = {
+        let finish = async { while tasks.join_next().await.is_some() {} };
+        tokio::pin!(finish);
+        if stop.is_stopped() {
+            tokio::time::timeout(options.stop_grace, &mut finish)
+                .await
+                .is_ok()
+        } else {
+            // A stop during the grace shortens it.
+            tokio::select! {
+                done = tokio::time::timeout(options.grace, &mut finish) => done.is_ok(),
+                () = stop.stopped() => {
+                    tokio::time::timeout(options.stop_grace, &mut finish).await.is_ok()
+                }
+            }
         }
+    };
+    let interrupted = if finished {
+        0
+    } else {
+        let left = tasks.len() as u32;
+        tasks.abort_all();
+        // Virtual users between iterations stop on their own; those
+        // still in the set were mid-iteration.
+        left
     };
     Outcome {
         dropped,
         interrupted,
+        aborted,
     }
 }
 

@@ -79,23 +79,31 @@ pub fn junit_report(result: &FlowResult) -> String {
 }
 
 /// One `<testcase>` per threshold, so a load test in CI shows which ones
-/// held. The run's figures go in `<system-out>`.
+/// held. The run's figures go in `<system-out>`. A test that was stopped
+/// early gets one more, failed, test case saying so.
 pub fn junit_load_report(report: &LoadReport) -> String {
     let s = &report.summary;
-    let failures = report.thresholds.iter().filter(|t| !t.passed).count();
+    let aborted = usize::from(report.aborted);
+    let failures = report.thresholds.iter().filter(|t| !t.passed).count() + aborted;
+    let tests = report.thresholds.len() + aborted;
     let time = s.duration_ms / 1000.0;
     let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     let _ = writeln!(
         xml,
-        r#"<testsuites name="stormix load" tests="{}" failures="{failures}" time="{time:.3}">"#,
-        report.thresholds.len(),
+        r#"<testsuites name="stormix load" tests="{tests}" failures="{failures}" time="{time:.3}">"#,
     );
     let _ = writeln!(
         xml,
-        r#"  <testsuite name="{}" tests="{}" failures="{failures}" time="{time:.3}">"#,
+        r#"  <testsuite name="{}" tests="{tests}" failures="{failures}" time="{time:.3}">"#,
         escape(&report.name),
-        report.thresholds.len(),
     );
+    if report.aborted {
+        let _ = writeln!(
+            xml,
+            "    <testcase classname=\"{}\" name=\"ran to the end\">\n      <failure message=\"stopped after {time:.1} s\" type=\"aborted\"/>\n    </testcase>",
+            escape(&report.name),
+        );
+    }
     for t in &report.thresholds {
         let _ = write!(
             xml,

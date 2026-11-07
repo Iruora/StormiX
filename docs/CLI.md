@@ -82,6 +82,8 @@ Without overrides, `load` uses the file's `load` profile. A collection has no pr
 | `--out FILE` | Also write the full report as JSON |
 | `-q`, `--quiet` | No live progress line |
 
+Press **Ctrl+C** to stop a load test early: no new iterations start, the ones running get 3 seconds to finish, and the report covers what ran so far, marked as stopped, with exit code 1. A second Ctrl+C quits at once.
+
 ```
 $ stormix load examples/demo-api.stormix.yaml
 Demo API login · ramping from 10/s: 100/s over 5s, 100/s over 10s, 0/s over 5s (20s in all)
