@@ -631,10 +631,20 @@ monitor:
   - actuator: { url: "{{base}}/actuator/" }
   - prometheus: { url: "{{base}}/metrics" }
   - prometheus: { url: "{{nowhere}}/metrics" }
-  - prometheus: { url: "http://127.0.0.1:1/metrics?token=s3cret" }
+  - prometheus: { url: "{{closing}}/metrics?token=s3cret" }
 "#,
     );
+    // Hangs up on every connection, so reads fail at once on every OS (a
+    // closed port can take seconds to refuse on Windows).
+    let closing = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let closing_url = format!("http://{}", closing.local_addr().unwrap());
+    tokio::spawn(async move {
+        while let Ok((socket, _)) = closing.accept().await {
+            drop(socket);
+        }
+    });
     let mut vars = base(&url);
+    vars.set("closing", &closing_url);
     vars.set("token", "s3cret");
     let runner = Runner::new(RunOptions::default()).unwrap();
     let options = LoadOptions {
@@ -714,7 +724,7 @@ monitor:
     assert!(unset.failing);
 
     // Errors leave the URL, and the token in it, out.
-    assert_eq!(refused.url, "http://127.0.0.1:1/metrics");
+    assert_eq!(refused.url, format!("{closing_url}/metrics"));
     let error = refused.error.as_deref().unwrap();
     assert!(!error.contains("s3cret"), "{error}");
     assert!(refused.failing);
