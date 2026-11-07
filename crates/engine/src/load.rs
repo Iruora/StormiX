@@ -160,6 +160,9 @@ impl LoadReport {
 
 /// Runs `flow` under `profile` and checks `thresholds` at the end.
 /// `on_second` is called once a second with live figures.
+/// Configured monitors read a baseline before load begins, waiting up to ten
+/// seconds or until stopped. Monitor failures are recorded in the returned
+/// resource series and do not stop the load test.
 pub async fn run_load(
     runner: &Runner,
     flow: &Flow,

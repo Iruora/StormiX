@@ -44,7 +44,11 @@ export function reportResources(report: LoadReport): ResourceView[] {
   return (report.resources ?? []).map((r) => ({ ...r }));
 }
 
-/** Series built from the live events: each carries every API's latest read. */
+/**
+ * Builds series by monitor index for the monitors in the latest event.
+ * Samples with repeated timestamps are omitted. Health status or detail changes
+ * use the event's elapsed seconds, which may follow the actual health read.
+ */
 export function liveResources(points: LoadProgress[]): ResourceView[] {
   const last = points[points.length - 1];
   return (last?.resources ?? []).map((r, i) => {
@@ -277,7 +281,9 @@ function values(series: ResourceView, pick: (s: ResourceView["samples"][number])
   });
 }
 
+/** Arithmetic mean, or undefined when there are no readings. */
 const avg = (v: number[]) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : undefined);
+/** Largest reading, or undefined when there are no readings. */
 const max = (v: number[]) => (v.length ? Math.max(...v) : undefined);
 
 /** A CPU figure, or a dash when there is none. */
@@ -285,7 +291,7 @@ function pct(v: number | undefined): string {
   return v == null ? "–" : `${Math.round(v)}%`;
 }
 
-/** A memory size in MB, or GB from 1 GB up. */
+/** Formats bytes using binary MB/GB units; missing values display a dash. */
 export function bytes(v: number | null | undefined): string {
   if (v == null) return "–";
   const mb = v / 1024 / 1024;

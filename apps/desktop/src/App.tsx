@@ -481,7 +481,7 @@ function TestFileView({
   const [setupOpen, setSetupOpen] = useState(false);
   // Steps left out of the last load test, by name, offered again next time.
   const [excluded, setExcluded] = useState<string[]>(ws.excluded);
-  /** Saves the setup's load profile and thresholds into the file, then runs the chosen steps. */
+  /** Saves changed load, threshold, monitor, tracing and cache settings, then runs the chosen steps. */
   const startLoad = async ({ included, cache, load: profile, thresholds, trace, monitor }: LoadSetupChoice) => {
     const test = result?.test;
     if (!test) return;

@@ -128,7 +128,9 @@ pub struct ResourceStats {
 }
 
 impl ResourceSeries {
-    /// Each time the API was unhealthy, in order.
+    /// Each time the API was unhealthy, in order, with times in seconds.
+    /// Consecutive unhealthy states form one period, keeping the first state's
+    /// status and detail. `to` is `None` without a later `UP` or `UNKNOWN`.
     pub fn unhealthy_periods(&self) -> Vec<UnhealthyPeriod> {
         let mut periods: Vec<UnhealthyPeriod> = Vec::new();
         for (i, change) in self.health.iter().enumerate() {
@@ -153,7 +155,10 @@ impl ResourceSeries {
         periods
     }
 
-    /// Averages and peaks over the whole test.
+    /// Averages and peaks over available samples, including the baseline.
+    /// Averages weight each present value equally, ignoring missing values.
+    /// Memory start and end are the first and last available memory readings;
+    /// a statistic is `None` when no corresponding values were recorded.
     pub fn stats(&self) -> ResourceStats {
         let values = |f: fn(&ResourceSample) -> Option<f64>| -> Vec<f64> {
             self.samples.iter().filter_map(f).collect()
@@ -201,6 +206,8 @@ pub(crate) struct Read {
 
 impl ResourceSeries {
     /// Takes in one reading or failure, and any health change, from a monitor task.
+    /// Repeated health status and detail pairs are omitted. A successful read
+    /// clears `failing` but retains the last error and cumulative failure count.
     pub(crate) fn apply(&mut self, update: Update) {
         match update.health {
             Some(HealthNews::Reading(change)) => {
@@ -236,7 +243,9 @@ impl ResourceSeries {
 }
 
 /// Reads every monitor until dropped. Returns the empty series, in order,
-/// and the tasks filling them through `tx`.
+/// and the tasks filling them through `tx`. Missing template values or an invalid
+/// metrics URL mark that series as failing without spawning a task. An invalid
+/// health URL disables only health reads and records `health_error`.
 pub(crate) fn start(
     monitors: &[Monitor],
     vars: &Variables,
@@ -552,7 +561,9 @@ fn not_up(json: &serde_json::Value, prefix: &str, out: &mut Vec<String>) {
 
 impl Reader {
     /// One reading. For Actuator, the first success decides between its
-    /// `/prometheus` and its JSON `/metrics`.
+    /// `/prometheus` and its JSON `/metrics`. The selected format is reused on
+    /// later reads. Before selection, a Prometheus failure falls back to JSON;
+    /// if both fail, the returned error includes both reasons.
     async fn read(&self, mode: &mut Option<Mode>) -> Result<Figures, String> {
         if !self.actuator {
             *mode = Some(Mode::Prometheus);
@@ -582,7 +593,9 @@ impl Reader {
         }
     }
 
-    /// One read of the health check, when there is one.
+    /// Reads health, returning `None` when no health URL is configured.
+    /// Request errors become `Unreachable`; 401, 403 and 404 become `Refused`.
+    /// A body read failure is treated as an empty body, using the HTTP status.
     async fn health(&self) -> Option<HealthOutcome> {
         let url = self.health.clone()?;
         let mut request = self
@@ -614,7 +627,9 @@ impl Reader {
         })
     }
 
-    /// One GET with the monitor's headers; errors never carry the URL.
+    /// One GET with the monitor's headers and timeout.
+    /// Returns an error for request or body read failures, or a non-success
+    /// HTTP status. Request and body errors have their URL removed.
     async fn get(&self, url: reqwest::Url, accept: &str) -> Result<String, String> {
         let mut request = self
             .client
@@ -638,7 +653,9 @@ impl Reader {
             .map_err(|e| describe(&e.without_url()))
     }
 
-    /// One read of a Prometheus text endpoint.
+    /// Reads CPU and memory figures from a Prometheus text endpoint.
+    /// Returns GET errors or an error when no recognized CPU or memory metric
+    /// is present; malformed metric lines are skipped.
     async fn prometheus(&self, url: reqwest::Url) -> Result<Figures, String> {
         let text = self
             .get(url, "text/plain;version=0.0.4;q=1,*/*;q=0.1")
@@ -651,7 +668,10 @@ impl Reader {
         }
     }
 
-    /// Actuator's `/metrics/{name}` JSON, one call per metric, together.
+    /// Reads Actuator's `/metrics/{name}` JSON metrics concurrently.
+    /// Propagates request or measurement errors for `process.cpu.usage`.
+    /// Errors for other metrics leave their values absent; missing non-heap
+    /// memory falls back to heap alone when heap is available.
     async fn actuator_json(&self, base: &reqwest::Url) -> Result<Figures, String> {
         let get = |path: &'static str| {
             let url = under(base, &format!("metrics/{path}"));
@@ -707,7 +727,10 @@ fn describe(err: &reqwest::Error) -> String {
     message
 }
 
-/// A measurement from Actuator's `{"measurements":[{"statistic":..,"value":..}]}`.
+/// Reads the requested statistic from Actuator's `measurements` array,
+/// falling back to its first entry if the statistic is absent.
+/// Returns an error for invalid JSON or when the selected entry has no numeric
+/// value; it does not search later entries for a usable value.
 fn actuator_value(text: &str, statistic: &str) -> Result<f64, String> {
     let json: serde_json::Value =
         serde_json::from_str(text).map_err(|_| "the response is not JSON".to_owned())?;
@@ -800,7 +823,11 @@ impl Figures {
     }
 
     /// The sample for this read, `since` being the time since the previous
-    /// read and that read's counters.
+    /// successful read in seconds and that read's counters. `t` is seconds
+    /// since the load started. Counter rates are absent without a prior value,
+    /// for nonpositive intervals, or when a counter decreases. CPU uses 100%
+    /// per core, GC uses milliseconds per second, and memory prefers RSS over
+    /// JVM usage.
     fn to_read(&self, t: f64, since: Option<(f64, &Counters)>, mode: Mode) -> Read {
         let rate = |now: Option<f64>, before: fn(&Counters) -> Option<f64>| {
             let (secs, counters) = since?;

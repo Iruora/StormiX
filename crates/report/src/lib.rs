@@ -566,6 +566,7 @@ fn ms(v: f64) -> String {
     }
 }
 
+/// Formats bytes as B, KB, MB or GB using powers of 1024.
 fn bytes(b: f64) -> String {
     if b >= 1_073_741_824.0 {
         format!("{:.2} GB", b / 1_073_741_824.0)
