@@ -1,0 +1,10 @@
+name: Stormix CodeQL config
+
+# Skip build output, dependencies and generated files.
+paths-ignore:
+  - target
+  - "**/node_modules"
+  - "**/dist"
+  - docs/.vitepress/cache
+  - apps/desktop/src-tauri/gen
+  - apps/desktop/src/bindings.ts
