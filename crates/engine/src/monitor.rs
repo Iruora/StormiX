@@ -52,6 +52,10 @@ pub struct ResourceSeries {
     /// that), like `404 Not Found` when it is not exposed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_error: Option<String>,
+    /// Whether the latest read failed (or none can be made), for live
+    /// views; `error` keeps the last failure's reason after that.
+    #[serde(skip)]
+    pub failing: bool,
 }
 
 /// The API's health from a moment on, until the next change.
@@ -218,10 +222,12 @@ impl ResourceSeries {
                     self.memory_kind = Some(kind.to_owned());
                 }
                 self.samples.push(read.sample);
+                self.failing = false;
             }
             Err(error) => {
                 self.failed_reads += 1;
                 self.error = Some(error);
+                self.failing = true;
             }
         }
     }
@@ -256,14 +262,18 @@ pub(crate) fn start(
                 .collect();
             let parsed = reqwest::Url::parse(url.trim());
             let mut series = ResourceSeries {
+                // A URL that does not parse is never copied into the
+                // report: it may hold a token that `shown` would remove.
                 name: target.name.clone().unwrap_or_else(|| {
                     parsed
                         .as_ref()
                         .ok()
                         .and_then(|u| u.host_str().map(str::to_owned))
-                        .unwrap_or_else(|| url.clone())
+                        .unwrap_or_else(|| format!("monitor {}", index + 1))
                 }),
-                url: parsed.as_ref().map_or_else(|_| url.clone(), shown),
+                url: parsed
+                    .as_ref()
+                    .map_or_else(|_| "(not a valid URL)".to_owned(), shown),
                 format: monitor.kind().to_owned(),
                 cpu_cores: None,
                 heap_max_bytes: None,
@@ -274,10 +284,12 @@ pub(crate) fn start(
                 health_url: None,
                 health: Vec::new(),
                 health_error: None,
+                failing: false,
             };
             let health = monitor.health_url().map(|h| fill(&h));
             if let Some(name) = missing.first() {
                 series.error = Some(format!("`{{{{{name}}}}}` has no value"));
+                series.failing = true;
             } else {
                 match parsed {
                     Ok(url) => {
@@ -303,7 +315,10 @@ pub(crate) fn start(
                         };
                         tasks.spawn(watch(index, reader, target.every(), origin, tx.clone()));
                     }
-                    Err(e) => series.error = Some(format!("the URL is not valid: {e}")),
+                    Err(e) => {
+                        series.error = Some(format!("the URL is not valid: {e}"));
+                        series.failing = true;
+                    }
                 }
             }
             series
@@ -533,7 +548,7 @@ impl Reader {
         Some(match request.send().await {
             // The deepest cause says it best: `Connection refused (os error 111)`.
             Err(e) => HealthOutcome::Unreachable(
-                describe(&e)
+                describe(&e.without_url())
                     .rsplit(": ")
                     .next()
                     .unwrap_or_default()
@@ -560,12 +575,18 @@ impl Reader {
         for (name, value) in &self.headers {
             request = request.header(name, value);
         }
-        let response = request.send().await.map_err(|e| describe(&e))?;
+        let response = request
+            .send()
+            .await
+            .map_err(|e| describe(&e.without_url()))?;
         let status = response.status();
         if !status.is_success() {
             return Err(status.to_string());
         }
-        response.text().await.map_err(|e| describe(&e))
+        response
+            .text()
+            .await
+            .map_err(|e| describe(&e.without_url()))
     }
 
     async fn prometheus(&self, url: reqwest::Url) -> Result<Figures, String> {
@@ -963,6 +984,7 @@ http_server_requests_seconds_count{method="GET",uri="/a \"b\"",} 3.0
             health_url: None,
             health: Vec::new(),
             health_error: None,
+            failing: false,
         };
         let stats = series.stats();
         assert_eq!(stats.cpu_avg, Some(100.0));
@@ -1022,6 +1044,7 @@ http_server_requests_seconds_count{method="GET",uri="/a \"b\"",} 3.0
                 change(9.0, "OUT_OF_SERVICE"),
             ],
             health_error: None,
+            failing: false,
         };
         let periods = series.unhealthy_periods();
         assert_eq!(periods.len(), 2);

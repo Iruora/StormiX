@@ -631,6 +631,7 @@ monitor:
   - actuator: { url: "{{base}}/actuator/" }
   - prometheus: { url: "{{base}}/metrics" }
   - prometheus: { url: "{{nowhere}}/metrics" }
+  - prometheus: { url: "http://127.0.0.1:1/metrics?token=s3cret" }
 "#,
     );
     let mut vars = base(&url);
@@ -659,7 +660,7 @@ monitor:
     )
     .await;
     assert!(report.passed());
-    let [prometheus, actuator, unauthorized, unset] = &report.resources[..] else {
+    let [prometheus, actuator, unauthorized, unset, refused] = &report.resources[..] else {
         panic!("{:?}", report.resources);
     };
 
@@ -707,4 +708,16 @@ monitor:
     assert_eq!(unauthorized.error.as_deref(), Some("401 Unauthorized"));
 
     assert_eq!(unset.error.as_deref(), Some("`{{nowhere}}` has no value"));
+    // A URL that does not parse is not copied into the report.
+    assert_eq!(unset.url, "(not a valid URL)");
+    assert_eq!(unset.name, "monitor 4");
+    assert!(unset.failing);
+
+    // Errors leave the URL, and the token in it, out.
+    assert_eq!(refused.url, "http://127.0.0.1:1/metrics");
+    let error = refused.error.as_deref().unwrap();
+    assert!(!error.contains("s3cret"), "{error}");
+    assert!(refused.failing);
+    // A later success clears `failing` but keeps the last reason.
+    assert!(!prometheus.failing);
 }

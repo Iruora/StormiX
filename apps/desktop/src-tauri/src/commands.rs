@@ -333,7 +333,7 @@ pub async fn run_load_test(
                         t: r.samples.last().map(|s| s.t),
                         cpu_percent: r.samples.last().and_then(|s| s.cpu_percent),
                         memory_bytes: r.samples.last().and_then(|s| s.memory_bytes),
-                        error: r.error.clone(),
+                        error: r.failing.then(|| r.error.clone()).flatten(),
                         cpu_cores: r.cpu_cores,
                         memory_kind: r.memory_kind.clone(),
                         health: r.health.last().map(|h| h.status.clone()),

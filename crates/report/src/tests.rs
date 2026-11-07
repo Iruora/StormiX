@@ -148,6 +148,7 @@ fn load_report_shows_the_apis_resources() {
                     },
                 ],
                 health_error: None,
+                failing: false,
             },
             ResourceSeries {
                 name: "<down>".into(),
@@ -162,6 +163,7 @@ fn load_report_shows_the_apis_resources() {
                 health_url: None,
                 health: Vec::new(),
                 health_error: None,
+                failing: false,
             },
         ],
     };
