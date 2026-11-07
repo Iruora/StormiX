@@ -58,9 +58,16 @@ export const commands = {
 	saveEnvironment: (path: string, variables: { [key in string]: string }, secrets: string[]) => typedError<LoadedEnvironment, string>(__TAURI_INVOKE("save_environment", { path, variables, secrets })),
 	/**
 	 *  Runs the file's flow under its load profile and checks its thresholds,
-	 *  sending [`LoadProgress`] events as it goes.
+	 *  sending [`LoadProgress`] events as it goes. [`stop_load_test`] ends it
+	 *  early.
 	 */
 	runLoadTest: (text: string, variables: { [key in string]: string }, source: string | null) => typedError<LoadReport_Serialize, string>(__TAURI_INVOKE("run_load_test", { text, variables, source })),
+	/**
+	 *  Stops the running load test: no new iterations start, running ones get
+	 *  a few seconds to finish, and [`run_load_test`] then returns what was
+	 *  measured, marked aborted. False when no load test is running.
+	 */
+	stopLoadTest: () => __TAURI_INVOKE<boolean>("stop_load_test"),
 	/**  Steps with a cached response, from steps marked `cache: true`. */
 	cachedSteps: () => __TAURI_INVOKE<CachedStep[]>("cached_steps"),
 	/**
@@ -695,6 +702,11 @@ export type LoadReport_Deserialize = {
 	 *  when the flow has no `trace`.
 	 */
 	slowest?: SlowRequest_Deserialize[],
+	/**
+	 *  Stopped before the profile ended (see [`StopSignal`]): the figures
+	 *  cover only the time it ran, and the test does not pass.
+	 */
+	aborted?: boolean,
 };
 
 export type LoadReport_Serialize = {
@@ -720,6 +732,11 @@ export type LoadReport_Serialize = {
 	 *  when the flow has no `trace`.
 	 */
 	slowest?: SlowRequest_Serialize[],
+	/**
+	 *  Stopped before the profile ended (see [`StopSignal`]): the figures
+	 *  cover only the time it ran, and the test does not pass.
+	 */
+	aborted?: boolean,
 };
 
 /**  An environment read from a file of its own. */

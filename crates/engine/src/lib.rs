@@ -21,7 +21,7 @@ pub use cache::{CachedStep, ResponseCache};
 pub use connection::ProxyChoice;
 pub use diagnose::{Diagnosis, DiagnosisStage, StageOutcome};
 pub use junit::{junit_load_report, junit_report};
-pub use load::{run_load, LoadOptions, LoadReport, Progress, SlowRequest};
+pub use load::{run_load, LoadOptions, LoadReport, Progress, SlowRequest, StopSignal};
 pub use result::{
     Certificate, Check, Connection, Exchange, FlowResult, HeaderPair, Payload, ResponseRecord,
     StepResult,

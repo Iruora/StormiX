@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use stormix_engine::{
     run_load, CachedStep, Diagnosis, FlowResult, LoadOptions, LoadReport, ProxyChoice, Runner,
-    StepStart, Variables,
+    StepStart, StopSignal, Variables,
 };
 use stormix_flow::{Issue, Severity, TestFile};
 use stormix_store::{RunData, RunDiff, RunSummary, Store, StoredRun};
@@ -228,8 +228,42 @@ pub struct LoadProgress {
     pub active: u32,
 }
 
+/// The load test running now, so [`stop_load_test`] can stop it.
+#[derive(Default)]
+pub struct RunningLoad(Mutex<Option<StopSignal>>);
+
+impl RunningLoad {
+    fn start(&self, stop: StopSignal) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(stop);
+    }
+
+    /// Forgets `stop`, unless a newer test has taken its place.
+    fn finish(&self, stop: &StopSignal) {
+        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.as_ref().is_some_and(|s| s.same_as(stop)) {
+            *slot = None;
+        }
+    }
+}
+
+/// Stops the running load test: no new iterations start, running ones get
+/// a few seconds to finish, and [`run_load_test`] then returns what was
+/// measured, marked aborted. False when no load test is running.
+#[tauri::command]
+#[specta::specta]
+pub fn stop_load_test(running: State<'_, RunningLoad>) -> bool {
+    match &*running.0.lock().unwrap_or_else(|e| e.into_inner()) {
+        Some(stop) => {
+            stop.stop();
+            true
+        }
+        None => false,
+    }
+}
+
 /// Runs the file's flow under its load profile and checks its thresholds,
-/// sending [`LoadProgress`] events as it goes.
+/// sending [`LoadProgress`] events as it goes. [`stop_load_test`] ends it
+/// early.
 #[tauri::command]
 #[specta::specta]
 pub async fn run_load_test(
@@ -239,6 +273,7 @@ pub async fn run_load_test(
     app: AppHandle,
     runner: State<'_, SharedRunner>,
     store: State<'_, Mutex<Store>>,
+    running: State<'_, RunningLoad>,
 ) -> Result<LoadReport, String> {
     let test = checked(&text)?;
     let Some(profile) = &test.load else {
@@ -246,13 +281,15 @@ pub async fn run_load_test(
     };
     let mut vars = Variables::new();
     vars.extend(variables);
+    let options = LoadOptions::default();
+    running.start(options.stop.clone());
     let report = run_load(
         &runner.get(),
         &test.flow,
         &vars,
         profile,
         &test.thresholds,
-        &LoadOptions::default(),
+        &options,
         |p| {
             let _ = LoadProgress {
                 elapsed_s: p.elapsed.as_secs() as u32,
@@ -266,6 +303,7 @@ pub async fn run_load_test(
         },
     )
     .await;
+    running.finish(&options.stop);
     save(&store, RunData::Load(report.clone()), source.as_deref());
     Ok(report)
 }

@@ -20,6 +20,10 @@ The panel says the test is starting (setup steps and warm-up) until its first se
 
 <Shot name="load-running" alt="A load test running, with its live chart" />
 
+### Stopping a test
+
+Started the wrong test, or pointed it at the wrong server? **Stop** (in the header and on the live panel) ends it early. No new iterations start, the requests already in flight get a few seconds to finish, and the panel then shows what was measured so far, marked **Stopped before the end**. A stopped test never counts as passed, even when its thresholds held, and it is kept in the run history like any other.
+
 ## The results
 
 At the end the panel shows:
@@ -31,6 +35,8 @@ At the end the panel shows:
 - a **per-step table**;
 - the **most common failures**, each with a **Details** button that opens the first failing request and its response;
 - the **slowest traced requests**, with tracing on.
+
+**Replay** runs the same steps again with the same load profile and thresholds, without going through the setup dialog. It uses the environment selected now. Editing the file clears the result, and with it Replay; use **Load test** to start from the setup again.
 
 ### Sorting and filtering steps
 

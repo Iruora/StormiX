@@ -24,6 +24,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::environment_path_beside,
             commands::save_environment,
             commands::run_load_test,
+            commands::stop_load_test,
             commands::cached_steps,
             commands::clear_cache,
             commands::list_runs,
@@ -80,6 +81,7 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
+            app.manage(commands::RunningLoad::default());
             app.manage(commands::SharedRunner::new(Runner::new(
                 RunOptions::default(),
             )?));

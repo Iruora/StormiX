@@ -355,3 +355,194 @@ load:
     .await;
     assert!(report.slowest.is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn virtual_users_run_the_whole_profile_however_short_the_grace() {
+    let url = serve().await;
+    let test = test_file(
+        r#"
+flow:
+  name: fast
+  steps:
+    - name: fast
+      request: { method: GET, url: "{{base}}/fast" }
+load:
+  virtual_users: { count: 1, duration: 1s, think_time: 100ms }
+"#,
+    );
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let options = LoadOptions {
+        grace: Duration::from_millis(200),
+        ..LoadOptions::default()
+    };
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(&url),
+        test.load.as_ref().unwrap(),
+        &[],
+        &options,
+        |_| {},
+    )
+    .await;
+    let s = &report.summary;
+    // The grace counts from the end of the profile, not from the start.
+    assert!(s.iterations >= 7, "{s:?}");
+    assert!(s.duration_ms >= 1000.0, "{s:?}");
+    assert!(!report.aborted);
+}
+
+/// Starts `test`, stops it after `after`, and returns the report and how
+/// long the whole run took.
+async fn stopped_after(
+    test: &TestFile,
+    url: &str,
+    after: Duration,
+) -> (stormix_engine::LoadReport, Duration) {
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let options = LoadOptions::default();
+    let stop = options.stop.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(after).await;
+        stop.stop();
+    });
+    let started = std::time::Instant::now();
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(url),
+        test.load.as_ref().unwrap(),
+        &thresholds(&["errors < 1%"]),
+        &options,
+        |_| {},
+    )
+    .await;
+    (report, started.elapsed())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stopping_virtual_users_keeps_what_was_measured() {
+    let url = serve().await;
+    let test = test_file(
+        r#"
+flow:
+  name: fast
+  steps:
+    - name: fast
+      request: { method: GET, url: "{{base}}/fast" }
+load:
+  virtual_users: { count: 3, duration: 60s, think_time: 5s }
+"#,
+    );
+    let (report, took) = stopped_after(&test, &url, Duration::from_millis(500)).await;
+    // Users waiting out their think time stop at once.
+    assert!(took < Duration::from_secs(2), "took {took:?}");
+    assert!(report.aborted);
+    assert!(!report.passed(), "a stopped test does not pass");
+    assert!(
+        report.thresholds[0].passed,
+        "thresholds still cover what ran"
+    );
+    assert_eq!(report.summary.iterations, 3, "{:?}", report.summary);
+    assert_eq!(report.summary.interrupted_iterations, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stopping_an_open_model_lets_running_iterations_finish() {
+    let url = serve().await;
+    let test = test_file(
+        r#"
+flow:
+  name: slow
+  steps:
+    - name: slow
+      request: { method: GET, url: "{{base}}/slow" }
+load:
+  constant_rate: { rate: 20, duration: 60s }
+"#,
+    );
+    let (report, took) = stopped_after(&test, &url, Duration::from_millis(1000)).await;
+    assert!(took < Duration::from_secs(2), "took {took:?}");
+    assert!(report.aborted);
+    let s = &report.summary;
+    // About 20 started in the first second; those in flight finished.
+    assert!((15..=25).contains(&s.iterations), "{s:?}");
+    assert_eq!(s.interrupted_iterations, 0, "{s:?}");
+    assert!(s.duration_ms < 2000.0, "{s:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_test_stopped_before_it_starts_sends_nothing() {
+    let url = serve().await;
+    let test = test_file(
+        r#"
+flow:
+  name: slow
+  steps:
+    - name: slow
+      request: { method: GET, url: "{{base}}/slow" }
+load:
+  virtual_users: { count: 2, duration: 60s }
+"#,
+    );
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let options = LoadOptions {
+        stop_grace: Duration::ZERO,
+        ..LoadOptions::default()
+    };
+    options.stop.stop();
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(&url),
+        test.load.as_ref().unwrap(),
+        &[],
+        &options,
+        |_| {},
+    )
+    .await;
+    // Stopped before it began: nothing ran.
+    assert!(report.aborted);
+    assert_eq!(report.summary.iterations, 0);
+    assert_eq!(report.summary.requests, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stopping_cuts_off_iterations_past_the_stop_grace() {
+    let url = serve().await;
+    let test = test_file(
+        r#"
+flow:
+  name: slow
+  steps:
+    - name: slow
+      request: { method: GET, url: "{{base}}/slow" }
+load:
+  virtual_users: { count: 2, duration: 60s }
+"#,
+    );
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let options = LoadOptions {
+        stop_grace: Duration::from_millis(50),
+        ..LoadOptions::default()
+    };
+    let stop = options.stop.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        stop.stop();
+    });
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(&url),
+        test.load.as_ref().unwrap(),
+        &[],
+        &options,
+        |_| {},
+    )
+    .await;
+    // Both users were 100 ms into a 300 ms request.
+    assert!(report.aborted);
+    assert_eq!(report.summary.iterations, 0);
+    assert_eq!(report.summary.interrupted_iterations, 2);
+}

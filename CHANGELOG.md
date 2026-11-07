@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Stop and replay load tests
+
+- **Stop a running load test.** A **Stop** button sits beside **Load test** and on the live panel. No new iterations start, the requests in flight get a few seconds to finish, and the results show what was measured so far, marked **Stopped before the end**. A stopped test does not count as passed. In the CLI, Ctrl+C does the same (a second Ctrl+C quits at once), and HTML and JUnit reports say the test was stopped.
+- **Replay a load test.** **Replay** on a finished or stopped load test runs the same steps with the same load profile and thresholds again, without the setup dialog.
+
+### Fixes
+
+- A virtual-user load test longer than the 30-second grace period no longer stops early: the grace now counts from the end of the profile, not from its start.
+
 ## 1.10.0 (2026-11-03)
 
 ### Edit variables and scripts where you see them
