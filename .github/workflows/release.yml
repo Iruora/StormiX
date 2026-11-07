@@ -135,22 +135,13 @@ jobs:
           cache-dependency-path: apps/desktop/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: apps/desktop
-      - name: Give the MSI a numeric version for a pre-release
-        if: runner.os == 'Windows' && contains(env.TAG, '-')
+      - name: Settings for a pre-release version
+        id: bundle
         shell: bash
-        run: |
-          # Windows Installer only takes major.minor.patch.build, so 1.11.0-rc.1
-          # becomes 1.11.0.1 for the .msi. The other installers keep the full version.
-          node -e '
-            const fs = require("fs");
-            const path = "apps/desktop/src-tauri/tauri.conf.json";
-            const conf = JSON.parse(fs.readFileSync(path, "utf8"));
-            const [core, pre] = conf.version.split("-");
-            const build = (pre.match(/(\d+)$/) || [, "0"])[1];
-            conf.bundle.windows = { ...conf.bundle.windows, wix: { ...(conf.bundle.windows || {}).wix, version: `${core}.${build}` } };
-            fs.writeFileSync(path, JSON.stringify(conf, null, 2));
-            console.log(`MSI version ${core}.${build}`);
-          '
+        working-directory: apps/desktop
+        # For a pre-release like 1.11.0-rc.1: a numeric .msi version, and no .rpm
+        # (rpm refuses the "-" and would sort it above 1.11.0). See the script.
+        run: echo "args=$(node scripts/bundle-args.mjs)" >> "$GITHUB_OUTPUT"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -160,9 +151,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
-          # rpm has no pre-release versions: it would sort 1.11.0-rc.1 above 1.11.0
-          # and block the upgrade, so a pre-release ships the .deb and .AppImage only.
-          args: --target ${{ matrix.target }}${{ runner.os == 'Linux' && contains(env.TAG, '-') && ' --bundles deb,appimage' || '' }}
+          args: --target ${{ matrix.target }} ${{ steps.bundle.outputs.args }}
           releaseId: ${{ needs.create-release.outputs.release-id }}
       - name: Build and attach the CLI
         shell: bash
