@@ -160,7 +160,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
-          args: --target ${{ matrix.target }}
+          # rpm has no pre-release versions: it would sort 1.11.0-rc.1 above 1.11.0
+          # and block the upgrade, so a pre-release ships the .deb and .AppImage only.
+          args: --target ${{ matrix.target }}${{ runner.os == 'Linux' && contains(env.TAG, '-') && ' --bundles deb,appimage' || '' }}
           releaseId: ${{ needs.create-release.outputs.release-id }}
       - name: Build and attach the CLI
         shell: bash
@@ -271,7 +273,9 @@ jobs:
           names=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate --jq '.[].name')
           echo "$names"
           missing=0
-          for suffix in _aarch64.dmg _x64.dmg _aarch64.app.zip _x64.app.zip -setup.exe .msi _portable.zip _installer.zip .AppImage .deb .rpm \
+          # A pre-release has no .rpm (see the build job).
+          case "$TAG" in *-*) rpm= ;; *) rpm=.rpm ;; esac
+          for suffix in _aarch64.dmg _x64.dmg _aarch64.app.zip _x64.app.zip -setup.exe .msi _portable.zip _installer.zip .AppImage .deb $rpm \
             _aarch64-apple-darwin.tar.gz _x86_64-apple-darwin.tar.gz _x86_64-unknown-linux-gnu.tar.gz _x86_64-pc-windows-msvc.zip \
             latest.json; do
             if ! grep -q -- "$suffix\$" <<< "$names"; then
