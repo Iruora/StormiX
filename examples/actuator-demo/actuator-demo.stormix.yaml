@@ -1,0 +1,28 @@
+# Load test for the local actuator-demo app (see README.md).
+# Stormix reads the app's CPU, memory and health from /actuator while it runs.
+version: 1
+flow:
+  name: Actuator demo
+  variables:
+    base_url: http://localhost:8080
+  steps:
+    - name: Hello
+      request: { method: GET, url: "{{base_url}}/api/hello" }
+      assert: [ { status: 200 } ]
+    - name: Burn some CPU
+      request: { method: GET, url: "{{base_url}}/api/work?ms=20" }
+      assert: [ { status: 200 } ]
+    - name: Grow the heap
+      request: { method: GET, url: "{{base_url}}/api/alloc?kb=256" }
+      assert: [ { status: 200 } ]
+monitor:
+  - actuator:
+      url: "{{base_url}}/actuator"
+      name: actuator-demo
+load:
+  ramping:
+    start_rate: 5
+    stages:
+      - { duration: 10s, target: 50 }
+      - { duration: 30s, target: 50 }
+      - { duration: 10s, target: 0 }
