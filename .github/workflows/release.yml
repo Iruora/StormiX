@@ -68,15 +68,17 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
               --jq ".[] | select(.tag_name == \"$TAG\" or .name == \"Stormix $TAG\") | .id" | sort -n | tail -n 1
           }
+          # A tag with a pre-release part, like v1.11.0-rc.1, makes a pre-release.
+          case "$TAG" in *-*) prerelease=true ;; *) prerelease=false ;; esac
           id=$(find_id)
           if [ -z "$id" ]; then
             # Take the id from the response: a fresh draft can take a moment to show up in the list.
             id=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$TAG" \
-              -f name="Stormix $TAG" -F draft=true -F body=@.github/release-notes.md --jq .id)
+              -f name="Stormix $TAG" -F draft=true -F prerelease=$prerelease -F body=@.github/release-notes.md --jq .id)
           else
             # A rerun refreshes the notes of the existing release and pins it to the tag again.
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$id" -f tag_name="$TAG" \
-              -F body=@.github/release-notes.md --silent
+              -F prerelease=$prerelease -F body=@.github/release-notes.md --silent
           fi
           if [ -z "$id" ]; then
             echo "::error::Could not find or create the draft release for $TAG"
@@ -133,6 +135,13 @@ jobs:
           cache-dependency-path: apps/desktop/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: apps/desktop
+      - name: Settings for a pre-release version
+        id: bundle
+        shell: bash
+        working-directory: apps/desktop
+        # For a pre-release like 1.11.0-rc.1: a numeric .msi version, and no .rpm
+        # or .deb (both would sort it above 1.11.0). See the script.
+        run: echo "args=$(node scripts/bundle-args.mjs)" >> "$GITHUB_OUTPUT"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -142,7 +151,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} ${{ steps.bundle.outputs.args }}
           releaseId: ${{ needs.create-release.outputs.release-id }}
       - name: Build and attach the CLI
         shell: bash
@@ -253,7 +262,9 @@ jobs:
           names=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate --jq '.[].name')
           echo "$names"
           missing=0
-          for suffix in _aarch64.dmg _x64.dmg _aarch64.app.zip _x64.app.zip -setup.exe .msi _portable.zip _installer.zip .AppImage .deb .rpm \
+          # A pre-release has no .rpm or .deb (see the build job).
+          case "$TAG" in *-*) linux= ;; *) linux=".deb .rpm" ;; esac
+          for suffix in _aarch64.dmg _x64.dmg _aarch64.app.zip _x64.app.zip -setup.exe .msi _portable.zip _installer.zip .AppImage $linux \
             _aarch64-apple-darwin.tar.gz _x86_64-apple-darwin.tar.gz _x86_64-unknown-linux-gnu.tar.gz _x86_64-pc-windows-msvc.zip \
             latest.json; do
             if ! grep -q -- "$suffix\$" <<< "$names"; then
@@ -273,8 +284,11 @@ jobs:
           done
           [ "$missing" = 0 ] || exit 1
           # Naming the tag here keeps the release on it rather than an untagged-... one.
+          # A pre-release is never marked latest: the in-app updater reads
+          # releases/latest, so installed apps are not offered a release candidate.
+          case "$TAG" in *-*) prerelease=true; latest=false ;; *) prerelease=false; latest=true ;; esac
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -f tag_name="$TAG" \
-            -F draft=false -f make_latest=true --silent
+            -F draft=false -F prerelease=$prerelease -f make_latest=$latest --silent
           echo "Published $TAG"
           # Clean up leftovers of earlier attempts: other drafts of this release and stray untagged-... tags.
           gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
