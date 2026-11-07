@@ -245,10 +245,7 @@ impl TestFile {
                     .any(|h| h.name.eq_ignore_ascii_case("authorization"));
             // A token over plain HTTP can be read on the way; this machine
             // is the exception.
-            let local = ["http://localhost", "http://127.0.0.1", "http://[::1]"]
-                .iter()
-                .any(|l| url.starts_with(l));
-            if authorized && url.starts_with("http://") && !local {
+            if authorized && url.starts_with("http://") && !loopback(url) {
                 issues.warning(
                     &format!("{at}.url"),
                     "the token is sent without HTTPS, so it can be read on the way; use https://",
@@ -333,6 +330,22 @@ fn mentioned(scripts: &[&str], name: &str) -> bool {
     })
 }
 
+/// Whether an `http://` URL's host is this machine: `localhost`,
+/// `127.0.0.1` or `[::1]` exactly, whatever the port or user info.
+fn loopback(url: &str) -> bool {
+    let rest = url.strip_prefix("http://").unwrap_or(url);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority.rsplit('@').next().unwrap_or_default();
+    let host = if host.starts_with('[') {
+        host.split_inclusive(']').next().unwrap_or_default()
+    } else {
+        host.split(':').next().unwrap_or_default()
+    };
+    ["localhost", "127.0.0.1", "[::1]"]
+        .iter()
+        .any(|l| host.eq_ignore_ascii_case(l))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -415,6 +428,22 @@ flow:
         for monitor in fine {
             assert_eq!(issues(&file(monitor)), [], "{monitor}");
         }
+        // Hosts that only look local, and a token in a header.
+        let flagged = [
+            r#"prometheus: { url: "http://localhost.evil.example/metrics", token: "{{t}}" }"#,
+            r#"prometheus: { url: "http://127.0.0.1.evil.example/metrics", token: "{{t}}" }"#,
+            r#"prometheus: { url: "http://localhost@evil.example/metrics", token: "{{t}}" }"#,
+            r#"prometheus: { url: "http://api.test/metrics", headers: [{ name: Authorization, value: "Bearer {{t}}" }] }"#,
+        ];
+        for monitor in flagged {
+            assert_eq!(
+                issues(&file(monitor)),
+                [(Severity::Warning, "monitor[0].prometheus.url".into())],
+                "{monitor}"
+            );
+        }
+        assert!(loopback("http://[::1]:9090/metrics"));
+        assert!(loopback("http://user@LOCALHOST:8080"));
     }
 
     #[test]
