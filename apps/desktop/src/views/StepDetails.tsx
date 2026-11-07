@@ -6,6 +6,7 @@ import {
   CircleX,
   Copy,
   Info,
+  Sparkles,
   Stethoscope,
   Waypoints,
   X,
@@ -17,8 +18,10 @@ import { methodText } from "../lib/methods";
 import { useProxy } from "../lib/proxy";
 import { ProxySetting } from "./ProxySetting";
 import { Spinner } from "./Busy";
+import { ExplainPanel } from "./Explain";
+import { useAiContext, useAiProviders } from "../lib/ai";
 
-type Tab = "failure" | "request" | "response" | "connection";
+type Tab = "failure" | "request" | "response" | "connection" | "explain";
 
 /** Sends the step again and checks each stage of its request. */
 export type Diagnose = (stepName: string) => Promise<Diagnosis>;
@@ -54,6 +57,15 @@ export function StepDetails({
     } catch (e) {
       setDiagnosis({ pending: false, error: e instanceof Error ? e.message : String(e) });
     }
+  };
+
+  const ai = useAiProviders();
+  const { file } = useAiContext();
+  const showExplain = ai.settings.enabled;
+  const [explainStarted, setExplainStarted] = useState(false);
+  const explain = () => {
+    setExplainStarted(true);
+    setTab("explain");
   };
 
   useEffect(() => {
@@ -106,16 +118,19 @@ export function StepDetails({
         </header>
 
         <nav className="flex gap-1 border-b border-line bg-surface-2 px-4 py-1.5">
-          {(["failure", "request", "response", "connection"] as const).map((t) => (
+          {(["failure", "request", "response", "connection", ...(showExplain ? (["explain"] as const) : [])] as const).map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => setTab(t)}
-              className={`rounded px-2.5 py-0.5 text-xs font-medium ${
-                tab === t ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface"
-              }`}
+              className={`flex items-center gap-1 rounded px-2.5 py-0.5 text-xs font-medium ${
+                t === "explain" ? "ml-auto " : ""
+              }${tab === t ? "bg-accent-soft text-accent" : "text-muted hover:bg-surface"}`}
             >
-              {t === "failure"
+              {t === "explain" && <Sparkles size="0.75rem" />}
+              {t === "explain"
+                ? "Explain"
+                : t === "failure"
                 ? passed
                   ? "Checks"
                   : "Failure"
@@ -145,7 +160,33 @@ export function StepDetails({
                   <DiagnoseButton pending={diagnosis.pending} onClick={startDiagnosis} />
                 </div>
               )}
+              {!passed && showExplain && ai.active && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-line bg-surface-2 px-3 py-2 text-[0.8125rem]">
+                  <span className="min-w-0 flex-1 text-muted">Want a second opinion on why it failed?</span>
+                  <button
+                    type="button"
+                    onClick={explain}
+                    className="flex shrink-0 items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1 text-xs font-medium hover:border-accent hover:text-accent"
+                  >
+                    <Sparkles size="0.8125rem" /> Explain
+                  </button>
+                </div>
+              )}
             </>
+          )}
+          {showExplain && (
+            <div className={tab === "explain" ? "" : "hidden"}>
+            <ExplainPanel
+              what={passed ? "about this response" : "why this step failed"}
+              autoStart={explainStarted}
+              question={() => ({
+                kind: "step",
+                step,
+                file,
+                diagnosis: diagnosis.result ?? null,
+              })}
+            />
+            </div>
           )}
           {tab === "request" &&
             (exchange ? (
