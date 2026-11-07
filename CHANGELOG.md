@@ -7,6 +7,10 @@
 - **Stop a running load test.** A **Stop** button sits beside **Load test** and on the live panel. No new iterations start, the requests in flight get a few seconds to finish, and the results show what was measured so far, marked **Stopped before the end**. A stopped test does not count as passed. In the CLI, Ctrl+C does the same (a second Ctrl+C quits at once), and HTML and JUnit reports say the test was stopped.
 - **Replay a load test.** **Replay** on a finished or stopped load test runs the same steps with the same load profile and thresholds again, without the setup dialog.
 
+### Watch the API's CPU and memory during a load test
+
+- **API CPU and memory beside the latency.** Point a load test at the API's metrics endpoint, such as Spring Boot Actuator's `/actuator/prometheus`, `/actuator/metrics`, Quarkus' `/q/metrics`, or the `/metrics` of prometheus-net, prom-client or Go. Stormix reads it every second, starting just before the load. The API's CPU (100% = one core), memory, JVM heap and GC pauses then show live while the test runs, and as figures and a chart in the results, the HTML report and the run history. Set it up under **API CPU and memory** in the load test setup, with a `monitor` section in the file, or with `stormix load --monitor URL`. Headers, such as a token from a secret, can go with each read.
+
 ### Fixes
 
 - A virtual-user load test longer than the 30-second grace period no longer stops early: the grace now counts from the end of the profile, not from its start.

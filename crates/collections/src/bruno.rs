@@ -150,6 +150,7 @@ pub fn from_dir_with_progress(
             },
             load: None,
             thresholds: Vec::new(),
+            monitor: Vec::new(),
         },
         environments,
         secrets: env_secrets,

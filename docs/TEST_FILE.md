@@ -275,3 +275,23 @@ A threshold is `<metric> <operator> <value>`. The operator is `<`, `<=`, `>` or 
 | `rps` | Requests per second over the run, a plain number | `rps > 200` |
 
 Thresholds apply only under load. `stormix load --threshold "p95 < 300ms"` adds one from the command line.
+
+## `monitor`
+
+Metrics endpoints the API serves, read during a load test so that the API's own CPU and memory show beside the latency. Each entry is `prometheus` (Prometheus text, like `/actuator/prometheus`, `/metrics` or `/q/metrics`) or `actuator` (a Spring Boot Actuator base URL; Stormix reads `/prometheus` under it when that is exposed, else the JSON at `/metrics`).
+
+| Field | |
+|---|---|
+| `url` | The endpoint. `{{variables}}` work |
+| `name` | What to call it in results (optional, the URL's host by default) |
+| `headers` | `[{ name, value }]` sent with every read, like a bearer token (optional) |
+| `interval` | Time between reads (optional, `1s` by default) |
+
+```yaml
+monitor:
+  - prometheus:
+      url: "{{base_url}}/actuator/prometheus"
+      headers: [{ name: Authorization, value: "Bearer {{actuator_token}}" }]
+```
+
+See [API CPU and memory](/features/api-resources) for which figures are read and how they are shown.

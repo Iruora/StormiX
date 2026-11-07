@@ -546,3 +546,132 @@ load:
     assert_eq!(report.summary.iterations, 0);
     assert_eq!(report.summary.interrupted_iterations, 2);
 }
+
+/// An API serving Prometheus text whose CPU counter grows half a second per
+/// second of wall time, behind a bearer token.
+async fn serve_metrics() -> String {
+    use axum::http::{HeaderMap, StatusCode};
+    let started = std::time::Instant::now();
+    let app = Router::new()
+        .route("/fast", get(|| async { "ok" }))
+        .route(
+            "/metrics",
+            get(move |headers: HeaderMap| async move {
+                if headers.get("authorization").and_then(|v| v.to_str().ok())
+                    != Some("Bearer s3cret")
+                {
+                    return (StatusCode::UNAUTHORIZED, String::new());
+                }
+                let cpu = started.elapsed().as_secs_f64() / 2.0;
+                (
+                    StatusCode::OK,
+                    format!(
+                        "# TYPE process_cpu_seconds_total counter\nprocess_cpu_seconds_total {cpu}\nprocess_resident_memory_bytes 1.5e8\n"
+                    ),
+                )
+            }),
+        )
+        .route(
+            "/actuator/metrics/{name}",
+            get(
+                |axum::extract::Path(name): axum::extract::Path<String>| async move {
+                    let value = match name.as_str() {
+                        "process.cpu.usage" => 0.1,
+                        "system.cpu.count" => 8.0,
+                        "jvm.memory.used" => 1e8,
+                        _ => return (StatusCode::NOT_FOUND, String::new()),
+                    };
+                    (
+                        StatusCode::OK,
+                        format!(r#"{{"name":"{name}","measurements":[{{"statistic":"VALUE","value":{value}}}]}}"#),
+                    )
+                },
+            ),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{addr}")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn monitors_read_the_apis_cpu_and_memory_throughout_the_test() {
+    let url = serve_metrics().await;
+    let test = test_file(
+        r#"
+flow:
+  name: watched
+  steps:
+    - name: fast
+      request: { method: GET, url: "{{base}}/fast" }
+load:
+  constant_rate: { rate: 20, duration: 2s }
+monitor:
+  - prometheus:
+      url: "{{base}}/metrics?debug=1"
+      name: orders-api
+      headers: [{ name: Authorization, value: "Bearer {{token}}" }]
+      interval: 500ms
+  - actuator: { url: "{{base}}/actuator/" }
+  - prometheus: { url: "{{base}}/metrics" }
+  - prometheus: { url: "{{nowhere}}/metrics" }
+"#,
+    );
+    let mut vars = base(&url);
+    vars.set("token", "s3cret");
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let options = LoadOptions {
+        monitor: test.monitor.clone(),
+        ..LoadOptions::default()
+    };
+    let mut live = Vec::new();
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &vars,
+        test.load.as_ref().unwrap(),
+        &[],
+        &options,
+        |p| {
+            live.push(
+                p.resources
+                    .iter()
+                    .map(|r| r.samples.len())
+                    .collect::<Vec<_>>(),
+            )
+        },
+    )
+    .await;
+    assert!(report.passed());
+    let [prometheus, actuator, unauthorized, unset] = &report.resources[..] else {
+        panic!("{:?}", report.resources);
+    };
+
+    assert_eq!(prometheus.name, "orders-api");
+    // The query string may hold a token, so reports leave it out.
+    assert_eq!(prometheus.url, format!("{url}/metrics"));
+    assert_eq!(prometheus.format, "prometheus");
+    assert_eq!(prometheus.memory_kind.as_deref(), Some("resident"));
+    assert!(prometheus.samples.len() >= 4, "{prometheus:?}");
+    assert_eq!(prometheus.samples[0].t, 0.0);
+    assert_eq!(prometheus.samples[0].cpu_percent, None);
+    for sample in &prometheus.samples[1..] {
+        let cpu = sample.cpu_percent.unwrap();
+        assert!((35.0..=65.0).contains(&cpu), "{cpu}");
+        assert_eq!(sample.memory_bytes, Some(1.5e8));
+    }
+    assert!(live.last().unwrap()[0] >= 3, "{live:?}");
+
+    // No Prometheus registry: Actuator's JSON instead.
+    assert_eq!(actuator.format, "actuator");
+    assert_eq!(actuator.cpu_cores, Some(8.0));
+    assert_eq!(actuator.samples[0].cpu_percent, Some(80.0));
+    assert_eq!(actuator.samples[0].memory_bytes, Some(2e8));
+    assert_eq!(actuator.memory_kind.as_deref(), Some("jvm"));
+
+    assert!(unauthorized.samples.is_empty());
+    assert!(unauthorized.failed_reads >= 2);
+    assert_eq!(unauthorized.error.as_deref(), Some("401 Unauthorized"));
+
+    assert_eq!(unset.error.as_deref(), Some("`{{nowhere}}` has no value"));
+}

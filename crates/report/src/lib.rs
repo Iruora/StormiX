@@ -5,7 +5,7 @@
 
 use std::fmt::Write;
 
-use stormix_engine::{FlowResult, LoadReport, StepResult};
+use stormix_engine::{FlowResult, LoadReport, ResourceSeries, StepResult};
 use stormix_metrics::{Second, ThresholdResult};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -172,6 +172,10 @@ pub fn load_report(report: &LoadReport) -> String {
         );
     }
 
+    for series in &report.resources {
+        resources_html(&mut body, series, s.duration_ms / 1000.0);
+    }
+
     let _ = write!(
         body,
         r#"<section><h2>Iterations</h2><p>{} iterations, {} failed{}{} · {} received</p></section>"#,
@@ -320,6 +324,109 @@ fn timeline_svg(seconds: &[Second]) -> String {
     svg
 }
 
+/// The API's CPU and memory from one monitor: figures, then both over time.
+fn resources_html(out: &mut String, series: &ResourceSeries, duration_s: f64) {
+    let _ = write!(
+        out,
+        r#"<section><h2>API resources · {}</h2><p class="url">{}</p>"#,
+        esc(&series.name),
+        esc(&series.url)
+    );
+    if series.samples.is_empty() {
+        let _ = write!(
+            out,
+            r#"<p class="error">Could not read it: {}</p></section>"#,
+            esc(series.error.as_deref().unwrap_or("no reads"))
+        );
+        return;
+    }
+    let st = series.stats();
+    let pct = |v: Option<f64>| v.map_or("—".to_owned(), |v| format!("{v:.0}%"));
+    let mem = |v: Option<f64>| v.map_or("—".to_owned(), bytes);
+    out.push_str(r#"<div class="tiles">"#);
+    out.push_str(&tile("CPU avg", &pct(st.cpu_avg)));
+    out.push_str(&tile("CPU peak", &pct(st.cpu_peak)));
+    out.push_str(&tile("memory before", &mem(st.memory_start)));
+    out.push_str(&tile("memory peak", &mem(st.memory_peak)));
+    out.push_str(&tile("memory at the end", &mem(st.memory_end)));
+    if let Some(heap) = st.heap_peak {
+        let max = series
+            .heap_max_bytes
+            .map(|m| format!(" / {}", bytes(m)))
+            .unwrap_or_default();
+        out.push_str(&tile("heap peak", &format!("{}{max}", bytes(heap))));
+    }
+    if let Some(gc) = st.gc_avg {
+        out.push_str(&tile("GC pauses", &format!("{gc:.1} ms/s")));
+    }
+    out.push_str("</div>");
+    let cores = series
+        .cpu_cores
+        .map(|c| format!(" of {c:.0} cores"))
+        .unwrap_or_default();
+    let memory = match series.memory_kind.as_deref() {
+        Some("jvm") => "JVM heap and non-heap in use",
+        _ => "resident memory",
+    };
+    let _ = write!(
+        out,
+        r#"<p class="muted">CPU: 100% is one full core{cores}. Memory: {memory}.{}</p>"#,
+        if series.failed_reads > 0 {
+            format!(
+                " {} reads failed, the last with {}.",
+                series.failed_reads,
+                esc(series.error.as_deref().unwrap_or("?"))
+            )
+        } else {
+            String::new()
+        }
+    );
+    if series.samples.len() > 1 {
+        out.push_str(&resources_svg(series, duration_s));
+    }
+    out.push_str("</section>");
+}
+
+/// CPU and memory as two lines over the test's own time axis.
+fn resources_svg(series: &ResourceSeries, duration_s: f64) -> String {
+    const W: f64 = 800.0;
+    const H: f64 = 160.0;
+    let end = series
+        .samples
+        .last()
+        .map_or(0.0, |s| s.t)
+        .max(duration_s)
+        .max(1.0);
+    let line = |values: Vec<(f64, f64)>| -> (String, f64) {
+        let max = values.iter().map(|v| v.1).fold(0.0, f64::max).max(1e-9);
+        let points: Vec<String> = values
+            .iter()
+            .map(|(t, v)| format!("{:.1},{:.1}", t / end * W, H - v / max * (H - 8.0)))
+            .collect();
+        (points.join(" "), max)
+    };
+    let (cpu, cpu_max) = line(
+        series
+            .samples
+            .iter()
+            .filter_map(|s| Some((s.t, s.cpu_percent?)))
+            .collect(),
+    );
+    let (mem, mem_max) = line(
+        series
+            .samples
+            .iter()
+            .filter_map(|s| Some((s.t, s.memory_bytes?)))
+            .collect(),
+    );
+    format!(
+        r#"<div class="legend"><span><i class="sw cpu"></i>CPU (max {cpu_max:.0}%)</span><span><i class="sw mem"></i>memory (max {})</span></div><svg viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img" aria-label="The API's CPU and memory over time"><polyline class="cpu" points="{cpu}"/><polyline class="mem" points="{mem}"/></svg><div class="axis mono"><span>0s</span><span>{:.0}s</span><span>{:.0}s</span></div>"#,
+        bytes(mem_max),
+        end / 2.0,
+        end,
+    )
+}
+
 fn tile(label: &str, value: &str) -> String {
     format!(
         r#"<div class="tile"><div class="value">{}</div><div class="label">{}</div></div>"#,
@@ -366,6 +473,8 @@ table{width:100%;border-collapse:collapse}th{font-weight:500;color:var(--muted);
 td{text-align:right;padding:6px 8px;border-top:1px solid var(--line);white-space:nowrap}
 svg{width:100%;height:160px;display:block}svg .req{fill:var(--accent);opacity:.55}svg .fail{fill:var(--bad)}svg .p95{fill:none;stroke:var(--warn);stroke-width:2;vector-effect:non-scaling-stroke}
 .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-bottom:6px}.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+svg .cpu{fill:none;stroke:var(--accent);stroke-width:2;vector-effect:non-scaling-stroke}svg .mem{fill:none;stroke:var(--ok);stroke-width:2;vector-effect:non-scaling-stroke}
+.sw.cpu{height:2px;background:var(--accent);vertical-align:3px}.sw.mem{height:2px;background:var(--ok);vertical-align:3px}
 .sw.req{background:var(--accent);opacity:.55}.sw.fail{background:var(--bad)}.sw.p95{height:2px;background:var(--warn);vertical-align:3px}
 .trace{user-select:all}
 .axis{display:flex;justify-content:space-between;color:var(--muted);font-size:11px}
@@ -398,7 +507,9 @@ fn ms(v: f64) -> String {
 }
 
 fn bytes(b: f64) -> String {
-    if b >= 1_048_576.0 {
+    if b >= 1_073_741_824.0 {
+        format!("{:.2} GB", b / 1_073_741_824.0)
+    } else if b >= 1_048_576.0 {
         format!("{:.1} MB", b / 1_048_576.0)
     } else if b >= 1024.0 {
         format!("{:.1} KB", b / 1024.0)

@@ -68,7 +68,7 @@ pub enum RunnerError {
 /// and the responses kept for steps marked `cache: true`.
 #[derive(Debug, Clone)]
 pub struct Runner {
-    client: reqwest::Client,
+    pub(crate) client: reqwest::Client,
     pub(crate) options: RunOptions,
     cache: Arc<ResponseCache>,
     /// To report the proxy each request went through; the client makes the

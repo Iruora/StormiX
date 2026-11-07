@@ -15,6 +15,7 @@ import { useMemo, useState } from "react";
 
 import type { LoadProgress, LoadReport, Second, SlowRequest, StepResult, StepSummary, ThresholdResult } from "../bindings";
 import { ProgressBar } from "./Busy";
+import { ApiResources, liveResources, reportResources } from "./Resources";
 import { DetailsButton, stepPassed } from "./RunResult";
 import { CopyButton, StepDetails, type Diagnose } from "./StepDetails";
 
@@ -51,6 +52,7 @@ export function LoadLive({ points, onStop, stopping }: { points: LoadProgress[];
         <Stat label="in flight" value={last ? String(last.active) : "–"} />
       </div>
       <Timeline seconds={points.map((p) => ({ t: p.elapsedS, requests: p.requests, failed: p.failed, p95Ms: p.p95Ms }))} />
+      <ApiResources series={liveResources(points)} duration={total} live />
     </section>
   );
 }
@@ -177,6 +179,7 @@ export function LoadResult({
       )}
 
       <Timeline seconds={s.timeline} />
+      <ApiResources series={reportResources(report)} duration={(s.durationMs ?? 0) / 1000} />
 
       {s.steps.length > 0 && <StepTable steps={s.steps} />}
 

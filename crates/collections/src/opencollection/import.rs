@@ -348,6 +348,7 @@ fn build(collection: Collection) -> Imported {
             },
             load: None,
             thresholds: Vec::new(),
+            monitor: Vec::new(),
         },
         environments,
         secrets,

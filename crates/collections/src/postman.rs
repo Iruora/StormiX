@@ -64,6 +64,7 @@ pub fn from_json(text: &str) -> Result<Imported, ImportError> {
             },
             load: None,
             thresholds: Vec::new(),
+            monitor: Vec::new(),
         },
         environments: BTreeMap::new(),
         secrets: BTreeMap::new(),

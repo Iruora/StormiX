@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use clap::Args;
 use stormix_engine::{junit_load_report, run_load, LoadOptions, LoadReport, Progress};
-use stormix_flow::{Duration, LoadProfile, TestFile, Threshold};
+use stormix_flow::{Duration, LoadProfile, Monitor, MonitorTarget, TestFile, Threshold};
 
 use crate::run::{write_report, Prepared, Target};
 use crate::Format;
@@ -35,6 +35,12 @@ pub struct LoadArgs {
     /// Add a threshold, like "p95 < 300ms". Repeatable; adds to the file's.
     #[arg(long = "threshold", value_name = "RULE")]
     thresholds: Vec<Threshold>,
+    /// Read the API's CPU and memory from this metrics endpoint during the
+    /// test: Prometheus text (like /actuator/prometheus or /metrics), or a
+    /// Spring Boot Actuator base URL ending in /actuator. Repeatable; adds
+    /// to the file's `monitor` section.
+    #[arg(long = "monitor", value_name = "URL")]
+    monitors: Vec<String>,
     /// Open models: the most iterations in flight at once; more are dropped.
     #[arg(long, default_value_t = 1000)]
     max_in_flight: u32,
@@ -66,6 +72,7 @@ pub fn load(args: LoadArgs) -> Result<ExitCode, String> {
         duration: args.duration,
         think_time: args.think_time,
         thresholds: args.thresholds,
+        monitors: args.monitors,
     };
     let Prepared {
         source,
@@ -78,6 +85,7 @@ pub fn load(args: LoadArgs) -> Result<ExitCode, String> {
     let options = LoadOptions {
         max_in_flight: args.max_in_flight,
         grace: args.grace.into(),
+        monitor: test.monitor.clone(),
         ..LoadOptions::default()
     };
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -158,12 +166,15 @@ struct Overrides {
     duration: Option<Duration>,
     think_time: Option<Duration>,
     thresholds: Vec<Threshold>,
+    monitors: Vec<String>,
 }
 
 impl Overrides {
     /// Command-line load options win over the file's `load` section.
     fn apply(self, test: &mut TestFile) -> Result<(), String> {
         test.thresholds.extend(self.thresholds);
+        test.monitor
+            .extend(self.monitors.into_iter().map(monitor_for));
         let duration = self.duration;
         let length = |what: &str| {
             duration.ok_or_else(|| format!("--{what} needs --duration too, like --duration 30s"))
@@ -200,6 +211,23 @@ impl Overrides {
             );
         }
         Ok(())
+    }
+}
+
+/// `--monitor URL`: Actuator for a URL ending in `/actuator`, else
+/// Prometheus text.
+fn monitor_for(url: String) -> Monitor {
+    let actuator = url.trim_end_matches('/').ends_with("/actuator");
+    let target = MonitorTarget {
+        url,
+        name: None,
+        headers: Vec::new(),
+        interval: None,
+    };
+    if actuator {
+        Monitor::Actuator(target)
+    } else {
+        Monitor::Prometheus(target)
     }
 }
 
@@ -250,7 +278,7 @@ impl ProgressLine {
     }
 
     fn show(&mut self, p: &Progress<'_>) {
-        let line = format!(
+        let mut line = format!(
             "  {:>4}s/{}s  {:>6.1} req/s  p95 {:>7}  failed {:<4} in flight {:<4} target {}",
             p.elapsed.as_secs(),
             p.total.as_secs(),
@@ -260,6 +288,15 @@ impl ProgressLine {
             p.second.active,
             round(p.target),
         );
+        // The first monitored API's latest figures.
+        if let Some(latest) = p.resources.first().and_then(|r| r.samples.last()) {
+            if let Some(cpu) = latest.cpu_percent {
+                let _ = write!(line, "  api cpu {cpu:.0}%");
+            }
+            if let Some(memory) = latest.memory_bytes {
+                let _ = write!(line, "  mem {}", bytes(memory));
+            }
+        }
         let mut err = std::io::stderr();
         if self.terminal {
             let _ = write!(err, "\r\x1b[2K{line}");
@@ -443,6 +480,10 @@ fn render_text(report: &LoadReport, title: Option<String>) -> String {
         }
     }
 
+    for series in &report.resources {
+        render_resources(&mut out, series);
+    }
+
     if report.thresholds.is_empty() {
         let _ = writeln!(
             out,
@@ -456,6 +497,72 @@ fn render_text(report: &LoadReport, title: Option<String>) -> String {
         }
     }
     out
+}
+
+fn render_resources(out: &mut String, series: &stormix_engine::ResourceSeries) {
+    let _ = writeln!(out, "\n  api resources  {} ({})", series.name, series.url);
+    if series.samples.is_empty() {
+        let reason = series.error.as_deref().unwrap_or("no reads");
+        let _ = writeln!(out, "    could not read it: {reason}");
+        return;
+    }
+    let stats = series.stats();
+    if let (Some(avg), Some(peak)) = (stats.cpu_avg, stats.cpu_peak) {
+        let cores = series
+            .cpu_cores
+            .map(|c| format!(" of {c:.0} cores"))
+            .unwrap_or_default();
+        let _ = writeln!(
+            out,
+            "    cpu      avg {avg:.0}%  peak {peak:.0}%   (100% = one core{cores})"
+        );
+    }
+    if let (Some(start), Some(peak), Some(end)) =
+        (stats.memory_start, stats.memory_peak, stats.memory_end)
+    {
+        let kind = match series.memory_kind.as_deref() {
+            Some("jvm") => "   (JVM heap + non-heap)",
+            Some("resident") => "   (resident)",
+            _ => "",
+        };
+        let _ = writeln!(
+            out,
+            "    memory   before {}  peak {}  end {}{kind}",
+            bytes(start),
+            bytes(peak),
+            bytes(end)
+        );
+    }
+    if let Some(heap) = stats.heap_peak {
+        let max = series
+            .heap_max_bytes
+            .map(|m| format!(" of {}", bytes(m)))
+            .unwrap_or_default();
+        let _ = writeln!(out, "    heap     peak {}{max}", bytes(heap));
+    }
+    if let Some(gc) = stats.gc_avg {
+        let _ = writeln!(
+            out,
+            "    gc       {gc:.1} ms of pauses per second on average"
+        );
+    }
+    if series.failed_reads > 0 {
+        let _ = writeln!(
+            out,
+            "    {} reads failed, the last with: {}",
+            series.failed_reads,
+            series.error.as_deref().unwrap_or("?")
+        );
+    }
+}
+
+fn bytes(value: f64) -> String {
+    const MB: f64 = 1024.0 * 1024.0;
+    if value >= 1024.0 * MB {
+        format!("{:.2} GB", value / (1024.0 * MB))
+    } else {
+        format!("{:.0} MB", value / MB)
+    }
 }
 
 /// The measured value in the threshold's own unit.
@@ -508,7 +615,25 @@ mod tests {
             duration: None,
             think_time: None,
             thresholds: Vec::new(),
+            monitors: Vec::new(),
         }
+    }
+
+    #[test]
+    fn monitor_flags_add_to_the_files_monitors() {
+        let mut test = test_file("load: { constant_rate: { rate: 1, duration: 1s } }\n");
+        Overrides {
+            monitors: vec![
+                "http://api/actuator/prometheus".into(),
+                "http://api/actuator/".into(),
+            ],
+            ..overrides()
+        }
+        .apply(&mut test)
+        .unwrap();
+        assert_eq!(test.monitor[0].kind(), "prometheus");
+        assert_eq!(test.monitor[1].kind(), "actuator");
+        assert_eq!(test.monitor[1].target().url, "http://api/actuator/");
     }
 
     #[test]

@@ -10,11 +10,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use stormix_flow::{Flow, LoadProfile, Threshold};
+use stormix_flow::{Flow, LoadProfile, Monitor, Threshold};
 use stormix_metrics::{check_thresholds, Recorder, Sample, Second, Summary, ThresholdResult};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 
+use crate::monitor::{self, ResourceSeries};
 use crate::{Exchanges, FlowResult, Runner, StepResult, Variables};
 
 #[derive(Debug, Clone)]
@@ -29,6 +30,9 @@ pub struct LoadOptions {
     /// After a stop, how long iterations still running may take to finish.
     /// Shorter than `grace`, since whoever stopped the test wants it over.
     pub stop_grace: Duration,
+    /// Metrics endpoints of the API, read throughout the test for its CPU
+    /// and memory use: the test file's `monitor` section.
+    pub monitor: Vec<Monitor>,
 }
 
 impl Default for LoadOptions {
@@ -38,6 +42,7 @@ impl Default for LoadOptions {
             grace: Duration::from_secs(30),
             stop: StopSignal::default(),
             stop_grace: Duration::from_secs(3),
+            monitor: Vec::new(),
         }
     }
 }
@@ -89,6 +94,8 @@ pub struct Progress<'a> {
     pub requests: u64,
     /// The rate (open models) or user count (closed model) aimed for now.
     pub target: f64,
+    /// The API's CPU and memory so far, one series per `monitor` entry.
+    pub resources: &'a [ResourceSeries],
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -118,6 +125,10 @@ pub struct LoadReport {
     /// cover only the time it ran, and the test does not pass.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub aborted: bool,
+    /// The API's own CPU and memory over the test, one series per
+    /// `monitor` entry. Empty when the file has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resources: Vec<ResourceSeries>,
 }
 
 /// One traced request from a load test.
@@ -175,6 +186,22 @@ pub async fn run_load(
     });
     let total: Duration = profile.total_duration().into();
     let started = Instant::now();
+    let (monitor_tx, mut monitor_rx) = mpsc::unbounded_channel();
+    let (mut resources, mut monitors) = if options.monitor.is_empty() {
+        (Vec::new(), JoinSet::new())
+    } else {
+        let mut vars = Variables::new();
+        vars.extend(flow.variables.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        vars.extend(overrides.entries());
+        monitor::start(
+            &options.monitor,
+            &vars,
+            &runner.client,
+            started,
+            &monitor_tx,
+        )
+    };
+    drop(monitor_tx);
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut driver = tokio::spawn(drive(
         shared.clone(),
@@ -194,17 +221,22 @@ pub async fn run_load(
     let outcome = loop {
         tokio::select! {
             Some(result) = rx.recv() => record(&mut recorder, &mut samples, &mut slowest, result),
+            Some(update) = monitor_rx.recv() => resources[update.index].apply(update.outcome),
             _ = tick.tick() => {
                 let elapsed = started.elapsed();
                 let target = target(profile, elapsed.min(total));
                 let requests = recorder.requests();
                 let second = recorder.close_second(shared.active.load(Ordering::Relaxed));
-                on_second(&Progress { elapsed, total, second, requests, target });
+                on_second(&Progress { elapsed, total, second, requests, target, resources: &resources });
             }
             outcome = &mut driver => break outcome.unwrap_or_default(),
         }
     };
     let elapsed = started.elapsed();
+    monitors.abort_all();
+    while let Ok(update) = monitor_rx.try_recv() {
+        resources[update.index].apply(update.outcome);
+    }
     while let Ok(result) = rx.try_recv() {
         record(&mut recorder, &mut samples, &mut slowest, result);
     }
@@ -222,6 +254,7 @@ pub async fn run_load(
         setup,
         slowest: slowest.into_list(),
         aborted: outcome.aborted,
+        resources,
     }
 }
 

@@ -21,13 +21,34 @@ const STEP_KEYS: Key[] = [
   { label: "scripts", info: "pre_request and test JavaScript" },
 ];
 
+const MONITOR_KEYS: Key[] = [
+  { label: "url", info: "The metrics URL; {{variables}} work" },
+  { label: "name", info: "What to call it in results; the URL's host by default" },
+  { label: "headers", info: "A list of { name, value }, like a bearer token from a secret" },
+  { label: "interval", info: "Time between reads (default 1s)", value: "1s" },
+];
+
+const HEADER_KEYS: Key[] = [
+  { label: "name", info: "Header name" },
+  { label: "value", info: "Header value; {{variables}} work" },
+];
+
 const KEYS: Record<string, Key[]> = {
   "": [
     { label: "version", info: "Always 1 for now", value: "1" },
     { label: "flow", info: "The requests, run in order" },
     { label: "load", info: "A load profile: constant_rate, ramping or virtual_users" },
     { label: "thresholds", info: "Pass/fail rules under load, like `p95 < 300ms`" },
+    { label: "monitor", info: "Metrics endpoints to read the API's CPU and memory from during a load test" },
   ],
+  "monitor/[]": [
+    { label: "prometheus", info: "{ url }: Prometheus text, like /actuator/prometheus, /metrics or /q/metrics" },
+    { label: "actuator", info: "{ url }: Spring Boot Actuator's base URL, like {{base_url}}/actuator" },
+  ],
+  "monitor/[]/prometheus": MONITOR_KEYS,
+  "monitor/[]/actuator": MONITOR_KEYS,
+  "monitor/[]/prometheus/headers/[]": HEADER_KEYS,
+  "monitor/[]/actuator/headers/[]": HEADER_KEYS,
   flow: [
     { label: "name", info: "Shown in reports and in the run history" },
     { label: "description", info: "Free text" },

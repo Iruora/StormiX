@@ -116,6 +116,7 @@ export default defineConfig({
           { text: 'GraphQL', link: '/features/graphql' },
           { text: 'Response cache', link: '/features/cache' },
           { text: 'Tracing in Dynatrace and APM tools', link: '/features/tracing' },
+          { text: 'API CPU and memory', link: '/features/api-resources' },
           { text: 'Proxies', link: '/features/proxies' },
           { text: 'Import and export collections', link: '/features/import-export' },
         ],
