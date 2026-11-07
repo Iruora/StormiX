@@ -69,7 +69,9 @@ export function liveResources(points: LoadProgress[]): ResourceView[] {
       seen.add(now.t);
       samples.push({ t: now.t, cpuPercent: now.cpuPercent, memoryBytes: now.memoryBytes });
     }
-    return { name: r.name, format: r.format, samples, error: r.error, cpuCores: r.cpuCores, memoryKind: r.memoryKind, health };
+    // Dynatrace sends its whole series, revised as late minutes come in.
+    const whole = r.samples?.map((s) => ({ t: s.t, cpuPercent: s.cpuPercent, memoryBytes: s.memoryBytes }));
+    return { name: r.name, format: r.format, samples: whole ?? samples, error: r.error, cpuCores: r.cpuCores, memoryKind: r.memoryKind, health };
   });
 }
 

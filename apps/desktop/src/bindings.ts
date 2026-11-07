@@ -672,6 +672,11 @@ export type LiveResource_Deserialize = {
 	health?: string | null,
 	/**  What is not up, or why it did not answer. */
 	healthDetail?: string | null,
+	/**
+	 *  Dynatrace only: the whole series so far, since it fills in (and
+	 *  revises) minutes late. Endpoint monitors send only the latest.
+	 */
+	samples?: ResourceSample_Deserialize[] | null,
 };
 
 /**  A monitored API's latest reading while a load test runs. */
@@ -698,6 +703,11 @@ export type LiveResource_Serialize = {
 	health: string | null,
 	/**  What is not up, or why it did not answer. */
 	healthDetail: string | null,
+	/**
+	 *  Dynatrace only: the whole series so far, since it fills in (and
+	 *  revises) minutes late. Endpoint monitors send only the latest.
+	 */
+	samples: ResourceSample_Serialize[] | null,
 };
 
 export type LoadDiff = LoadDiff_Serialize | LoadDiff_Deserialize;

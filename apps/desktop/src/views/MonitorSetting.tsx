@@ -67,7 +67,13 @@ export function MonitorSetting({ value, onChange }: { value: Monitor[]; onChange
                 <select
                   aria-label="Endpoint type"
                   value={kind}
-                  onChange={(e) => set(i, make(e.target.value as MonitorKind, target))}
+                  onChange={(e) => {
+                    const next = e.target.value as MonitorKind;
+                    // Dynatrace's entity and token mean nothing to an
+                    // endpoint (and the token must not be sent to one).
+                    const { entity: _e, token: _t, ...rest } = target;
+                    set(i, make(next, (next === "dynatrace") === (kind === "dynatrace") ? target : rest));
+                  }}
                   className="rounded-md border border-line bg-surface px-1.5 py-1 text-xs"
                 >
                   <option value="prometheus">Prometheus text</option>

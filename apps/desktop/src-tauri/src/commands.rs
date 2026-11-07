@@ -252,6 +252,9 @@ pub struct LiveResource {
     pub health: Option<String>,
     /// What is not up, or why it did not answer.
     pub health_detail: Option<String>,
+    /// Dynatrace only: the whole series so far, since it fills in (and
+    /// revises) minutes late. Endpoint monitors send only the latest.
+    pub samples: Option<Vec<stormix_engine::ResourceSample>>,
 }
 
 /// The load test running now, so [`stop_load_test`] can stop it.
@@ -341,6 +344,7 @@ pub async fn run_load_test(
                         memory_kind: r.memory_kind.clone(),
                         health: r.health.last().map(|h| h.status.clone()),
                         health_detail: r.health.last().and_then(|h| h.detail.clone()),
+                        samples: (r.format == "dynatrace").then(|| r.samples.clone()),
                     })
                     .collect(),
             }
