@@ -140,7 +140,7 @@ jobs:
         shell: bash
         working-directory: apps/desktop
         # For a pre-release like 1.11.0-rc.1: a numeric .msi version, and no .rpm
-        # (rpm refuses the "-" and would sort it above 1.11.0). See the script.
+        # or .deb (both would sort it above 1.11.0). See the script.
         run: echo "args=$(node scripts/bundle-args.mjs)" >> "$GITHUB_OUTPUT"
       - uses: tauri-apps/tauri-action@v0
         env:
@@ -262,9 +262,9 @@ jobs:
           names=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate --jq '.[].name')
           echo "$names"
           missing=0
-          # A pre-release has no .rpm (see the build job).
-          case "$TAG" in *-*) rpm= ;; *) rpm=.rpm ;; esac
-          for suffix in _aarch64.dmg _x64.dmg _aarch64.app.zip _x64.app.zip -setup.exe .msi _portable.zip _installer.zip .AppImage .deb $rpm \
+          # A pre-release has no .rpm or .deb (see the build job).
+          case "$TAG" in *-*) linux= ;; *) linux=".deb .rpm" ;; esac
+          for suffix in _aarch64.dmg _x64.dmg _aarch64.app.zip _x64.app.zip -setup.exe .msi _portable.zip _installer.zip .AppImage $linux \
             _aarch64-apple-darwin.tar.gz _x86_64-apple-darwin.tar.gz _x86_64-unknown-linux-gnu.tar.gz _x86_64-pc-windows-msvc.zip \
             latest.json; do
             if ! grep -q -- "$suffix\$" <<< "$names"; then

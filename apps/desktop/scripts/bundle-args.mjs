@@ -5,8 +5,9 @@
 // A pre-release version such as 1.11.0-rc.1 needs two changes:
 // - Windows Installer only takes major.minor.patch.build, so the .msi gets
 //   a numeric version (1.11.0-rc.1 becomes 1.11.0.1).
-// - rpm refuses a "-" in a version, and would sort 1.11.0-rc.1 above 1.11.0
-//   anyway, so Linux builds the .deb and .AppImage only.
+// - rpm refuses a "-" in a version, and both rpm and dpkg would sort
+//   1.11.0-rc.1 above 1.11.0, blocking the upgrade to the final release.
+//   So Linux builds the .AppImage only (the one the in-app updater uses).
 // A stable version passes the base config through unchanged.
 import fs from "node:fs";
 import path from "node:path";
@@ -27,7 +28,7 @@ if (pre) {
     config.bundle.windows = config.bundle.windows || {};
     config.bundle.windows.wix = { ...config.bundle.windows.wix, version: `${core}.${build}` };
   }
-  if (process.platform === "linux") args.push("--bundles", "deb,appimage");
+  if (process.platform === "linux") args.push("--bundles", "appimage");
 }
 
 if (Object.keys(config).length > 0) {

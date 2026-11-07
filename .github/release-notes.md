@@ -17,7 +17,7 @@ See the [changelog](https://github.com/Iruora/StormiX/blob/main/CHANGELOG.md) fo
 | macOS (Apple silicon) | `Stormix_<version>_aarch64.dmg` (or `.app.zip`) |
 | macOS (Intel) | `Stormix_<version>_x64.dmg` (or `.app.zip`) |
 | Windows | `Stormix_<version>_x64-setup.exe` (or the `.msi`), `_x64_installer.zip` (both installers in one zip), or `_x64_portable.zip` to run without installing |
-| Linux | `.AppImage`, or `.deb` (Debian, Ubuntu). No `.rpm` for a release candidate: on Fedora, use the `.AppImage` |
+| Linux | `.AppImage` (a release candidate has no `.deb` or `.rpm`, so that the final 1.11.0 packages install over it cleanly) |
 | CLI only | `stormix-cli_<version>_<target>.tar.gz` (`.zip` on Windows) |
 
 The builds are not code signed yet, so macOS and Windows ask you to confirm once before the first launch. [Getting started](https://github.com/Iruora/StormiX/blob/main/docs/GETTING_STARTED.md#install) has the steps.

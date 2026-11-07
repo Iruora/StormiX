@@ -157,7 +157,7 @@ jobs:
         run: cargo build --release -p stormix-cli
       - name: Build the app and installers
         # Signed update bundles need the release key, which only release.yml has.
-        # bundle-args.mjs adds the changes a pre-release version needs (MSI version, no .rpm).
+        # bundle-args.mjs adds the changes a pre-release version needs (MSI version, AppImage only on Linux).
         shell: bash
         run: pnpm tauri build $(node scripts/bundle-args.mjs src-tauri/tauri.ci.conf.json)
         working-directory: apps/desktop
