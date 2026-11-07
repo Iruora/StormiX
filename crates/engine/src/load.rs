@@ -185,7 +185,7 @@ pub async fn run_load(
         active: AtomicU32::new(0),
     });
     let total: Duration = profile.total_duration().into();
-    let started = Instant::now();
+    let origin = monitor::Origin::default();
     let (monitor_tx, mut monitor_rx) = mpsc::unbounded_channel();
     let (mut resources, mut monitors) = if options.monitor.is_empty() {
         (Vec::new(), JoinSet::new())
@@ -197,11 +197,33 @@ pub async fn run_load(
             &options.monitor,
             &vars,
             &runner.client,
-            started,
+            &origin,
             &monitor_tx,
         )
     };
     drop(monitor_tx);
+    // The first reads are the baseline, so the load waits for them: every
+    // running monitor's first answer or failure. A read gives up within
+    // 10 s, so a slow or unreachable API cannot hold the test any longer.
+    let mut waiting = monitors.len();
+    let baseline = tokio::time::sleep(Duration::from_secs(10));
+    tokio::pin!(baseline);
+    let mut first = vec![false; resources.len()];
+    while waiting > 0 {
+        tokio::select! {
+            Some(update) = monitor_rx.recv() => {
+                if !std::mem::replace(&mut first[update.index], true) {
+                    waiting -= 1;
+                }
+                resources[update.index].apply(update);
+            }
+            () = &mut baseline => break,
+            () = stop.stopped() => break,
+            else => break,
+        }
+    }
+    let started = Instant::now();
+    let _ = origin.set(started);
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut driver = tokio::spawn(drive(
         shared.clone(),

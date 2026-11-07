@@ -2,7 +2,7 @@
 
 A load test shows what the clients see: latency, throughput and errors. To see what that load does to the API itself, Stormix can read the API's own metrics endpoint during the test. The API's **CPU** and **memory** then show beside the latency, live while the test runs and in the results, reports and run history. With a health check, such as `/actuator/health`, Stormix also spots the API **going unhealthy**: when it went down, what was down, and when it came back.
 
-Stormix reads the endpoint once just before the load starts, which gives you a baseline, and then every second until the test ends.
+Stormix reads the endpoint once before the load starts, and waits for that read (up to 10 seconds) so it gives you a true baseline. It then reads it every second until the test ends.
 
 ## What the API needs
 

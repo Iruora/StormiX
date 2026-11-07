@@ -731,3 +731,65 @@ monitor:
     // A later success clears `failing` but keeps the last reason.
     assert!(!prometheus.failing);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_first_reading_is_taken_before_any_load() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let hits = std::sync::Arc::new(AtomicU64::new(0));
+    let counted = hits.clone();
+    // A slow metrics endpoint whose "memory" is the number of requests
+    // the API has had so far.
+    let app = Router::new()
+        .route(
+            "/fast",
+            get(move || {
+                counted.fetch_add(1, Ordering::Relaxed);
+                async { "ok" }
+            }),
+        )
+        .route(
+            "/metrics",
+            get(move || {
+                let seen = hits.load(Ordering::Relaxed);
+                async move {
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    format!("process_resident_memory_bytes {seen}\n")
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let test = test_file(
+        r#"
+flow:
+  name: baseline
+  steps:
+    - name: fast
+      request: { method: GET, url: "{{base}}/fast" }
+load:
+  virtual_users: { count: 2, duration: 500ms }
+monitor:
+  - prometheus: { url: "{{base}}/metrics" }
+"#,
+    );
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let options = LoadOptions {
+        monitor: test.monitor.clone(),
+        ..LoadOptions::default()
+    };
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(&url),
+        test.load.as_ref().unwrap(),
+        &[],
+        &options,
+        |_| {},
+    )
+    .await;
+    let first = &report.resources[0].samples[0];
+    assert_eq!(first.t, 0.0);
+    assert_eq!(first.memory_bytes, Some(0.0), "the baseline saw load");
+    assert!(report.summary.requests > 0);
+}

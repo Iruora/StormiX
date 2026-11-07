@@ -241,7 +241,7 @@ pub(crate) fn start(
     monitors: &[Monitor],
     vars: &Variables,
     client: &reqwest::Client,
-    origin: Instant,
+    origin: &Origin,
     tx: &mpsc::UnboundedSender<Update>,
 ) -> (Vec<ResourceSeries>, JoinSet<()>) {
     let mut tasks = JoinSet::new();
@@ -323,7 +323,13 @@ pub(crate) fn start(
                             timeout: timeout(target),
                             health,
                         };
-                        tasks.spawn(watch(index, reader, target.every(), origin, tx.clone()));
+                        tasks.spawn(watch(
+                            index,
+                            reader,
+                            target.every(),
+                            origin.clone(),
+                            tx.clone(),
+                        ));
                     }
                     Err(e) => {
                         series.error = Some(format!("the URL is not valid: {e}"));
@@ -359,6 +365,10 @@ fn under(base: &reqwest::Url, path: &str) -> reqwest::Url {
     url
 }
 
+/// When the load started, set once the first reads are in: until then
+/// readings are the baseline, taken before any load.
+pub(crate) type Origin = std::sync::Arc<std::sync::OnceLock<Instant>>;
+
 /// The URL as reports show it: no password, no query (it may hold a token).
 fn shown(url: &reqwest::Url) -> String {
     let mut url = url.clone();
@@ -372,7 +382,7 @@ async fn watch(
     index: usize,
     reader: Reader,
     every: Duration,
-    origin: Instant,
+    origin: Origin,
     tx: mpsc::UnboundedSender<Update>,
 ) {
     let mut tick = tokio::time::interval(every);
@@ -384,7 +394,10 @@ async fn watch(
     loop {
         tick.tick().await;
         let at = Instant::now();
-        let elapsed = at.saturating_duration_since(origin).as_secs_f64();
+        // Reads taken before the load starts are its baseline, at 0 s.
+        let elapsed = origin
+            .get()
+            .map_or(0.0, |o| at.saturating_duration_since(*o).as_secs_f64());
         let (metrics, health) = tokio::join!(reader.read(&mut mode), async {
             if health_on {
                 reader.health().await
