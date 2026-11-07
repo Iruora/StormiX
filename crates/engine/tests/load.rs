@@ -748,6 +748,10 @@ async fn the_first_reading_is_taken_before_any_load() {
             }),
         )
         .route(
+            "/quick",
+            get(|| async { "process_resident_memory_bytes 1\n" }),
+        )
+        .route(
             "/metrics",
             get(move || {
                 let seen = hits.load(Ordering::Relaxed);
@@ -771,6 +775,7 @@ load:
   virtual_users: { count: 2, duration: 500ms }
 monitor:
   - prometheus: { url: "{{base}}/metrics" }
+  - prometheus: { url: "{{base}}/quick", interval: 250ms }
 "#,
     );
     let runner = Runner::new(RunOptions::default()).unwrap();
@@ -792,4 +797,8 @@ monitor:
     assert_eq!(first.t, 0.0);
     assert_eq!(first.memory_bytes, Some(0.0), "the baseline saw load");
     assert!(report.summary.requests > 0);
+    // A fast monitor does not pile up baseline readings while it waits.
+    let quick = &report.resources[1].samples;
+    assert_eq!(quick.iter().filter(|s| s.t == 0.0).count(), 1, "{quick:?}");
+    assert!(quick.len() > 1);
 }

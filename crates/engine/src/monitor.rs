@@ -367,7 +367,7 @@ fn under(base: &reqwest::Url, path: &str) -> reqwest::Url {
 
 /// When the load started, set once the first reads are in: until then
 /// readings are the baseline, taken before any load.
-pub(crate) type Origin = std::sync::Arc<std::sync::OnceLock<Instant>>;
+pub(crate) type Origin = tokio::sync::watch::Receiver<Option<Instant>>;
 
 /// The URL as reports show it: no password, no query (it may hold a token).
 fn shown(url: &reqwest::Url) -> String {
@@ -382,7 +382,7 @@ async fn watch(
     index: usize,
     reader: Reader,
     every: Duration,
-    origin: Origin,
+    mut origin: Origin,
     tx: mpsc::UnboundedSender<Update>,
 ) {
     let mut tick = tokio::time::interval(every);
@@ -396,8 +396,8 @@ async fn watch(
         let at = Instant::now();
         // Reads taken before the load starts are its baseline, at 0 s.
         let elapsed = origin
-            .get()
-            .map_or(0.0, |o| at.saturating_duration_since(*o).as_secs_f64());
+            .borrow()
+            .map_or(0.0, |o| at.saturating_duration_since(o).as_secs_f64());
         let (metrics, health) = tokio::join!(reader.read(&mut mode), async {
             if health_on {
                 reader.health().await
@@ -437,6 +437,14 @@ async fn watch(
             .is_err()
         {
             return;
+        }
+        // One baseline reading per monitor: a fast one waits for the load
+        // to start rather than piling up readings at 0 s.
+        if origin.borrow().is_none() {
+            if origin.wait_for(Option::is_some).await.is_err() {
+                return;
+            }
+            tick.reset();
         }
     }
 }

@@ -185,7 +185,7 @@ pub async fn run_load(
         active: AtomicU32::new(0),
     });
     let total: Duration = profile.total_duration().into();
-    let origin = monitor::Origin::default();
+    let (set_origin, origin) = tokio::sync::watch::channel(None);
     let (monitor_tx, mut monitor_rx) = mpsc::unbounded_channel();
     let (mut resources, mut monitors) = if options.monitor.is_empty() {
         (Vec::new(), JoinSet::new())
@@ -223,7 +223,7 @@ pub async fn run_load(
         }
     }
     let started = Instant::now();
-    let _ = origin.set(started);
+    set_origin.send_replace(Some(started));
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut driver = tokio::spawn(drive(
         shared.clone(),
