@@ -68,15 +68,17 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
               --jq ".[] | select(.tag_name == \"$TAG\" or .name == \"Stormix $TAG\") | .id" | sort -n | tail -n 1
           }
+          # A tag with a pre-release part, like v1.11.0-rc.1, makes a pre-release.
+          case "$TAG" in *-*) prerelease=true ;; *) prerelease=false ;; esac
           id=$(find_id)
           if [ -z "$id" ]; then
             # Take the id from the response: a fresh draft can take a moment to show up in the list.
             id=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$TAG" \
-              -f name="Stormix $TAG" -F draft=true -F body=@.github/release-notes.md --jq .id)
+              -f name="Stormix $TAG" -F draft=true -F prerelease=$prerelease -F body=@.github/release-notes.md --jq .id)
           else
             # A rerun refreshes the notes of the existing release and pins it to the tag again.
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$id" -f tag_name="$TAG" \
-              -F body=@.github/release-notes.md --silent
+              -F prerelease=$prerelease -F body=@.github/release-notes.md --silent
           fi
           if [ -z "$id" ]; then
             echo "::error::Could not find or create the draft release for $TAG"
@@ -133,6 +135,22 @@ jobs:
           cache-dependency-path: apps/desktop/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: apps/desktop
+      - name: Give the MSI a numeric version for a pre-release
+        if: runner.os == 'Windows' && contains(env.TAG, '-')
+        shell: bash
+        run: |
+          # Windows Installer only takes major.minor.patch.build, so 1.11.0-rc.1
+          # becomes 1.11.0.1 for the .msi. The other installers keep the full version.
+          node -e '
+            const fs = require("fs");
+            const path = "apps/desktop/src-tauri/tauri.conf.json";
+            const conf = JSON.parse(fs.readFileSync(path, "utf8"));
+            const [core, pre] = conf.version.split("-");
+            const build = (pre.match(/(\d+)$/) || [, "0"])[1];
+            conf.bundle.windows = { ...conf.bundle.windows, wix: { ...(conf.bundle.windows || {}).wix, version: `${core}.${build}` } };
+            fs.writeFileSync(path, JSON.stringify(conf, null, 2));
+            console.log(`MSI version ${core}.${build}`);
+          '
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -273,8 +291,11 @@ jobs:
           done
           [ "$missing" = 0 ] || exit 1
           # Naming the tag here keeps the release on it rather than an untagged-... one.
+          # A pre-release is never marked latest: the in-app updater reads
+          # releases/latest, so installed apps are not offered a release candidate.
+          case "$TAG" in *-*) prerelease=true; latest=false ;; *) prerelease=false; latest=true ;; esac
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -f tag_name="$TAG" \
-            -F draft=false -f make_latest=true --silent
+            -F draft=false -F prerelease=$prerelease -f make_latest=$latest --silent
           echo "Published $TAG"
           # Clean up leftovers of earlier attempts: other drafts of this release and stray untagged-... tags.
           gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \

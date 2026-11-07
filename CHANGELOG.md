@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.11.0-rc.1 (2026-11-07)
+
+Release candidate for 1.11.0. It is published as a pre-release, so the app's automatic update keeps offering 1.10.0 until 1.11.0 is out; install it from the release page to try it.
+
+### Documentation website
+
+- **[iruora.github.io/StormiX](https://iruora.github.io/StormiX/)** has the whole documentation, with a guide to each part of the desktop app, the features and the CLI reference, and a welcome page.
+
 ### Stop and replay load tests
 
 - **Stop a running load test.** A **Stop** button sits beside **Load test** and on the live panel. No new iterations start, the requests in flight get a few seconds to finish, and the results show what was measured so far, marked **Stopped before the end**. A stopped test does not count as passed. In the CLI, Ctrl+C does the same (a second Ctrl+C quits at once), and HTML and JUnit reports say the test was stopped.
