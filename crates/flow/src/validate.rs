@@ -237,6 +237,23 @@ impl TestFile {
                     "the URL does not start with http:// or https://",
                 );
             }
+            let authorized = monitor.target().token.is_some()
+                || monitor
+                    .target()
+                    .headers
+                    .iter()
+                    .any(|h| h.name.eq_ignore_ascii_case("authorization"));
+            // A token over plain HTTP can be read on the way; this machine
+            // is the exception.
+            let local = ["http://localhost", "http://127.0.0.1", "http://[::1]"]
+                .iter()
+                .any(|l| url.starts_with(l));
+            if authorized && url.starts_with("http://") && !local {
+                issues.warning(
+                    &format!("{at}.url"),
+                    "the token is sent without HTTPS, so it can be read on the way; use https://",
+                );
+            }
             if matches!(monitor, crate::Monitor::Dynatrace(_)) {
                 if monitor
                     .target()
@@ -249,13 +266,7 @@ impl TestFile {
                         "Dynatrace needs an entity selector for the API's processes, like `type(\"PROCESS_GROUP_INSTANCE\"),entityName.contains(\"orders\")`",
                     );
                 }
-                if monitor.target().token.is_none()
-                    && !monitor
-                        .target()
-                        .headers
-                        .iter()
-                        .any(|h| h.name.eq_ignore_ascii_case("authorization"))
-                {
+                if !authorized {
                     issues.warning(
                         &format!("{at}.token"),
                         "Dynatrace needs an API token with the metrics.read scope; set `token`",
@@ -385,6 +396,25 @@ flow:
             )),
             [(Severity::Warning, "monitor[0].prometheus.entity".into())]
         );
+    }
+
+    #[test]
+    fn tokens_over_plain_http_are_flagged() {
+        assert_eq!(
+            issues(&file(
+                r#"prometheus: { url: "http://api.test/metrics", token: "{{t}}" }"#
+            )),
+            [(Severity::Warning, "monitor[0].prometheus.url".into())]
+        );
+        let fine = [
+            r#"prometheus: { url: "https://api.test/metrics", token: "{{t}}" }"#,
+            r#"prometheus: { url: "http://localhost:8080/metrics", token: "{{t}}" }"#,
+            r#"prometheus: { url: "{{base}}/metrics", token: "{{t}}" }"#,
+            r#"prometheus: { url: "http://api.test/metrics" }"#,
+        ];
+        for monitor in fine {
+            assert_eq!(issues(&file(monitor)), [], "{monitor}");
+        }
     }
 
     #[test]

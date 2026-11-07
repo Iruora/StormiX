@@ -132,8 +132,11 @@ function OneApi({ series, duration, live }: { series: ResourceView; duration: nu
           <div className="grid grid-cols-[repeat(auto-fit,minmax(6rem,1fr))] gap-3">
             {live ? (
               <>
-                <Figure label={`CPU now (${cpuWhat})`} value={pct(cpu.at(-1))} />
-                <Figure label={`memory now, ${memoryWhat}`} value={bytes(memory.at(-1))} />
+                <Figure label={`${dynatrace ? "CPU, latest minute" : "CPU now"} (${cpuWhat})`} value={pct(cpu.at(-1))} />
+                <Figure
+                  label={`${dynatrace ? "memory, latest minute" : "memory now"}, ${memoryWhat}`}
+                  value={bytes(memory.at(-1))}
+                />
                 <Figure label="CPU peak" value={pct(max(cpu))} />
                 <Figure label="memory peak" value={bytes(max(memory))} />
               </>

@@ -96,6 +96,6 @@ Stormix reads `builtin:tech.generic.cpu.usage` (process CPU usage) and `builtin:
 
 - **One reading per minute.** Dynatrace keeps a figure per minute, so a 5-minute test has about 5 points, and spikes shorter than a minute are averaged out. Use a metrics endpoint when you need second-by-second detail.
 - **A minute or two late.** Dynatrace has each minute's figures one to two minutes after it ends. Stormix reads every 30 seconds and once more when the test ends, each time taking the whole series again so late minutes fill in. The last minute or two of a short test can still be missing.
-- **The baseline** is the last minute that ended before the load started.
+- **The baseline** is the latest minute Dynatrace has that ended before the load started, usually the one just before, but an older one if that minute isn't in yet.
 - **CPU is as Dynatrace reports it**, a percentage, not "100% is one core" as with a metrics endpoint.
 - If the token lacks the scope or the selector is wrong, the results show Dynatrace's own message, like `403 Forbidden: Token is missing required scope`, or say there was no data for that entity.

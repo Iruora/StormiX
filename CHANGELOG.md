@@ -14,7 +14,7 @@
 
 ### API CPU and memory from Dynatrace
 
-- **Read the API's CPU and memory from Dynatrace** when it can't expose a metrics endpoint. Add a `dynatrace` monitor (or pick **Dynatrace** under **API CPU and memory**) with the environment URL, an entity selector for the API's processes and an API token with `metrics.read`. Stormix reads process CPU usage and working-set memory per minute, from the minute before the load to the end of the test, summed over the processes the selector matches. Dynatrace has each minute a minute or two late, so Stormix reads it again when the test ends.
+- **Read the API's CPU and memory from Dynatrace** when it can't expose a metrics endpoint. Add a `dynatrace` monitor (or pick **Dynatrace** under **API CPU and memory**) with the environment URL, an entity selector for the API's processes and an API token with `metrics.read`. Stormix reads process CPU usage and working-set memory per minute, from the latest minute Dynatrace has before the load to the end of the test, summed over the processes the selector matches. Dynatrace has each minute a minute or two late, so Stormix reads it again when the test ends.
 - **`token` on any monitor**: sent as `Authorization: Api-Token …` to Dynatrace and `Authorization: Bearer …` to metrics endpoints, so a token from a secret doesn't need a header entry.
 
 ### Fixes
