@@ -153,6 +153,7 @@ impl ResourceSeries {
         periods
     }
 
+    /// Averages and peaks over the whole test.
     pub fn stats(&self) -> ResourceStats {
         let values = |f: fn(&ResourceSample) -> Option<f64>| -> Vec<f64> {
             self.samples.iter().filter_map(f).collect()
@@ -199,6 +200,7 @@ pub(crate) struct Read {
 }
 
 impl ResourceSeries {
+    /// Takes in one reading or failure, and any health change, from a monitor task.
     pub(crate) fn apply(&mut self, update: Update) {
         match update.health {
             Some(HealthNews::Reading(change)) => {
@@ -335,6 +337,7 @@ pub(crate) fn start(
     (series, tasks)
 }
 
+/// How long one read may take: the interval, kept between 2 and 10 seconds.
 fn timeout(target: &MonitorTarget) -> Duration {
     target
         .every()
@@ -364,6 +367,7 @@ fn shown(url: &reqwest::Url) -> String {
     url.to_string()
 }
 
+/// Reads one monitor every `every` until the test ends, sending each outcome.
 async fn watch(
     index: usize,
     reader: Reader,
@@ -451,6 +455,7 @@ enum HealthOutcome {
 }
 
 impl HealthOutcome {
+    /// The change as recorded in the report, at `t` seconds into the test.
     fn into_change(self, t: f64) -> HealthChange {
         let (status, detail) = match self {
             Self::Status(status, detail) => (status, detail),
@@ -588,6 +593,7 @@ impl Reader {
         })
     }
 
+    /// One GET with the monitor's headers; errors never carry the URL.
     async fn get(&self, url: reqwest::Url, accept: &str) -> Result<String, String> {
         let mut request = self
             .client
@@ -611,6 +617,7 @@ impl Reader {
             .map_err(|e| describe(&e.without_url()))
     }
 
+    /// One read of a Prometheus text endpoint.
     async fn prometheus(&self, url: reqwest::Url) -> Result<Figures, String> {
         let text = self
             .get(url, "text/plain;version=0.0.4;q=1,*/*;q=0.1")
@@ -663,6 +670,7 @@ impl Reader {
     }
 }
 
+/// A short reason for a failed request: its timeout or its chain of causes.
 fn describe(err: &reqwest::Error) -> String {
     use std::error::Error as _;
     if err.is_timeout() {
@@ -716,6 +724,7 @@ struct Figures {
 }
 
 impl Figures {
+    /// Whether the response held any CPU or memory metric at all.
     fn found_any(&self) -> bool {
         self.cpu_usage.is_some()
             || self.counters.cpu_seconds.is_some()
@@ -723,6 +732,7 @@ impl Figures {
             || self.jvm_used.is_some()
     }
 
+    /// The figures found in a Prometheus text exposition.
     fn from_prometheus(text: &str) -> Self {
         let mut f = Self::default();
         let mut heap = None::<f64>;
@@ -821,6 +831,7 @@ struct Metric<'a> {
 }
 
 impl Metric<'_> {
+    /// The value of one label of this sample, if it has it.
     fn label(&self, name: &str) -> Option<&str> {
         self.labels
             .iter()

@@ -4,14 +4,17 @@ import type { Monitor, MonitorTarget } from "../bindings";
 
 export type MonitorKind = "prometheus" | "actuator";
 
+/** Which kind of endpoint a `monitor` entry reads. */
 export function monitorKind(m: Monitor): MonitorKind {
   return "actuator" in m && m.actuator ? "actuator" : "prometheus";
 }
 
+/** The URL, name, headers and health check of a `monitor` entry, whatever its kind. */
 export function monitorTarget(m: Monitor): MonitorTarget {
   return ("actuator" in m && m.actuator ? m.actuator : (m as { prometheus: MonitorTarget }).prometheus) as MonitorTarget;
 }
 
+/** A `monitor` entry of the given kind around the target. */
 function make(kind: MonitorKind, target: MonitorTarget): Monitor {
   return (kind === "actuator" ? { actuator: target } : { prometheus: target }) as Monitor;
 }

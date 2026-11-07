@@ -506,6 +506,7 @@ fn render_text(report: &LoadReport, title: Option<String>) -> String {
     out
 }
 
+/// Writes one monitored API's CPU and memory summary to the report.
 fn render_resources(out: &mut String, series: &stormix_engine::ResourceSeries) {
     let _ = writeln!(out, "\n  api resources  {} ({})", series.name, series.url);
     render_health(out, series);
@@ -596,6 +597,7 @@ fn render_health(out: &mut String, series: &stormix_engine::ResourceSeries) {
     }
 }
 
+/// A memory size in MB, or GB from 1 GB up.
 fn bytes(value: f64) -> String {
     const MB: f64 = 1024.0 * 1024.0;
     if value >= 1024.0 * MB {

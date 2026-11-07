@@ -46,12 +46,14 @@ pub struct MonitorTarget {
 }
 
 impl Monitor {
+    /// The endpoint settings, whatever the kind.
     pub fn target(&self) -> &MonitorTarget {
         match self {
             Self::Prometheus(t) | Self::Actuator(t) => t,
         }
     }
 
+    /// `prometheus` or `actuator`, as written in the file.
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Prometheus(_) => "prometheus",

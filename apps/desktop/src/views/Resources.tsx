@@ -83,6 +83,7 @@ export function ApiResources({ series, duration, live = false }: { series: Resou
   );
 }
 
+/** One monitored API: health, figures and chart. */
 function OneApi({ series, duration, live }: { series: ResourceView; duration: number; live: boolean }) {
   const cpu = values(series, (s) => s.cpuPercent);
   const memory = values(series, (s) => s.memoryBytes);
@@ -199,6 +200,7 @@ function Health({ series, live }: { series: ResourceView; live: boolean }) {
   );
 }
 
+/** CPU and memory as two lines, each scaled to its own peak, with unhealthy stretches shaded. */
 function Chart({ series, duration }: { series: ResourceView; duration: number }) {
   const points = series.samples.filter((s) => s.t != null) as (ResourceView["samples"][number] & { t: number })[];
   if (points.length < 2) return null;
@@ -257,6 +259,7 @@ function Chart({ series, duration }: { series: ResourceView; duration: number })
   );
 }
 
+/** One big number with its label. */
 function Figure({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -266,6 +269,7 @@ function Figure({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** The readings of one kind, leaving out reads that lacked it. */
 function values(series: ResourceView, pick: (s: ResourceView["samples"][number]) => number | null | undefined): number[] {
   return series.samples.flatMap((s) => {
     const v = pick(s);
@@ -276,10 +280,12 @@ function values(series: ResourceView, pick: (s: ResourceView["samples"][number])
 const avg = (v: number[]) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : undefined);
 const max = (v: number[]) => (v.length ? Math.max(...v) : undefined);
 
+/** A CPU figure, or a dash when there is none. */
 function pct(v: number | undefined): string {
   return v == null ? "–" : `${Math.round(v)}%`;
 }
 
+/** A memory size in MB, or GB from 1 GB up. */
 export function bytes(v: number | null | undefined): string {
   if (v == null) return "–";
   const mb = v / 1024 / 1024;
