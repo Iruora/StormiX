@@ -235,10 +235,12 @@ pub struct LoadProgress {
 #[serde(rename_all = "camelCase")]
 pub struct LiveResource {
     pub name: String,
+    /// `prometheus`, `actuator` or `dynatrace`.
+    pub format: String,
     /// Seconds since the load started, of the latest successful read. None
     /// until one succeeds.
     pub t: Option<f64>,
-    /// 100 is one full core.
+    /// 100 is one full core, except for Dynatrace (as it reports it).
     pub cpu_percent: Option<f64>,
     pub memory_bytes: Option<f64>,
     /// Why the latest read failed.
@@ -250,6 +252,9 @@ pub struct LiveResource {
     pub health: Option<String>,
     /// What is not up, or why it did not answer.
     pub health_detail: Option<String>,
+    /// Dynatrace only: the whole series so far, since it fills in (and
+    /// revises) minutes late. Endpoint monitors send only the latest.
+    pub samples: Option<Vec<stormix_engine::ResourceSample>>,
 }
 
 /// The load test running now, so [`stop_load_test`] can stop it.
@@ -330,6 +335,7 @@ pub async fn run_load_test(
                     .iter()
                     .map(|r| LiveResource {
                         name: r.name.clone(),
+                        format: r.format.clone(),
                         t: r.samples.last().map(|s| s.t),
                         cpu_percent: r.samples.last().and_then(|s| s.cpu_percent),
                         memory_bytes: r.samples.last().and_then(|s| s.memory_bytes),
@@ -338,6 +344,7 @@ pub async fn run_load_test(
                         memory_kind: r.memory_kind.clone(),
                         health: r.health.last().map(|h| h.status.clone()),
                         health_detail: r.health.last().and_then(|h| h.detail.clone()),
+                        samples: (r.format == "dynatrace").then(|| r.samples.clone()),
                     })
                     .collect(),
             }

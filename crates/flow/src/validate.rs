@@ -237,6 +237,54 @@ impl TestFile {
                     "the URL does not start with http:// or https://",
                 );
             }
+            let authorized = monitor.target().token.is_some()
+                || monitor
+                    .target()
+                    .headers
+                    .iter()
+                    .any(|h| h.name.eq_ignore_ascii_case("authorization"));
+            // A token over plain HTTP can be read on the way; this machine
+            // is the exception.
+            if authorized && url.starts_with("http://") && !loopback(url) {
+                issues.warning(
+                    &format!("{at}.url"),
+                    "the token is sent without HTTPS, so it can be read on the way; use https://",
+                );
+            }
+            if matches!(monitor, crate::Monitor::Dynatrace(_)) {
+                if monitor
+                    .target()
+                    .entity
+                    .as_deref()
+                    .is_none_or(|e| e.trim().is_empty())
+                {
+                    issues.error(
+                        &format!("{at}.entity"),
+                        "Dynatrace needs an entity selector for the API's processes, like `type(\"PROCESS_GROUP_INSTANCE\"),entityName.contains(\"orders\")`",
+                    );
+                }
+                if monitor
+                    .target()
+                    .interval
+                    .is_some_and(|i| i.as_millis() < 10_000)
+                {
+                    issues.warning(
+                        &format!("{at}.interval"),
+                        "Dynatrace is read every 10s at least (its data comes by the minute)",
+                    );
+                }
+                if !authorized {
+                    issues.warning(
+                        &format!("{at}.token"),
+                        "Dynatrace needs an API token with the metrics.read scope; set `token`",
+                    );
+                }
+            } else if monitor.target().entity.is_some() {
+                issues.warning(
+                    &format!("{at}.entity"),
+                    "`entity` is only used by Dynatrace",
+                );
+            }
             if let Some(health) = &monitor.target().health {
                 let health = health.trim();
                 if !(health.starts_with("http://")
@@ -292,6 +340,23 @@ fn mentioned(scripts: &[&str], name: &str) -> bool {
     })
 }
 
+/// Whether an `http://` URL's host is this machine: `localhost`,
+/// `127.0.0.1` or `[::1]` exactly, whatever the port or user info.
+fn loopback(url: &str) -> bool {
+    let rest = url.strip_prefix("http://").unwrap_or(url);
+    // As URL parsers do for http, `\` ends the authority like `/`.
+    let authority = rest.split(['/', '\\', '?', '#']).next().unwrap_or_default();
+    let host = authority.rsplit('@').next().unwrap_or_default();
+    let host = if host.starts_with('[') {
+        host.split_inclusive(']').next().unwrap_or_default()
+    } else {
+        host.split(':').next().unwrap_or_default()
+    };
+    ["localhost", "127.0.0.1", "[::1]"]
+        .iter()
+        .any(|l| host.eq_ignore_ascii_case(l))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,6 +388,91 @@ flow:
         headers: [{ name: Authorization, value: "Bearer {{token}}" }]
 "#;
         assert_eq!(issues(yaml), []);
+    }
+
+    /// A file with one `monitor` entry, given as YAML flow.
+    fn file(monitor: &str) -> String {
+        format!(
+            "version: 1\nflow:\n  name: dt\n  steps:\n    - name: a\n      request: {{ method: GET, url: \"https://example.com\" }}\nload:\n  virtual_users: {{ count: 1, duration: 1s }}\nmonitor:\n  - {monitor}\n"
+        )
+    }
+
+    #[test]
+    fn dynatrace_needs_an_entity_and_a_token() {
+        assert_eq!(
+            issues(&file(
+                "dynatrace: { url: \"https://abc.live.dynatrace.com\" }"
+            )),
+            [
+                (Severity::Error, "monitor[0].dynatrace.entity".into()),
+                (Severity::Warning, "monitor[0].dynatrace.token".into()),
+            ]
+        );
+        assert_eq!(
+            issues(&file(
+                r#"dynatrace: { url: "https://abc.live.dynatrace.com", entity: 'type("PROCESS_GROUP_INSTANCE")', token: "{{dt}}" }"#
+            )),
+            []
+        );
+        assert_eq!(
+            issues(&file(
+                r#"prometheus: { url: "https://api/metrics", entity: x }"#
+            )),
+            [(Severity::Warning, "monitor[0].prometheus.entity".into())]
+        );
+    }
+
+    #[test]
+    fn tokens_over_plain_http_are_flagged() {
+        assert_eq!(
+            issues(&file(
+                r#"prometheus: { url: "http://api.test/metrics", token: "{{t}}" }"#
+            )),
+            [(Severity::Warning, "monitor[0].prometheus.url".into())]
+        );
+        let fine = [
+            r#"prometheus: { url: "https://api.test/metrics", token: "{{t}}" }"#,
+            r#"prometheus: { url: "http://localhost:8080/metrics", token: "{{t}}" }"#,
+            r#"prometheus: { url: "{{base}}/metrics", token: "{{t}}" }"#,
+            r#"prometheus: { url: "http://api.test/metrics" }"#,
+        ];
+        for monitor in fine {
+            assert_eq!(issues(&file(monitor)), [], "{monitor}");
+        }
+        // Hosts that only look local, and a token in a header.
+        let flagged = [
+            r#"prometheus: { url: "http://localhost.evil.example/metrics", token: "{{t}}" }"#,
+            r#"prometheus: { url: "http://127.0.0.1.evil.example/metrics", token: "{{t}}" }"#,
+            r#"prometheus: { url: "http://localhost@evil.example/metrics", token: "{{t}}" }"#,
+            r#"prometheus: { url: "http://api.test/metrics", headers: [{ name: Authorization, value: "Bearer {{t}}" }] }"#,
+        ];
+        for monitor in flagged {
+            assert_eq!(
+                issues(&file(monitor)),
+                [(Severity::Warning, "monitor[0].prometheus.url".into())],
+                "{monitor}"
+            );
+        }
+        assert!(loopback("http://[::1]:9090/metrics"));
+        assert!(!loopback(r"http://evil.example\@localhost/metrics"));
+        assert!(loopback("http://user@LOCALHOST:8080"));
+    }
+
+    #[test]
+    fn dynatrace_is_read_less_often() {
+        let every = |monitor: &str| {
+            TestFile::from_yaml(&file(monitor)).unwrap().monitor[0]
+                .every()
+                .as_millis()
+        };
+        assert_eq!(every("dynatrace: { url: x }"), 30_000);
+        assert_eq!(every("dynatrace: { url: x, interval: 1s }"), 10_000);
+        assert!(issues(&file(
+            r#"dynatrace: { url: "https://dt", entity: e, token: t, interval: 1s }"#
+        ))
+        .contains(&(Severity::Warning, "monitor[0].dynatrace.interval".into())));
+        assert_eq!(every("prometheus: { url: x }"), 1000);
+        assert_eq!(every("actuator: { url: x, interval: 100ms }"), 250);
     }
 
     #[test]

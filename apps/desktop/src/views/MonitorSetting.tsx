@@ -2,27 +2,33 @@ import { Cpu, Plus, X } from "lucide-react";
 
 import type { Monitor, MonitorTarget } from "../bindings";
 
-export type MonitorKind = "prometheus" | "actuator";
+export type MonitorKind = "prometheus" | "actuator" | "dynatrace";
 
 /** Which kind of endpoint a `monitor` entry reads. */
 export function monitorKind(m: Monitor): MonitorKind {
-  return "actuator" in m && m.actuator ? "actuator" : "prometheus";
+  if ("actuator" in m && m.actuator) return "actuator";
+  if ("dynatrace" in m && m.dynatrace) return "dynatrace";
+  return "prometheus";
 }
 
 /** The URL, name, headers and health check of a `monitor` entry, whatever its kind. */
 export function monitorTarget(m: Monitor): MonitorTarget {
-  return ("actuator" in m && m.actuator ? m.actuator : (m as { prometheus: MonitorTarget }).prometheus) as MonitorTarget;
+  return (m as unknown as Record<MonitorKind, MonitorTarget>)[monitorKind(m)];
 }
 
 /** A `monitor` entry of the given kind around the target. */
 function make(kind: MonitorKind, target: MonitorTarget): Monitor {
-  return (kind === "actuator" ? { actuator: target } : { prometheus: target }) as Monitor;
+  return { [kind]: target } as unknown as Monitor;
 }
 
 const PLACEHOLDER: Record<MonitorKind, string> = {
   prometheus: "{{base_url}}/actuator/prometheus",
   actuator: "{{base_url}}/actuator",
+  dynatrace: "https://abc12345.live.dynatrace.com",
 };
+
+/** The time between reads when the entry does not say. */
+const EVERY: Record<MonitorKind, string> = { prometheus: "1s", actuator: "1s", dynatrace: "30s" };
 
 /**
  * The file's `monitor` list: metrics endpoints the API serves, read during
@@ -40,7 +46,7 @@ export function MonitorSetting({ value, onChange }: { value: Monitor[]; onChange
           API CPU and memory
         </span>
         <span className="text-xs text-muted">
-          {value.length === 0 ? "Not watched" : `Read every ${monitorTarget(value[0]).interval ?? "1s"} during the test`}
+          {value.length === 0 ? "Not watched" : `Read every ${monitorTarget(value[0]).interval ?? EVERY[monitorKind(value[0])]} during the test`}
         </span>
         <button
           type="button"
@@ -61,14 +67,23 @@ export function MonitorSetting({ value, onChange }: { value: Monitor[]; onChange
                 <select
                   aria-label="Endpoint type"
                   value={kind}
-                  onChange={(e) => set(i, make(e.target.value as MonitorKind, target))}
+                  onChange={(e) => {
+                    const next = e.target.value as MonitorKind;
+                    // Dynatrace's entity and token mean nothing to an
+                    // endpoint (and the token must not be sent to one), and
+                    // its interval (30s by default, 10s at least) is not an
+                    // endpoint's (1s), so the new kind starts on its default.
+                    const { entity: _e, token: _t, interval: _i, ...rest } = target;
+                    set(i, make(next, (next === "dynatrace") === (kind === "dynatrace") ? target : rest));
+                  }}
                   className="rounded-md border border-line bg-surface px-1.5 py-1 text-xs"
                 >
                   <option value="prometheus">Prometheus text</option>
                   <option value="actuator">Spring Boot Actuator</option>
+                  <option value="dynatrace">Dynatrace</option>
                 </select>
                 <input
-                  aria-label="Metrics URL"
+                  aria-label={kind === "dynatrace" ? "Dynatrace environment URL" : "Metrics URL"}
                   value={target.url}
                   placeholder={PLACEHOLDER[kind]}
                   onChange={(e) => set(i, make(kind, { ...target, url: e.target.value }))}
@@ -84,6 +99,32 @@ export function MonitorSetting({ value, onChange }: { value: Monitor[]; onChange
                   }}
                   className="min-w-[6rem] flex-1 rounded-md border border-line bg-surface px-2 py-1 text-xs"
                 />
+                {kind === "dynatrace" && (
+                  <>
+                    <input
+                      aria-label="Entity selector"
+                      value={target.entity ?? ""}
+                      placeholder={'entity: type("PROCESS_GROUP_INSTANCE"),entityName.contains("orders")'}
+                      title="Which processes are the API, as a Dynatrace entity selector. Their CPU and memory are summed."
+                      onChange={(e) => {
+                        const { entity: _old, ...rest } = target;
+                        set(i, make(kind, e.target.value ? { ...rest, entity: e.target.value } : rest));
+                      }}
+                      className="mono min-w-[14rem] flex-[3] rounded-md border border-line bg-surface px-2 py-1 text-xs"
+                    />
+                    <input
+                      aria-label="API token"
+                      value={target.token ?? ""}
+                      placeholder="token: {{dynatrace_token}}"
+                      title="An API token with the metrics.read scope. Use a {{variable}} from a secret so the token stays out of the file."
+                      onChange={(e) => {
+                        const { token: _old, ...rest } = target;
+                        set(i, make(kind, e.target.value ? { ...rest, token: e.target.value } : rest));
+                      }}
+                      className="mono min-w-[9rem] flex-1 rounded-md border border-line bg-surface px-2 py-1 text-xs"
+                    />
+                  </>
+                )}
                 <input
                   aria-label="Health check URL"
                   value={target.health ?? ""}
@@ -120,7 +161,9 @@ export function MonitorSetting({ value, onChange }: { value: Monitor[]; onChange
         <span className="mono">/actuator</span> base URL and also works without the Prometheus registry. URLs can use{" "}
         <span className="mono">{"{{variables}}"}</span>. A health check (like{" "}
         <span className="mono">/actuator/health</span> or <span className="mono">/healthz</span>) is read at the same
-        time to spot the API going down; Actuator reads its own <span className="mono">/health</span>.
+        time to spot the API going down; Actuator reads its own <span className="mono">/health</span>. Dynatrace
+        takes the environment URL, an entity selector for the API&apos;s processes and a token with{" "}
+        <span className="mono">metrics.read</span>; it has one reading per minute, a minute or two late.
       </p>
     </div>
   );

@@ -25,8 +25,9 @@ const MONITOR_KEYS: Key[] = [
   { label: "url", info: "The metrics URL; {{variables}} work" },
   { label: "name", info: "What to call it in results; the URL's host by default" },
   { label: "headers", info: "A list of { name, value }, like a bearer token from a secret" },
-  { label: "interval", info: "Time between reads (default 1s)", value: "1s" },
+  { label: "interval", info: "Time between reads (default 1s, 30s for Dynatrace)", value: "1s" },
   { label: "health", info: "A health check URL read at the same time, like /actuator/health or /healthz; Actuator reads its own" },
+  { label: "token", info: "An API token, sent as Authorization: Bearer (Api-Token for Dynatrace); use a {{variable}}" },
 ];
 
 const HEADER_KEYS: Key[] = [
@@ -45,11 +46,17 @@ const KEYS: Record<string, Key[]> = {
   "monitor/[]": [
     { label: "prometheus", info: "{ url }: Prometheus text, like /actuator/prometheus, /metrics or /q/metrics" },
     { label: "actuator", info: "{ url }: Spring Boot Actuator's base URL, like {{base_url}}/actuator" },
+    { label: "dynatrace", info: "{ url, entity, token }: a Dynatrace environment, read through its Metrics API v2" },
   ],
   "monitor/[]/prometheus": MONITOR_KEYS,
   "monitor/[]/actuator": MONITOR_KEYS,
+  "monitor/[]/dynatrace": [
+    ...MONITOR_KEYS,
+    { label: "entity", info: 'The API\'s processes as an entity selector, like type("PROCESS_GROUP_INSTANCE"),entityName.contains("orders")' },
+  ],
   "monitor/[]/prometheus/headers/[]": HEADER_KEYS,
   "monitor/[]/actuator/headers/[]": HEADER_KEYS,
+  "monitor/[]/dynatrace/headers/[]": HEADER_KEYS,
   flow: [
     { label: "name", info: "Shown in reports and in the run history" },
     { label: "description", info: "Free text" },

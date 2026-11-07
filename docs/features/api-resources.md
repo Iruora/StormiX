@@ -4,6 +4,8 @@ A load test shows what the clients see: latency, throughput and errors. To see w
 
 Stormix reads the endpoint once before the load starts, and waits for that read (up to 10 seconds) so it gives you a true baseline. It then reads it every second until the test ends.
 
+When the API can't expose an endpoint, Stormix can read its CPU and memory from **Dynatrace** instead. See [From Dynatrace](#from-dynatrace).
+
 ## What the API needs
 
 A metrics endpoint that Stormix can reach. Most stacks already have one, or can add one with a single dependency:
@@ -68,4 +70,32 @@ If a read fails, for example with `401 Unauthorized`, `404 Not Found` or a timeo
 - The figures are what the process reports about itself. A JVM's heap doesn't show a container's memory limit, and for a service with several replicas each endpoint is one instance. Add one `monitor` entry per instance that you want to watch.
 - Reads go through the same proxy setting as the test's requests.
 - In reports, a URL is shown without its query string or password, in case they hold a token.
-- APIs that can't expose an endpoint will be able to use Dynatrace as a source in a later version.
+- APIs that can't expose an endpoint can use Dynatrace instead. See below.
+
+## From Dynatrace
+
+When OneAgent monitors the API, Stormix can read the API's CPU and memory from Dynatrace's Metrics API v2, so the API itself needs nothing. You need:
+
+- The **environment URL**, like `https://abc12345.live.dynatrace.com`, or `https://your-host/e/{environment-id}` for Dynatrace Managed.
+- An **API token** with the `metrics.read` scope (Dynatrace › Access tokens). Keep it in an environment's `$secrets` and use it as `{{dynatrace_token}}`.
+- An **entity selector** for the API's processes, like `type("PROCESS_GROUP_INSTANCE"),entityName.contains("orders")`, or a process group by ID: `type("PROCESS_GROUP_INSTANCE"),fromRelationships.isInstanceOf(type("PROCESS_GROUP"),entityId("PROCESS_GROUP-…"))`. When it matches several processes, such as replicas, their CPU and memory are summed. You can try a selector in Dynatrace's Data Explorer or **Entities API** first.
+
+```yaml
+monitor:
+  - dynatrace:
+      url: "https://abc12345.live.dynatrace.com"
+      entity: 'type("PROCESS_GROUP_INSTANCE"),entityName.contains("orders")'
+      token: "{{dynatrace_token}}"
+      name: orders-api                          # optional
+      health: "{{base_url}}/actuator/health"    # optional, read every 30 s
+```
+
+In the desktop app, pick **Dynatrace** under **API CPU and memory**, then fill in the URL, the entity selector and the token.
+
+Stormix reads `builtin:tech.generic.cpu.usage` (process CPU usage) and `builtin:tech.generic.mem.workingSetSize` (the process's working set) at one-minute resolution. That is different from a metrics endpoint in a few ways:
+
+- **One reading per minute.** Dynatrace keeps a figure per minute, so a 5-minute test has about 5 points, and spikes shorter than a minute are averaged out. Use a metrics endpoint when you need second-by-second detail.
+- **A minute or two late.** Dynatrace has each minute's figures one to two minutes after it ends. Stormix reads every 30 seconds and once more when the test ends, each time taking the whole series again so late minutes fill in. The last minute or two of a short test can still be missing.
+- **The baseline** is the latest minute Dynatrace has that ended before the load started, usually the one just before, but an older one if that minute isn't in yet.
+- **CPU is as Dynatrace reports it**, a percentage, not "100% is one core" as with a metrics endpoint.
+- If the token lacks the scope or the selector is wrong, the results show Dynatrace's own message, like `403 Forbidden: Token is missing required scope`, or say there was no data for that entity.

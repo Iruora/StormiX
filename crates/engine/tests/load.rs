@@ -802,3 +802,142 @@ monitor:
     assert_eq!(quick.iter().filter(|s| s.t == 0.0).count(), 1, "{quick:?}");
     assert!(quick.len() > 1);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dynatrace_gives_minutes_from_before_the_load_and_reads_once_more_at_the_end() {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    use axum::http::{HeaderMap, Uri};
+
+    let now_ms = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64
+    };
+    // Each query's Authorization header and parameters.
+    type Seen = Vec<(String, HashMap<String, String>)>;
+    let seen: Arc<Mutex<Seen>> = Arc::default();
+    let log = seen.clone();
+    // Two processes; the minute still going ends in the future, as with
+    // Dynatrace, and a minute with no data yet is null.
+    let query = move |headers: HeaderMap, uri: Uri| {
+        let q: HashMap<String, String> = reqwest::Url::parse(&format!("http://dt{uri}"))
+            .unwrap()
+            .query_pairs()
+            .into_owned()
+            .collect();
+        let auth = headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        let now = now_ms();
+        let (timestamps, cpu, memory) = match q.get("from").map(String::as_str) {
+            Some("now-5m") => (vec![now - 30_000], vec![5.0], vec![100e6]),
+            from => {
+                let from: i64 = from.unwrap().parse().unwrap();
+                (
+                    vec![from + 60_000, from + 120_000, now + 30_000],
+                    vec![4.0, f64::NAN, 80.0],
+                    vec![90e6, f64::NAN, 300e6],
+                )
+            }
+        };
+        log.lock().unwrap().push((auth, q));
+        let values = |list: &[f64], share: f64| {
+            list.iter()
+                .map(|v| {
+                    if v.is_nan() {
+                        serde_json::Value::Null
+                    } else {
+                        (v * share).into()
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        let body = serde_json::json!({
+            "totalCount": 2,
+            "resolution": "1m",
+            "result": [
+                { "metricId": "builtin:tech.generic.cpu.usage:splitBy():sum",
+                  "data": [{ "dimensionMap": {}, "timestamps": timestamps, "values": values(&cpu, 1.0) }] },
+                { "metricId": "builtin:tech.generic.mem.workingSetSize:splitBy():sum",
+                  "data": [
+                    { "dimensionMap": {}, "timestamps": timestamps, "values": values(&memory, 0.5) },
+                    { "dimensionMap": {}, "timestamps": timestamps, "values": values(&memory, 0.5) }
+                  ] }
+            ]
+        });
+        async move { axum::Json(body) }
+    };
+    let app = Router::new()
+        .route("/fast", get(|| async { "ok" }))
+        .route("/e/env1/api/v2/metrics/query", get(query));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let test = test_file(
+        r#"
+flow:
+  name: dynatrace
+  variables: { dt_token: dt0c01.secret }
+  steps:
+    - name: fast
+      request: { method: GET, url: "{{base}}/fast" }
+load:
+  virtual_users: { count: 1, duration: 500ms }
+monitor:
+  - dynatrace:
+      url: "{{base}}/e/env1"
+      entity: 'type("PROCESS_GROUP_INSTANCE"),entityName.contains("orders")'
+      token: "{{dt_token}}"
+"#,
+    );
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let options = LoadOptions {
+        monitor: test.monitor.clone(),
+        ..LoadOptions::default()
+    };
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(&url),
+        test.load.as_ref().unwrap(),
+        &[],
+        &options,
+        |_| {},
+    )
+    .await;
+    let seen = seen.lock().unwrap();
+    // The baseline, then one last read once the load ended: 30 s apart
+    // otherwise.
+    assert_eq!(seen.len(), 2, "{seen:?}");
+    for (auth, q) in seen.iter() {
+        assert_eq!(auth, "Api-Token dt0c01.secret");
+        assert_eq!(
+            q["entitySelector"],
+            r#"type("PROCESS_GROUP_INSTANCE"),entityName.contains("orders")"#
+        );
+        assert_eq!(q["resolution"], "1m");
+        assert!(q["metricSelector"].contains("builtin:tech.generic.cpu.usage"));
+    }
+    assert!(seen[1].1["from"].parse::<i64>().is_ok());
+    let series = &report.resources[0];
+    assert_eq!(series.format, "dynatrace");
+    assert_eq!(series.memory_kind.as_deref(), Some("working set"));
+    assert_eq!(series.failed_reads, 0, "{:?}", series.error);
+    assert!(!series.url.contains("secret"));
+    let samples = &series.samples;
+    assert_eq!(samples.len(), 2, "{samples:?}");
+    // The minute that ended before the load is its baseline...
+    assert_eq!(samples[0].t, 0.0);
+    assert_eq!(samples[0].cpu_percent, Some(4.0));
+    assert_eq!(samples[0].memory_bytes, Some(90e6));
+    // ...and the minute still going sits at the end of the test, not
+    // in the future.
+    assert!(samples[1].t > 0.0 && samples[1].t < 5.0, "{samples:?}");
+    assert_eq!(samples[1].cpu_percent, Some(80.0));
+    assert_eq!(samples[1].memory_bytes, Some(300e6));
+}
