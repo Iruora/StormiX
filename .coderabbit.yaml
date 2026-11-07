@@ -1,0 +1,61 @@
+# CodeRabbit AI review settings. Free for public repositories.
+# Reference: https://docs.coderabbit.ai/reference/configuration
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+tone_instructions: "Be concise. Focus on bugs, security issues and missing tests; skip style nits that rustfmt, clippy or tsc already catch."
+early_access: false
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  sequence_diagrams: false
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+  path_filters:
+    - "!**/Cargo.lock"
+    - "!**/pnpm-lock.yaml"
+    - "!apps/desktop/src/bindings.ts"
+    - "!apps/desktop/src-tauri/gen/**"
+    - "!**/*.png"
+    - "!docs/screenshots/**"
+  path_instructions:
+    - path: "crates/**/*.rs"
+      instructions: >-
+        Stormix is an API test and load test engine. Watch for blocking calls
+        inside async code, unwraps that can panic on user input, lost errors,
+        and anything that skews latency measurements or counts under load.
+    - path: "apps/desktop/src-tauri/**/*.rs"
+      instructions: >-
+        Tauri commands: long work must not block the main thread; check input
+        from the webview before touching the file system.
+    - path: "apps/desktop/src/**/*.{ts,tsx}"
+      instructions: >-
+        React UI. Check for stale state in effects, missing cleanup of
+        listeners and timers, and that it still works in light and dark themes.
+    - path: ".github/workflows/**"
+      instructions: >-
+        Check for untrusted input used in run steps and for overly broad
+        permissions.
+  tools:
+    clippy:
+      enabled: true
+    eslint:
+      enabled: true
+    actionlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    markdownlint:
+      enabled: false
+    gitleaks:
+      enabled: true
+
+chat:
+  auto_reply: true
