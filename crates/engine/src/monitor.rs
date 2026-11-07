@@ -1,12 +1,13 @@
 //! Reads the API's own CPU and memory use while a load test runs, from a
 //! metrics endpoint it serves: Prometheus text (Spring Boot Actuator with
 //! Micrometer, prometheus-net, prom-client, client_golang, Quarkus...) or
-//! Spring Boot Actuator's JSON `/metrics`.
+//! Spring Boot Actuator's JSON `/metrics`, or Dynatrace's Metrics API v2.
 
-use std::time::{Duration, Instant};
+use std::collections::BTreeMap;
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
-use stormix_flow::{Monitor, MonitorTarget};
+use stormix_flow::Monitor;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
@@ -21,8 +22,9 @@ pub struct ResourceSeries {
     pub name: String,
     /// The URL read, without its query string or any password.
     pub url: String,
-    /// How the figures were read: `prometheus`, or `actuator` for
-    /// Actuator's JSON `/metrics`.
+    /// How the figures were read: `prometheus`, `actuator` for Actuator's
+    /// JSON `/metrics`, or `dynatrace`. Dynatrace's CPU is as it reports
+    /// it, not a share of one core.
     pub format: String,
     /// CPU cores the API's machine or container has, when it says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -31,10 +33,12 @@ pub struct ResourceSeries {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heap_max_bytes: Option<f64>,
     /// What `memoryBytes` measures: `resident` (the process's resident
-    /// memory, RSS) or `jvm` (JVM heap and non-heap in use).
+    /// memory, RSS), `jvm` (JVM heap and non-heap in use) or `working set`
+    /// (Dynatrace's process working set).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_kind: Option<String>,
     /// One per read, oldest first. The first is read before the load starts.
+    /// Dynatrace's are one per minute, as it has them.
     pub samples: Vec<ResourceSample>,
     /// Reads that failed.
     pub failed_reads: u32,
@@ -197,11 +201,20 @@ pub(crate) enum HealthNews {
 
 #[derive(Debug)]
 pub(crate) struct Read {
-    pub sample: ResourceSample,
+    pub samples: Samples,
     pub format: &'static str,
     pub cpu_cores: Option<f64>,
     pub heap_max_bytes: Option<f64>,
     pub memory_kind: Option<&'static str>,
+}
+
+#[derive(Debug)]
+pub(crate) enum Samples {
+    /// One more, read just now.
+    One(ResourceSample),
+    /// The whole series so far, replacing what came before: Dynatrace
+    /// fills in its minutes late.
+    All(Vec<ResourceSample>),
 }
 
 impl ResourceSeries {
@@ -230,7 +243,10 @@ impl ResourceSeries {
                 if let Some(kind) = read.memory_kind {
                     self.memory_kind = Some(kind.to_owned());
                 }
-                self.samples.push(read.sample);
+                match read.samples {
+                    Samples::One(sample) => self.samples.push(sample),
+                    Samples::All(samples) => self.samples = samples,
+                }
                 self.failing = false;
             }
             Err(error) => {
@@ -243,7 +259,9 @@ impl ResourceSeries {
 }
 
 /// Reads every monitor until dropped. Returns the empty series, in order,
-/// and the tasks filling them through `tx`. Missing template values or an invalid
+/// and the tasks filling them through `tx`: those to abort when the load
+/// ends, then Dynatrace's, which make one last read once `end` turns true
+/// and finish. Missing template values or an invalid
 /// metrics URL mark that series as failing without spawning a task. An invalid
 /// health URL disables only health reads and records `health_error`.
 pub(crate) fn start(
@@ -251,9 +269,11 @@ pub(crate) fn start(
     vars: &Variables,
     client: &reqwest::Client,
     origin: &Origin,
+    end: &End,
     tx: &mpsc::UnboundedSender<Update>,
-) -> (Vec<ResourceSeries>, JoinSet<()>) {
+) -> (Vec<ResourceSeries>, JoinSet<()>, JoinSet<()>) {
     let mut tasks = JoinSet::new();
+    let mut finals = JoinSet::new();
     let series = monitors
         .iter()
         .enumerate()
@@ -266,11 +286,23 @@ pub(crate) fn start(
                 rendered.text
             };
             let url = fill(&target.url);
-            let headers: Vec<(String, String)> = target
+            let mut headers: Vec<(String, String)> = target
                 .headers
                 .iter()
                 .map(|h| (h.name.clone(), fill(&h.value)))
                 .collect();
+            let dynatrace = matches!(monitor, Monitor::Dynatrace(_));
+            if let Some(token) = &target.token {
+                let token = fill(token);
+                if !headers
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+                {
+                    let scheme = if dynatrace { "Api-Token" } else { "Bearer" };
+                    headers.push(("Authorization".into(), format!("{scheme} {}", token.trim())));
+                }
+            }
+            let entity = target.entity.as_deref().map(&mut fill).unwrap_or_default();
             let parsed = reqwest::Url::parse(url.trim());
             let mut series = ResourceSeries {
                 // A URL that does not parse is never copied into the
@@ -329,16 +361,28 @@ pub(crate) fn start(
                             url,
                             headers,
                             actuator: matches!(monitor, Monitor::Actuator(_)),
-                            timeout: timeout(target),
+                            timeout: timeout(monitor),
                             health,
                         };
-                        tasks.spawn(watch(
-                            index,
-                            reader,
-                            target.every(),
-                            origin.clone(),
-                            tx.clone(),
-                        ));
+                        if dynatrace {
+                            finals.spawn(watch_dynatrace(
+                                index,
+                                reader,
+                                entity,
+                                monitor.every(),
+                                origin.clone(),
+                                end.clone(),
+                                tx.clone(),
+                            ));
+                        } else {
+                            tasks.spawn(watch(
+                                index,
+                                reader,
+                                monitor.every(),
+                                origin.clone(),
+                                tx.clone(),
+                            ));
+                        }
                     }
                     Err(e) => {
                         series.error = Some(format!("the URL is not valid: {e}"));
@@ -349,12 +393,12 @@ pub(crate) fn start(
             series
         })
         .collect();
-    (series, tasks)
+    (series, tasks, finals)
 }
 
 /// How long one read may take: the interval, kept between 2 and 10 seconds.
-fn timeout(target: &MonitorTarget) -> Duration {
-    target
+fn timeout(monitor: &Monitor) -> Duration {
+    monitor
         .every()
         .max(Duration::from_secs(2))
         .min(Duration::from_secs(10))
@@ -378,6 +422,9 @@ fn under(base: &reqwest::Url, path: &str) -> reqwest::Url {
 /// readings are the baseline, taken before any load.
 pub(crate) type Origin = tokio::sync::watch::Receiver<Option<Instant>>;
 
+/// True once the load has ended, for Dynatrace's last read.
+pub(crate) type End = tokio::sync::watch::Receiver<bool>;
+
 /// The URL as reports show it: no password, no query (it may hold a token).
 fn shown(url: &reqwest::Url) -> String {
     let mut url = url.clone();
@@ -398,8 +445,7 @@ async fn watch(
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut mode = None;
     let mut previous: Option<(Instant, Counters)> = None;
-    let mut health_on = reader.health.is_some();
-    let mut health_seen = false;
+    let mut check = HealthCheck::new(&reader);
     loop {
         tick.tick().await;
         let at = Instant::now();
@@ -407,25 +453,8 @@ async fn watch(
         let elapsed = origin
             .borrow()
             .map_or(0.0, |o| at.saturating_duration_since(o).as_secs_f64());
-        let (metrics, health) = tokio::join!(reader.read(&mut mode), async {
-            if health_on {
-                reader.health().await
-            } else {
-                None
-            }
-        });
-        let health = health.map(|outcome| match outcome {
-            // A check that is not there or not allowed from the start is
-            // left alone, rather than counting the API as unhealthy.
-            HealthOutcome::Refused(error) if !health_seen => {
-                health_on = false;
-                HealthNews::Unavailable(error)
-            }
-            other => {
-                health_seen = true;
-                HealthNews::Reading(other.into_change((elapsed * 10.0).round() / 10.0))
-            }
-        });
+        let (metrics, health) = tokio::join!(reader.read(&mut mode), check.read(&reader));
+        let health = check.news(health, elapsed);
         let outcome = match metrics {
             Ok(figures) => {
                 let since = previous
@@ -455,6 +484,219 @@ async fn watch(
             }
             tick.reset();
         }
+    }
+}
+
+/// Reads Dynatrace every `every`, and once more when the load ends.
+/// Each read brings the whole series again from 2 minutes before the load
+/// started, as Dynatrace fills in each minute a minute or two late.
+async fn watch_dynatrace(
+    index: usize,
+    reader: Reader,
+    entity: String,
+    every: Duration,
+    mut origin: Origin,
+    mut end: End,
+    tx: mpsc::UnboundedSender<Update>,
+) {
+    let mut tick = tokio::time::interval(every);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut check = HealthCheck::new(&reader);
+    let mut baseline: Option<ResourceSample> = None;
+    // When the load started, in Dynatrace's milliseconds since 1970.
+    let mut start_ms: Option<i64> = None;
+    let mut last = false;
+    loop {
+        if !last {
+            tokio::select! {
+                _ = tick.tick() => {}
+                ended = end.wait_for(|ended| *ended) => {
+                    if ended.is_err() {
+                        return;
+                    }
+                    last = true;
+                }
+            }
+        }
+        let started = *origin.borrow();
+        if let (None, Some(started)) = (start_ms, started) {
+            start_ms = Some(epoch_ms() - millis(started.elapsed()));
+        }
+        let elapsed = started.map_or(0.0, |o| o.elapsed().as_secs_f64());
+        let from = start_ms.map_or_else(|| "now-5m".to_owned(), |s| (s - 120_000).to_string());
+        let (points, health) = tokio::join!(reader.dynatrace(&entity, &from), check.read(&reader));
+        let health = check.news(health, elapsed);
+        let outcome = points
+            .and_then(|points| dynatrace_samples(&points, start_ms, epoch_ms(), baseline.as_ref()))
+            .map(|samples| {
+                if baseline.is_none() {
+                    baseline = samples.first().cloned();
+                }
+                Read {
+                    samples: Samples::All(samples),
+                    format: "dynatrace",
+                    cpu_cores: None,
+                    heap_max_bytes: None,
+                    memory_kind: Some("working set"),
+                }
+            });
+        let sent = tx.send(Update {
+            index,
+            outcome,
+            health,
+        });
+        if last || sent.is_err() {
+            return;
+        }
+        if origin.borrow().is_none() {
+            if origin.wait_for(Option::is_some).await.is_err() {
+                return;
+            }
+            tick.reset();
+        }
+    }
+}
+
+fn epoch_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, millis)
+}
+
+fn millis(d: Duration) -> i64 {
+    i64::try_from(d.as_millis()).unwrap_or(i64::MAX)
+}
+
+/// Dynatrace's CPU and memory metrics, summed over the selected processes.
+const DYNATRACE_METRICS: &str = "builtin:tech.generic.cpu.usage:splitBy():sum,\
+builtin:tech.generic.mem.workingSetSize:splitBy():sum";
+
+/// Per minute (the minute's end, in ms since 1970): CPU %, memory bytes.
+type Points = BTreeMap<i64, (Option<f64>, Option<f64>)>;
+
+/// The series from Dynatrace's minutes. Before the load starts (`start_ms`
+/// unknown), the newest minute is the baseline. After, the newest minute
+/// ending by the start is the baseline at 0 s (else the one read before),
+/// and each later minute is placed at its end, or now for the minute still
+/// going.
+fn dynatrace_samples(
+    points: &Points,
+    start_ms: Option<i64>,
+    now_ms: i64,
+    baseline: Option<&ResourceSample>,
+) -> Result<Vec<ResourceSample>, String> {
+    let sample = |t: f64, (cpu, memory): (Option<f64>, Option<f64>)| ResourceSample {
+        t,
+        cpu_percent: cpu.map(|c| (c * 10.0).round() / 10.0),
+        memory_bytes: memory,
+        heap_bytes: None,
+        gc_ms_per_s: None,
+    };
+    let filled = points
+        .iter()
+        .filter(|(_, (cpu, memory))| cpu.is_some() || memory.is_some());
+    let Some(start) = start_ms else {
+        return filled
+            .clone()
+            .next_back()
+            .map(|(_, values)| vec![sample(0.0, *values)])
+            .ok_or_else(|| {
+                "Dynatrace has no CPU or memory data for that entity in the last 5 minutes".into()
+            });
+    };
+    let first = filled
+        .clone()
+        .take_while(|(at, _)| **at <= start)
+        .last()
+        .map(|(_, values)| sample(0.0, *values))
+        .or_else(|| baseline.cloned());
+    let samples: Vec<_> = first
+        .into_iter()
+        .chain(filled.filter(|(at, _)| **at > start).map(|(at, values)| {
+            let t = (*at).min(now_ms).saturating_sub(start) as f64 / 1000.0;
+            sample((t * 10.0).round() / 10.0, *values)
+        }))
+        .collect();
+    if samples.is_empty() {
+        Err("Dynatrace has no CPU or memory data for that entity".into())
+    } else {
+        Ok(samples)
+    }
+}
+
+/// Reads a Metrics API v2 answer into points, summing values from the same
+/// minute (one series per process when not already summed).
+fn parse_dynatrace(text: &str) -> Result<Points, String> {
+    let json: serde_json::Value =
+        serde_json::from_str(text).map_err(|_| "the response is not JSON".to_owned())?;
+    let results = json
+        .get("result")
+        .and_then(|r| r.as_array())
+        .ok_or("the response has no `result`")?;
+    let mut points = Points::new();
+    for result in results {
+        let cpu = result
+            .get("metricId")
+            .and_then(|m| m.as_str())
+            .is_some_and(|m| m.contains(".cpu."));
+        let data = result.get("data").and_then(|d| d.as_array());
+        for series in data.into_iter().flatten() {
+            let list = |key: &str| {
+                series
+                    .get(key)
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default()
+            };
+            for (at, value) in list("timestamps").iter().zip(list("values")) {
+                let (Some(at), Some(value)) = (at.as_i64(), value.as_f64()) else {
+                    continue;
+                };
+                let point = points.entry(at).or_default();
+                let slot = if cpu { &mut point.0 } else { &mut point.1 };
+                *slot = Some(slot.unwrap_or(0.0) + value);
+            }
+        }
+    }
+    Ok(points)
+}
+
+/// Whether the health check is still read, and whether it ever answered.
+struct HealthCheck {
+    on: bool,
+    seen: bool,
+}
+
+impl HealthCheck {
+    fn new(reader: &Reader) -> Self {
+        Self {
+            on: reader.health.is_some(),
+            seen: false,
+        }
+    }
+
+    async fn read(&self, reader: &Reader) -> Option<HealthOutcome> {
+        if self.on {
+            reader.health().await
+        } else {
+            None
+        }
+    }
+
+    /// What a read says, at `elapsed` seconds into the load.
+    fn news(&mut self, outcome: Option<HealthOutcome>, elapsed: f64) -> Option<HealthNews> {
+        outcome.map(|outcome| match outcome {
+            // A check that is not there or not allowed from the start is
+            // left alone, rather than counting the API as unhealthy.
+            HealthOutcome::Refused(error) if !self.seen => {
+                self.on = false;
+                HealthNews::Unavailable(error)
+            }
+            other => {
+                self.seen = true;
+                HealthNews::Reading(other.into_change((elapsed * 10.0).round() / 10.0))
+            }
+        })
     }
 }
 
@@ -651,6 +893,45 @@ impl Reader {
             .text()
             .await
             .map_err(|e| describe(&e.without_url()))
+    }
+
+    /// Dynatrace's minutes from `from` (`now-5m`, or ms since 1970) to now
+    /// for the processes `entity` selects. An error status gives Dynatrace's
+    /// own message, like `400 Bad Request: Token is missing required scope`.
+    async fn dynatrace(&self, entity: &str, from: &str) -> Result<Points, String> {
+        let mut url = under(&self.url, "api/v2/metrics/query");
+        url.query_pairs_mut()
+            .append_pair("metricSelector", DYNATRACE_METRICS)
+            .append_pair("entitySelector", entity)
+            .append_pair("resolution", "1m")
+            .append_pair("from", from);
+        let mut request = self
+            .client
+            .get(url)
+            .timeout(self.timeout)
+            .header(reqwest::header::ACCEPT, "application/json");
+        for (name, value) in &self.headers {
+            request = request.header(name, value);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|e| describe(&e.without_url()))?;
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .map_err(|e| describe(&e.without_url()))?;
+        if !status.is_success() {
+            let message = serde_json::from_str::<serde_json::Value>(&text)
+                .ok()
+                .and_then(|j| j.pointer("/error/message")?.as_str().map(str::to_owned));
+            return Err(match message {
+                Some(message) => format!("{status}: {message}"),
+                None => status.to_string(),
+            });
+        }
+        parse_dynatrace(&text)
     }
 
     /// Reads CPU and memory figures from a Prometheus text endpoint.
@@ -851,14 +1132,14 @@ impl Figures {
             (None, None) => (None, None),
         };
         Read {
-            sample: ResourceSample {
+            samples: Samples::One(ResourceSample {
                 t: (t * 10.0).round() / 10.0,
                 cpu_percent: cpu_percent.map(|c| (c * 10.0).round() / 10.0),
                 memory_bytes,
                 heap_bytes: self.heap_used,
                 gc_ms_per_s: rate(self.counters.gc_seconds, |c| c.gc_seconds)
                     .map(|s| (s * 10_000.0).round() / 10.0),
-            },
+            }),
             format: match mode {
                 Mode::Prometheus => "prometheus",
                 Mode::ActuatorJson => "actuator",
@@ -971,6 +1252,13 @@ jvm_gc_pause_seconds_sum{action="end of major GC",cause="System.gc()",gc="G1 Old
 http_server_requests_seconds_count{method="GET",uri="/a \"b\"",} 3.0
 "#;
 
+    fn one(read: &Read) -> &ResourceSample {
+        match &read.samples {
+            Samples::One(sample) => sample,
+            Samples::All(_) => panic!("expected one sample"),
+        }
+    }
+
     const STANDARD: &str = "process_cpu_seconds_total 12.5\nprocess_resident_memory_bytes 2.5e+08\nnodejs_gc_duration_seconds_sum{kind=\"minor\"} 0.5\n";
 
     #[test]
@@ -998,9 +1286,9 @@ http_server_requests_seconds_count{method="GET",uri="/a \"b\"",} 3.0
         assert_eq!(f.counters.gc_seconds, Some(0.15));
         let read = f.to_read(0.0, None, Mode::Prometheus);
         // A quarter of 4 cores is one full core.
-        assert_eq!(read.sample.cpu_percent, Some(100.0));
+        assert_eq!(one(&read).cpu_percent, Some(100.0));
         assert_eq!(read.memory_kind, Some("jvm"));
-        assert_eq!(read.sample.gc_ms_per_s, None);
+        assert_eq!(one(&read).gc_ms_per_s, None);
     }
 
     #[test]
@@ -1008,7 +1296,7 @@ http_server_requests_seconds_count{method="GET",uri="/a \"b\"",} 3.0
         let first = Figures::from_prometheus(STANDARD);
         assert_eq!(first.resident, Some(250_000_000.0));
         let read = first.to_read(0.0, None, Mode::Prometheus);
-        assert_eq!(read.sample.cpu_percent, None);
+        assert_eq!(one(&read).cpu_percent, None);
         assert_eq!(read.memory_kind, Some("resident"));
 
         let later = Figures::from_prometheus(
@@ -1016,14 +1304,14 @@ http_server_requests_seconds_count{method="GET",uri="/a \"b\"",} 3.0
         );
         let read = later.to_read(2.0, Some((2.0, &first.counters)), Mode::Prometheus);
         // 1.5 CPU seconds in 2 seconds: three quarters of a core.
-        assert_eq!(read.sample.cpu_percent, Some(75.0));
-        assert_eq!(read.sample.gc_ms_per_s, Some(10.0));
-        assert_eq!(read.sample.memory_bytes, Some(300_000_000.0));
+        assert_eq!(one(&read).cpu_percent, Some(75.0));
+        assert_eq!(one(&read).gc_ms_per_s, Some(10.0));
+        assert_eq!(one(&read).memory_bytes, Some(300_000_000.0));
 
         // A restart resets the counters: no rate rather than a negative one.
         let restarted = Figures::from_prometheus("process_cpu_seconds_total 1\n");
         let read = restarted.to_read(4.0, Some((2.0, &later.counters)), Mode::Prometheus);
-        assert_eq!(read.sample.cpu_percent, None);
+        assert_eq!(one(&read).cpu_percent, None);
     }
 
     #[test]
@@ -1146,6 +1434,38 @@ http_server_requests_seconds_count{method="GET",uri="/a \"b\"",} 3.0
             under(&bare, "prometheus").as_str(),
             "http://api.test/actuator/prometheus"
         );
+    }
+
+    #[test]
+    fn dynatrace_minutes_become_the_series() {
+        let text = r#"{"result":[
+            {"metricId":"builtin:tech.generic.cpu.usage:splitBy():sum",
+             "data":[{"timestamps":[60000,120000,180000,240000],"values":[2.04,null,30,50]}]},
+            {"metricId":"builtin:tech.generic.mem.workingSetSize:splitBy():sum",
+             "data":[{"timestamps":[60000,120000,180000,240000],"values":[1e8,null,2e8,3e8]},
+                     {"timestamps":[60000],"values":[1e8]}]}]}"#;
+        let points = parse_dynatrace(text).unwrap();
+        assert_eq!(points[&60_000], (Some(2.04), Some(2e8)));
+        assert!(!points.contains_key(&120_000), "null minutes are left out");
+        // Before the load: the newest minute with data.
+        let before = dynatrace_samples(&points, None, 250_000, None).unwrap();
+        assert_eq!(before.len(), 1);
+        assert_eq!((before[0].t, before[0].cpu_percent), (0.0, Some(50.0)));
+        // During: the last minute ending by the start is the baseline, the
+        // empty minute is skipped, the minute still going is placed now.
+        let during = dynatrace_samples(&points, Some(130_000), 200_000, None).unwrap();
+        let at: Vec<_> = during.iter().map(|s| (s.t, s.cpu_percent)).collect();
+        assert_eq!(
+            at,
+            [(0.0, Some(2.0)), (50.0, Some(30.0)), (70.0, Some(50.0))]
+        );
+        // Without a minute before the start, the earlier baseline stays.
+        let late: Points = points.range(150_000..).map(|(k, v)| (*k, *v)).collect();
+        let during = dynatrace_samples(&late, Some(130_000), 300_000, before.first()).unwrap();
+        assert_eq!(during[0].cpu_percent, Some(50.0));
+        assert_eq!(during.len(), 3);
+        assert!(dynatrace_samples(&Points::new(), None, 0, None).is_err());
+        assert!(parse_dynatrace("<html>").is_err());
     }
 
     #[test]

@@ -651,12 +651,14 @@ export type LiveResource = LiveResource_Serialize | LiveResource_Deserialize;
 /**  A monitored API's latest reading while a load test runs. */
 export type LiveResource_Deserialize = {
 	name: string,
+	/**  `prometheus`, `actuator` or `dynatrace`. */
+	format: string,
 	/**
 	 *  Seconds since the load started, of the latest successful read. None
 	 *  until one succeeds.
 	 */
 	t?: number | null,
-	/**  100 is one full core. */
+	/**  100 is one full core, except for Dynatrace (as it reports it). */
 	cpuPercent?: number | null,
 	memoryBytes?: number | null,
 	/**  Why the latest read failed. */
@@ -675,12 +677,14 @@ export type LiveResource_Deserialize = {
 /**  A monitored API's latest reading while a load test runs. */
 export type LiveResource_Serialize = {
 	name: string,
+	/**  `prometheus`, `actuator` or `dynatrace`. */
+	format: string,
 	/**
 	 *  Seconds since the load started, of the latest successful read. None
 	 *  until one succeeds.
 	 */
 	t: number | null,
-	/**  100 is one full core. */
+	/**  100 is one full core, except for Dynatrace (as it reports it). */
 	cpuPercent: number | null,
 	memoryBytes: number | null,
 	/**  Why the latest read failed. */
@@ -901,7 +905,7 @@ export type MonitorTarget_Deserialize = {
 	 *  use `{{variables}}`, so the token can stay a secret.
 	 */
 	headers?: Header[],
-	/**  Time between reads. 1s when left out. */
+	/**  Time between reads. 1s when left out (30s for Dynatrace). */
 	interval?: string | null,
 	/**
 	 *  A health check read at the same time, like `/actuator/health` or
@@ -910,6 +914,18 @@ export type MonitorTarget_Deserialize = {
 	 *  work, and the headers above are sent with it too.
 	 */
 	health?: string | null,
+	/**
+	 *  An API token, sent as `Authorization: Api-Token …` to Dynatrace and
+	 *  as `Authorization: Bearer …` to the other endpoints. Use a
+	 *  `{{variable}}` so the token stays a secret.
+	 */
+	token?: string | null,
+	/**
+	 *  Dynatrace only: an entity selector for the API's processes, like
+	 *  `type("PROCESS_GROUP_INSTANCE"),entityName.contains("orders")`.
+	 *  Their CPU and memory are summed.
+	 */
+	entity?: string | null,
 };
 
 export type MonitorTarget_Serialize = {
@@ -925,7 +941,7 @@ export type MonitorTarget_Serialize = {
 	 *  use `{{variables}}`, so the token can stay a secret.
 	 */
 	headers?: Header[],
-	/**  Time between reads. 1s when left out. */
+	/**  Time between reads. 1s when left out (30s for Dynatrace). */
 	interval?: string,
 	/**
 	 *  A health check read at the same time, like `/actuator/health` or
@@ -934,6 +950,18 @@ export type MonitorTarget_Serialize = {
 	 *  work, and the headers above are sent with it too.
 	 */
 	health?: string,
+	/**
+	 *  An API token, sent as `Authorization: Api-Token …` to Dynatrace and
+	 *  as `Authorization: Bearer …` to the other endpoints. Use a
+	 *  `{{variable}}` so the token stays a secret.
+	 */
+	token?: string,
+	/**
+	 *  Dynatrace only: an entity selector for the API's processes, like
+	 *  `type("PROCESS_GROUP_INSTANCE"),entityName.contains("orders")`.
+	 *  Their CPU and memory are summed.
+	 */
+	entity?: string,
 };
 
 /**
@@ -946,12 +974,19 @@ export type Monitor_Deserialize =
  *  Boot with Micrometer), `/metrics` (prometheus-net, prom-client,
  *  client_golang) or `/q/metrics` (Quarkus).
  */
-({ prometheus: MonitorTarget_Deserialize }) & { actuator?: never } | 
+({ prometheus: MonitorTarget_Deserialize }) & { actuator?: never; dynatrace?: never } | 
 /**
  *  Spring Boot Actuator's base URL, like `https://api/actuator`. Reads
  *  `/prometheus` under it when exposed, else the JSON at `/metrics`.
  */
-({ actuator: MonitorTarget_Deserialize }) & { prometheus?: never };
+({ actuator: MonitorTarget_Deserialize }) & { dynatrace?: never; prometheus?: never } | 
+/**
+ *  A Dynatrace environment, like `https://abc12345.live.dynatrace.com`
+ *  (or `https://host/e/{environment-id}` for Managed), read through its
+ *  Metrics API v2 for the processes `entity` selects. Needs a `token`
+ *  with the `metrics.read` scope.
+ */
+({ dynatrace: MonitorTarget_Deserialize }) & { actuator?: never; prometheus?: never };
 
 /**
  *  A metrics endpoint the API serves, read throughout a load test so its
@@ -963,12 +998,19 @@ export type Monitor_Serialize =
  *  Boot with Micrometer), `/metrics` (prometheus-net, prom-client,
  *  client_golang) or `/q/metrics` (Quarkus).
  */
-({ prometheus: MonitorTarget_Serialize }) & { actuator?: never } | 
+({ prometheus: MonitorTarget_Serialize }) & { actuator?: never; dynatrace?: never } | 
 /**
  *  Spring Boot Actuator's base URL, like `https://api/actuator`. Reads
  *  `/prometheus` under it when exposed, else the JSON at `/metrics`.
  */
-({ actuator: MonitorTarget_Serialize }) & { prometheus?: never };
+({ actuator: MonitorTarget_Serialize }) & { dynatrace?: never; prometheus?: never } | 
+/**
+ *  A Dynatrace environment, like `https://abc12345.live.dynatrace.com`
+ *  (or `https://host/e/{environment-id}` for Managed), read through its
+ *  Metrics API v2 for the processes `entity` selects. Needs a `token`
+ *  with the `metrics.read` scope.
+ */
+({ dynatrace: MonitorTarget_Serialize }) & { actuator?: never; prometheus?: never };
 
 /**  A body, as text. Binary bodies are described rather than kept. */
 export type Payload = {
@@ -1061,8 +1103,9 @@ export type ResourceSeries_Deserialize = {
 	/**  The URL read, without its query string or any password. */
 	url: string,
 	/**
-	 *  How the figures were read: `prometheus`, or `actuator` for
-	 *  Actuator's JSON `/metrics`.
+	 *  How the figures were read: `prometheus`, `actuator` for Actuator's
+	 *  JSON `/metrics`, or `dynatrace`. Dynatrace's CPU is as it reports
+	 *  it, not a share of one core.
 	 */
 	format: string,
 	/**  CPU cores the API's machine or container has, when it says. */
@@ -1071,10 +1114,14 @@ export type ResourceSeries_Deserialize = {
 	heapMaxBytes?: number | null,
 	/**
 	 *  What `memoryBytes` measures: `resident` (the process's resident
-	 *  memory, RSS) or `jvm` (JVM heap and non-heap in use).
+	 *  memory, RSS), `jvm` (JVM heap and non-heap in use) or `working set`
+	 *  (Dynatrace's process working set).
 	 */
 	memoryKind?: string | null,
-	/**  One per read, oldest first. The first is read before the load starts. */
+	/**
+	 *  One per read, oldest first. The first is read before the load starts.
+	 *  Dynatrace's are one per minute, as it has them.
+	 */
 	samples: ResourceSample_Deserialize[],
 	/**  Reads that failed. */
 	failedReads: number,
@@ -1101,8 +1148,9 @@ export type ResourceSeries_Serialize = {
 	/**  The URL read, without its query string or any password. */
 	url: string,
 	/**
-	 *  How the figures were read: `prometheus`, or `actuator` for
-	 *  Actuator's JSON `/metrics`.
+	 *  How the figures were read: `prometheus`, `actuator` for Actuator's
+	 *  JSON `/metrics`, or `dynatrace`. Dynatrace's CPU is as it reports
+	 *  it, not a share of one core.
 	 */
 	format: string,
 	/**  CPU cores the API's machine or container has, when it says. */
@@ -1111,10 +1159,14 @@ export type ResourceSeries_Serialize = {
 	heapMaxBytes?: number | null,
 	/**
 	 *  What `memoryBytes` measures: `resident` (the process's resident
-	 *  memory, RSS) or `jvm` (JVM heap and non-heap in use).
+	 *  memory, RSS), `jvm` (JVM heap and non-heap in use) or `working set`
+	 *  (Dynatrace's process working set).
 	 */
 	memoryKind?: string,
-	/**  One per read, oldest first. The first is read before the load starts. */
+	/**
+	 *  One per read, oldest first. The first is read before the load starts.
+	 *  Dynatrace's are one per minute, as it has them.
+	 */
 	samples: ResourceSample_Serialize[],
 	/**  Reads that failed. */
 	failedReads: number,

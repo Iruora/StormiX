@@ -189,9 +189,10 @@ pub async fn run_load(
     });
     let total: Duration = profile.total_duration().into();
     let (set_origin, origin) = tokio::sync::watch::channel(None);
+    let (set_end, end) = tokio::sync::watch::channel(false);
     let (monitor_tx, mut monitor_rx) = mpsc::unbounded_channel();
-    let (mut resources, mut monitors) = if options.monitor.is_empty() {
-        (Vec::new(), JoinSet::new())
+    let (mut resources, mut monitors, mut finals) = if options.monitor.is_empty() {
+        (Vec::new(), JoinSet::new(), JoinSet::new())
     } else {
         let mut vars = Variables::new();
         vars.extend(flow.variables.iter().map(|(k, v)| (k.as_str(), v.as_str())));
@@ -201,6 +202,7 @@ pub async fn run_load(
             &vars,
             &runner.client,
             &origin,
+            &end,
             &monitor_tx,
         )
     };
@@ -208,7 +210,7 @@ pub async fn run_load(
     // The first reads are the baseline, so the load waits for them: every
     // running monitor's first answer or failure. A read gives up within
     // 10 s, so a slow or unreachable API cannot hold the test any longer.
-    let mut waiting = monitors.len();
+    let mut waiting = monitors.len() + finals.len();
     let baseline = tokio::time::sleep(Duration::from_secs(10));
     tokio::pin!(baseline);
     let mut first = vec![false; resources.len()];
@@ -259,6 +261,15 @@ pub async fn run_load(
     };
     let elapsed = started.elapsed();
     monitors.abort_all();
+    // Dynatrace reads once more for the minutes the test ended in, unless
+    // the test was stopped. A read gives up within 10 s.
+    if stop.is_stopped() {
+        finals.abort_all();
+    } else {
+        set_end.send_replace(true);
+        let last = async { while finals.join_next().await.is_some() {} };
+        let _ = tokio::time::timeout(Duration::from_secs(11), last).await;
+    }
     while let Ok(update) = monitor_rx.try_recv() {
         resources[update.index].apply(update);
     }

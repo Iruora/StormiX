@@ -12,6 +12,11 @@
 - **API CPU and memory beside the latency.** Point a load test at the API's metrics endpoint, such as Spring Boot Actuator's `/actuator/prometheus`, `/actuator/metrics`, Quarkus' `/q/metrics`, or the `/metrics` of prometheus-net, prom-client or Go. Stormix reads it every second, starting just before the load. The API's CPU (100% = one core), memory, JVM heap and GC pauses then show live while the test runs, and as figures and a chart in the results, the HTML report and the run history. Set it up under **API CPU and memory** in the load test setup, with a `monitor` section in the file, or with `stormix load --monitor URL`. Headers, such as a token from a secret, can go with each read.
 - **Spot the API going unhealthy.** A health check (`/actuator/health`, read by Actuator without being asked, or any URL with `health:`) is read at the same time. The results say **Healthy throughout**, or when the API went `DOWN` or stopped answering, what was down (like `db: DOWN`) and when it came back, with those stretches shaded on the chart and **API went unhealthy** in the header.
 
+### API CPU and memory from Dynatrace
+
+- **Read the API's CPU and memory from Dynatrace** when it can't expose a metrics endpoint. Add a `dynatrace` monitor (or pick **Dynatrace** under **API CPU and memory**) with the environment URL, an entity selector for the API's processes and an API token with `metrics.read`. Stormix reads process CPU usage and working-set memory per minute, from the minute before the load to the end of the test, summed over the processes the selector matches. Dynatrace has each minute a minute or two late, so Stormix reads it again when the test ends.
+- **`token` on any monitor**: sent as `Authorization: Api-Token …` to Dynatrace and `Authorization: Bearer …` to metrics endpoints, so a token from a secret doesn't need a header entry.
+
 ### Fixes
 
 - A virtual-user load test longer than the 30-second grace period no longer stops early: the grace now counts from the end of the profile, not from its start.

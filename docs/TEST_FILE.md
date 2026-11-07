@@ -278,21 +278,27 @@ Thresholds apply only under load. `stormix load --threshold "p95 < 300ms"` adds 
 
 ## `monitor`
 
-Metrics endpoints the API serves, read during a load test so that the API's own CPU and memory show beside the latency. Each entry is `prometheus` (Prometheus text, like `/actuator/prometheus`, `/metrics` or `/q/metrics`) or `actuator` (a Spring Boot Actuator base URL; Stormix reads `/prometheus` under it when that is exposed, else the JSON at `/metrics`).
+Metrics endpoints the API serves, read during a load test so that the API's own CPU and memory show beside the latency. Each entry is `prometheus` (Prometheus text, like `/actuator/prometheus`, `/metrics` or `/q/metrics`), `actuator` (a Spring Boot Actuator base URL; Stormix reads `/prometheus` under it when that is exposed, else the JSON at `/metrics`) or `dynatrace` (a Dynatrace environment URL, read through its Metrics API v2).
 
 | Field | |
 |---|---|
 | `url` | The endpoint. `{{variables}}` work |
 | `name` | What to call it in results (optional, the URL's host by default) |
 | `headers` | `[{ name, value }]` sent with every read, like a bearer token (optional) |
-| `interval` | Time between reads (optional, `1s` by default) |
+| `interval` | Time between reads (optional, `1s` by default; `30s` for `dynatrace`, at least `10s`) |
 | `health` | A health check read at the same time, like `/actuator/health` or `/healthz`, to spot the API going down (optional; `actuator` reads `/health` under its URL without it) |
+| `token` | An API token, sent as `Authorization: Api-Token …` to Dynatrace and `Authorization: Bearer …` to the others. Use a `{{variable}}` from a secret (optional) |
+| `entity` | `dynatrace` only, required: an entity selector for the API's processes, like `type("PROCESS_GROUP_INSTANCE"),entityName.contains("orders")` |
 
 ```yaml
 monitor:
   - prometheus:
       url: "{{base_url}}/actuator/prometheus"
       headers: [{ name: Authorization, value: "Bearer {{actuator_token}}" }]
+  - dynatrace:
+      url: "https://abc12345.live.dynatrace.com"
+      entity: 'type("PROCESS_GROUP_INSTANCE"),entityName.contains("orders")'
+      token: "{{dynatrace_token}}"
 ```
 
 See [API CPU, memory and health](/features/api-resources) for which figures are read and how they are shown.

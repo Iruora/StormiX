@@ -6,6 +6,8 @@ import type { LoadProgress, LoadReport } from "../bindings";
 export type ResourceView = {
   name: string;
   url?: string;
+  /** `prometheus`, `actuator` or `dynatrace`. */
+  format?: string;
   samples: { t: number | null; cpuPercent?: number | null; memoryBytes?: number | null; heapBytes?: number | null; gcMsPerS?: number | null }[];
   error?: string | null;
   failedReads?: number;
@@ -67,7 +69,7 @@ export function liveResources(points: LoadProgress[]): ResourceView[] {
       seen.add(now.t);
       samples.push({ t: now.t, cpuPercent: now.cpuPercent, memoryBytes: now.memoryBytes });
     }
-    return { name: r.name, samples, error: r.error, cpuCores: r.cpuCores, memoryKind: r.memoryKind, health };
+    return { name: r.name, format: r.format, samples, error: r.error, cpuCores: r.cpuCores, memoryKind: r.memoryKind, health };
   });
 }
 
@@ -94,7 +96,10 @@ function OneApi({ series, duration, live }: { series: ResourceView; duration: nu
   const heap = values(series, (s) => s.heapBytes);
   const gc = values(series, (s) => s.gcMsPerS);
   const cores = series.cpuCores ? ` of ${Math.round(series.cpuCores)} cores` : "";
-  const memoryWhat = series.memoryKind === "jvm" ? "JVM heap + non-heap" : "resident memory";
+  const dynatrace = series.format === "dynatrace";
+  const memoryWhat =
+    series.memoryKind === "jvm" ? "JVM heap + non-heap" : dynatrace ? "process working set" : "resident memory";
+  const cpuWhat = dynatrace ? "as Dynatrace reports it" : `100% = 1 core${cores}`;
   const empty = series.samples.length === 0;
   return (
     <div className="border-t border-line px-4 py-3">
@@ -127,7 +132,7 @@ function OneApi({ series, duration, live }: { series: ResourceView; duration: nu
           <div className="grid grid-cols-[repeat(auto-fit,minmax(6rem,1fr))] gap-3">
             {live ? (
               <>
-                <Figure label={`CPU now (100% = 1 core${cores})`} value={pct(cpu.at(-1))} />
+                <Figure label={`CPU now (${cpuWhat})`} value={pct(cpu.at(-1))} />
                 <Figure label={`memory now, ${memoryWhat}`} value={bytes(memory.at(-1))} />
                 <Figure label="CPU peak" value={pct(max(cpu))} />
                 <Figure label="memory peak" value={bytes(max(memory))} />
@@ -151,7 +156,9 @@ function OneApi({ series, duration, live }: { series: ResourceView; duration: nu
           </div>
           {!live && (
             <div className="mt-1 text-[0.6875rem] text-subtle">
-              CPU: 100% is one full core{cores}. Memory: {memoryWhat}. The first reading is taken just before the load starts.
+              {dynatrace
+                ? `CPU: process CPU usage as Dynatrace reports it. Memory: ${memoryWhat}. One reading per minute, the first from just before the load starts; Dynatrace takes a minute or two to have each one.`
+                : `CPU: 100% is one full core${cores}. Memory: ${memoryWhat}. The first reading is taken just before the load starts.`}
             </div>
           )}
           <Chart series={series} duration={duration} />

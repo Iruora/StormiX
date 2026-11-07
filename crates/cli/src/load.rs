@@ -224,6 +224,8 @@ fn monitor_for(url: String) -> Monitor {
         headers: Vec::new(),
         interval: None,
         health: None,
+        token: None,
+        entity: None,
     };
     if actuator {
         Monitor::Actuator(target)
@@ -517,13 +519,18 @@ fn render_resources(out: &mut String, series: &stormix_engine::ResourceSeries) {
     }
     let stats = series.stats();
     if let (Some(avg), Some(peak)) = (stats.cpu_avg, stats.cpu_peak) {
-        let cores = series
-            .cpu_cores
-            .map(|c| format!(" of {c:.0} cores"))
-            .unwrap_or_default();
+        let scale = if series.format == "dynatrace" {
+            "as Dynatrace reports it".to_owned()
+        } else {
+            let cores = series
+                .cpu_cores
+                .map(|c| format!(" of {c:.0} cores"))
+                .unwrap_or_default();
+            format!("100% = one core{cores}")
+        };
         let _ = writeln!(
             out,
-            "    cpu      avg {avg:.0}%  peak {peak:.0}%   (100% = one core{cores})"
+            "    cpu      avg {avg:.0}%  peak {peak:.0}%   ({scale})"
         );
     }
     if let (Some(start), Some(peak), Some(end)) =
@@ -532,6 +539,7 @@ fn render_resources(out: &mut String, series: &stormix_engine::ResourceSeries) {
         let kind = match series.memory_kind.as_deref() {
             Some("jvm") => "   (JVM heap + non-heap)",
             Some("resident") => "   (resident)",
+            Some("working set") => "   (working set)",
             _ => "",
         };
         let _ = writeln!(

@@ -237,6 +237,36 @@ impl TestFile {
                     "the URL does not start with http:// or https://",
                 );
             }
+            if matches!(monitor, crate::Monitor::Dynatrace(_)) {
+                if monitor
+                    .target()
+                    .entity
+                    .as_deref()
+                    .is_none_or(|e| e.trim().is_empty())
+                {
+                    issues.error(
+                        &format!("{at}.entity"),
+                        "Dynatrace needs an entity selector for the API's processes, like `type(\"PROCESS_GROUP_INSTANCE\"),entityName.contains(\"orders\")`",
+                    );
+                }
+                if monitor.target().token.is_none()
+                    && !monitor
+                        .target()
+                        .headers
+                        .iter()
+                        .any(|h| h.name.eq_ignore_ascii_case("authorization"))
+                {
+                    issues.warning(
+                        &format!("{at}.token"),
+                        "Dynatrace needs an API token with the metrics.read scope; set `token`",
+                    );
+                }
+            } else if monitor.target().entity.is_some() {
+                issues.warning(
+                    &format!("{at}.entity"),
+                    "`entity` is only used by Dynatrace",
+                );
+            }
             if let Some(health) = &monitor.target().health {
                 let health = health.trim();
                 if !(health.starts_with("http://")
@@ -323,6 +353,51 @@ flow:
         headers: [{ name: Authorization, value: "Bearer {{token}}" }]
 "#;
         assert_eq!(issues(yaml), []);
+    }
+
+    /// A file with one `monitor` entry, given as YAML flow.
+    fn file(monitor: &str) -> String {
+        format!(
+            "version: 1\nflow:\n  name: dt\n  steps:\n    - name: a\n      request: {{ method: GET, url: \"https://example.com\" }}\nload:\n  virtual_users: {{ count: 1, duration: 1s }}\nmonitor:\n  - {monitor}\n"
+        )
+    }
+
+    #[test]
+    fn dynatrace_needs_an_entity_and_a_token() {
+        assert_eq!(
+            issues(&file(
+                "dynatrace: { url: \"https://abc.live.dynatrace.com\" }"
+            )),
+            [
+                (Severity::Error, "monitor[0].dynatrace.entity".into()),
+                (Severity::Warning, "monitor[0].dynatrace.token".into()),
+            ]
+        );
+        assert_eq!(
+            issues(&file(
+                r#"dynatrace: { url: "https://abc.live.dynatrace.com", entity: 'type("PROCESS_GROUP_INSTANCE")', token: "{{dt}}" }"#
+            )),
+            []
+        );
+        assert_eq!(
+            issues(&file(
+                r#"prometheus: { url: "https://api/metrics", entity: x }"#
+            )),
+            [(Severity::Warning, "monitor[0].prometheus.entity".into())]
+        );
+    }
+
+    #[test]
+    fn dynatrace_is_read_less_often() {
+        let every = |monitor: &str| {
+            TestFile::from_yaml(&file(monitor)).unwrap().monitor[0]
+                .every()
+                .as_millis()
+        };
+        assert_eq!(every("dynatrace: { url: x }"), 30_000);
+        assert_eq!(every("dynatrace: { url: x, interval: 1s }"), 10_000);
+        assert_eq!(every("prometheus: { url: x }"), 1000);
+        assert_eq!(every("actuator: { url: x, interval: 100ms }"), 250);
     }
 
     #[test]

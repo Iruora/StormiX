@@ -368,11 +368,17 @@ fn resources_html(out: &mut String, series: &ResourceSeries, duration_s: f64) {
         .unwrap_or_default();
     let memory = match series.memory_kind.as_deref() {
         Some("jvm") => "JVM heap and non-heap in use",
+        Some("working set") => "the processes' working set",
         _ => "resident memory",
+    };
+    let cpu = if series.format == "dynatrace" {
+        "process CPU usage as Dynatrace reports it, one reading per minute".to_owned()
+    } else {
+        format!("100% is one full core{cores}")
     };
     let _ = write!(
         out,
-        r#"<p class="muted">CPU: 100% is one full core{cores}. Memory: {memory}.{}</p>"#,
+        r#"<p class="muted">CPU: {cpu}. Memory: {memory}.{}</p>"#,
         if series.failed_reads > 0 {
             format!(
                 " {} reads failed, the last with {}.",
