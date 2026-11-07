@@ -263,6 +263,16 @@ impl TestFile {
                         "Dynatrace needs an entity selector for the API's processes, like `type(\"PROCESS_GROUP_INSTANCE\"),entityName.contains(\"orders\")`",
                     );
                 }
+                if monitor
+                    .target()
+                    .interval
+                    .is_some_and(|i| i.as_millis() < 10_000)
+                {
+                    issues.warning(
+                        &format!("{at}.interval"),
+                        "Dynatrace is read every 10s at least (its data comes by the minute)",
+                    );
+                }
                 if !authorized {
                     issues.warning(
                         &format!("{at}.token"),
@@ -457,6 +467,10 @@ flow:
         };
         assert_eq!(every("dynatrace: { url: x }"), 30_000);
         assert_eq!(every("dynatrace: { url: x, interval: 1s }"), 10_000);
+        assert!(issues(&file(
+            r#"dynatrace: { url: "https://dt", entity: e, token: t, interval: 1s }"#
+        ))
+        .contains(&(Severity::Warning, "monitor[0].dynatrace.interval".into())));
         assert_eq!(every("prometheus: { url: x }"), 1000);
         assert_eq!(every("actuator: { url: x, interval: 100ms }"), 250);
     }
