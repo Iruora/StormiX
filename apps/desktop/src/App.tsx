@@ -441,6 +441,16 @@ function TestFileView({
       client.invalidateQueries({ queryKey: CACHE_KEY });
     },
   });
+  // Leaving this workspace unmounts this view: stop its load test, which
+  // would otherwise run on unseen, with no Stop button, and block the next one.
+  const loadPending = useRef(false);
+  loadPending.current = load.isPending;
+  useEffect(
+    () => () => {
+      if (loadPending.current) void commands.stopLoadTest().catch(() => {});
+    },
+    [],
+  );
   const busy = run.isPending || load.isPending;
   // Set from Stop until the stopped test returns what it measured.
   const [stopping, setStopping] = useState(false);
