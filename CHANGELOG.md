@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.11.0 (2026-11-08)
+
+Everything in 1.11.0-rc.1 below, plus:
 
 ### Find an API's limit and the pods it needs
 

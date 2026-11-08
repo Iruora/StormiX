@@ -4035,7 +4035,7 @@ checksum = "ff7589a1859b09232522bb9edf076ca7fcf14ded96685d3fa629db73023ffbb7"
 
 [[package]]
 name = "stormix-cli"
-version = "1.11.0-rc.1"
+version = "1.11.0"
 dependencies = [
  "clap",
  "serde_json",
@@ -4050,7 +4050,7 @@ dependencies = [
 
 [[package]]
 name = "stormix-collections"
-version = "1.11.0-rc.1"
+version = "1.11.0"
 dependencies = [
  "base64 0.22.1",
  "serde_json",
@@ -4062,7 +4062,7 @@ dependencies = [
 
 [[package]]
 name = "stormix-desktop"
-version = "1.11.0-rc.1"
+version = "1.11.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4087,7 +4087,7 @@ dependencies = [
 
 [[package]]
 name = "stormix-engine"
-version = "1.11.0-rc.1"
+version = "1.11.0"
 dependencies = [
  "axum",
  "bytes",
@@ -4113,7 +4113,7 @@ dependencies = [
 
 [[package]]
 name = "stormix-flow"
-version = "1.11.0-rc.1"
+version = "1.11.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4126,7 +4126,7 @@ dependencies = [
 
 [[package]]
 name = "stormix-metrics"
-version = "1.11.0-rc.1"
+version = "1.11.0"
 dependencies = [
  "hdrhistogram",
  "serde",
@@ -4136,7 +4136,7 @@ dependencies = [
 
 [[package]]
 name = "stormix-report"
-version = "1.11.0-rc.1"
+version = "1.11.0"
 dependencies = [
  "stormix-engine",
  "stormix-flow",
@@ -4145,7 +4145,7 @@ dependencies = [
 
 [[package]]
 name = "stormix-script"
-version = "1.11.0-rc.1"
+version = "1.11.0"
 dependencies = [
  "rquickjs",
  "serde",
@@ -4154,7 +4154,7 @@ dependencies = [
 
 [[package]]
 name = "stormix-store"
-version = "1.11.0-rc.1"
+version = "1.11.0"
 dependencies = [
  "rusqlite",
  "serde",
