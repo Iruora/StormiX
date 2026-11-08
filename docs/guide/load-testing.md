@@ -4,15 +4,16 @@ A load test runs your flow many times at once and measures how the API holds up.
 
 ## Choosing a load model
 
-There are three, and the choice decides what a slow API does to the test.
+There are four, and the choice decides what a slow API does to the test.
 
 | Model | You set | What happens when the API slows down |
 |---|---|---|
 | **Constant rate** (`constant_rate`) | iterations a second, duration | Nothing changes: new iterations keep starting on schedule, so requests queue up, as real traffic would |
 | **Ramping rate** (`ramping`) | a start rate and stages, each a target rate and a duration | Same as constant rate, with the rate moving linearly between stages |
 | **Virtual users** (`virtual_users`) | number of users, duration, think time | Each user waits for its iteration to finish before the next, so a slower API gets fewer requests |
+| **Find the limit** (`find_limit`) | a start rate, an increase, a step length and a max rate | The rate goes up step by step; the test ends at the first step that breaks a threshold |
 
-The first two are *open* models and the third a *closed* one. To find the rate at which an API breaks, ramp an open model up in stages. To reproduce a known number of concurrent users clicking through an app, use virtual users with a think time.
+Constant rate, ramping and find the limit are *open* models, virtual users a *closed* one. To find the rate at which an API breaks, use **find the limit**: it checks each step on its own and, with a `capacity` section, says how many pods your production peak needs. See [Capacity and pods](/features/capacity). To reproduce a known number of concurrent users clicking through an app, use virtual users with a think time.
 
 ```yaml
 load:

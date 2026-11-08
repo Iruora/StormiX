@@ -156,6 +156,7 @@ fn load(latency_ms: f64, failed: usize, seconds: u64) -> RunData {
         slowest: Vec::new(),
         aborted: false,
         resources: Vec::new(),
+        limit: None,
     })
 }
 

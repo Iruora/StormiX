@@ -151,6 +151,7 @@ pub fn from_dir_with_progress(
             load: None,
             thresholds: Vec::new(),
             monitor: Vec::new(),
+            capacity: None,
         },
         environments,
         secrets: env_secrets,

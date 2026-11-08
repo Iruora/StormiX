@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Flow, LoadProfile, Monitor, Threshold};
+use crate::{Capacity, Flow, LoadProfile, Monitor, Threshold};
 
 /// The only format version so far. A file with a newer one is refused rather
 /// than half-read.
@@ -24,6 +24,9 @@ pub struct TestFile {
     /// its CPU and memory beside the latency.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub monitor: Vec<Monitor>,
+    /// Production traffic to size for from a `find_limit` test's result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capacity: Option<Capacity>,
 }
 
 #[derive(Debug, thiserror::Error)]

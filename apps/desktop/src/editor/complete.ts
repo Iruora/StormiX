@@ -39,9 +39,19 @@ const KEYS: Record<string, Key[]> = {
   "": [
     { label: "version", info: "Always 1 for now", value: "1" },
     { label: "flow", info: "The requests, run in order" },
-    { label: "load", info: "A load profile: constant_rate, ramping or virtual_users" },
+    { label: "load", info: "A load profile: constant_rate, ramping, find_limit or virtual_users" },
     { label: "thresholds", info: "Pass/fail rules under load, like `p95 < 300ms`" },
     { label: "monitor", info: "Metrics endpoints to read the API's CPU and memory from during a load test" },
+    { label: "capacity", info: "Production traffic to size pods for from a find_limit test" },
+  ],
+  capacity: [
+    { label: "peak_rps", info: "Requests per second at the production peak, all pods together" },
+    { label: "growth", info: "Growth to plan for, like 30% (default 30%)" },
+    { label: "target_cpu", info: "CPU each pod should run at during the peak, like 65% (default 65%)" },
+    { label: "tested_pods", info: "Pods that served the test (default 1)" },
+    { label: "pod_cores", info: "CPU cores one pod may use (default: from the monitor, else 1)" },
+    { label: "spare_pods", info: "Extra pods so one can fail or redeploy (default 1)" },
+    { label: "current_pods", info: "Pods running in production today, to compare with" },
   ],
   "monitor/[]": [
     { label: "prometheus", info: "{ url }: Prometheus text, like /actuator/prometheus, /metrics or /q/metrics" },
@@ -130,6 +140,7 @@ const KEYS: Record<string, Key[]> = {
   load: [
     { label: "constant_rate", info: "{ rate, duration }: rate iterations start each second" },
     { label: "ramping", info: "{ start_rate, stages }: move linearly between rates" },
+    { label: "find_limit", info: "{ start_rate, increase, every, max_rate }: step the rate up until a threshold breaks" },
     { label: "virtual_users", info: "{ count, duration, think_time }: users loop the flow" },
   ],
   "load/constant_rate": [
@@ -143,6 +154,12 @@ const KEYS: Record<string, Key[]> = {
   "load/ramping/stages/[]": [
     { label: "duration", info: "Like 30s, 2m" },
     { label: "target", info: "Rate reached at the end of the stage" },
+  ],
+  "load/find_limit": [
+    { label: "start_rate", info: "Rate of the first step" },
+    { label: "increase", info: "Added to the rate at each step" },
+    { label: "every", info: "How long each step lasts, like 30s" },
+    { label: "max_rate", info: "The highest rate tried" },
   ],
   "load/virtual_users": [
     { label: "count", info: "Number of users" },
@@ -161,7 +178,7 @@ const VALUES: Record<string, string[]> = {
   version: ["1"],
 };
 
-const THRESHOLDS = ["p95 < 300ms", "p99 < 1s", "avg < 100ms", "errors < 1%", "checks > 99%", "rps > 100"];
+const THRESHOLDS = ["p95 < 300ms", "p99 < 1s", "avg < 100ms", "errors < 1%", "checks > 99%", "rps > 100", "cpu < 80%"];
 
 const DYNAMIC = ["$guid", "$randomUUID", "$timestamp", "$timestampMs", "$randomInt"];
 

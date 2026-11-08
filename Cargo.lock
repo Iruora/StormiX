@@ -4139,6 +4139,7 @@ name = "stormix-report"
 version = "1.11.0-rc.1"
 dependencies = [
  "stormix-engine",
+ "stormix-flow",
  "stormix-metrics",
 ]
 

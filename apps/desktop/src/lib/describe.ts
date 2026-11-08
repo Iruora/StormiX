@@ -13,6 +13,10 @@ export function describeLoad(load: LoadProfile | null | undefined): string {
     const plural = stages.length === 1 ? "stage" : "stages";
     return `Ramping up to ${peak} iterations/s over ${stages.length} ${plural}`;
   }
+  if ("find_limit" in load && load.find_limit) {
+    const { start_rate, increase, every, max_rate } = load.find_limit;
+    return `Find the limit: ${start_rate} iterations/s, +${increase} every ${every}, up to ${max_rate}`;
+  }
   if ("virtual_users" in load && load.virtual_users) {
     const { count, duration, think_time } = load.virtual_users;
     const think = think_time ? `, ${think_time} think time` : "";

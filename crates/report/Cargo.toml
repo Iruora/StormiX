@@ -10,3 +10,6 @@ license.workspace = true
 stormix-engine.workspace = true
 stormix-metrics.workspace = true
 
+
+[dev-dependencies]
+stormix-flow.workspace = true

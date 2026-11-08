@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Find an API's limit and the pods it needs
+
+- **`find_limit` load profile** (**Find the limit** in the load test setup): the rate goes up by `increase` every `every`, from `start_rate` to `max_rate`. Each step is measured and checked against the thresholds on its own, and the test ends at the first step that breaks one. The result lists every step (rate, req/s, latency, errors, API CPU) and the last one that held: what one instance sustains.
+- **`cpu` threshold**, like `cpu < 85%`: the API's average CPU from a monitor (100% = one core), so a find_limit test can stop at a CPU ceiling as well as at a latency or error one.
+- **Pods needed.** With a `capacity` section (or **Size pods for** in the setup) giving the production peak in req/s, growth, target CPU and the pods running today, the result works out `⌈peak × (1 + growth) ÷ usable rate per pod⌉ + spare pods`, where the usable rate scales the sustained rate to the target CPU. It also shows the requests in flight per pod (Little's law) for sizing thread and connection pools. In the app the numbers can be changed in the result to try other peaks; the CLI and the HTML report show the same section.
+
 ## 1.11.0-rc.1 (2026-11-07)
 
 Release candidate for 1.11.0. It is published as a pre-release, so the app's automatic update keeps offering 1.10.0 until 1.11.0 is out; install it from the release page to try it.

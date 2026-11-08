@@ -86,6 +86,7 @@ pub fn load(args: LoadArgs) -> Result<ExitCode, String> {
         max_in_flight: args.max_in_flight,
         grace: args.grace.into(),
         monitor: test.monitor.clone(),
+        capacity: test.capacity.clone(),
         ..LoadOptions::default()
     };
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -201,6 +202,10 @@ impl Overrides {
                         "--duration cannot change a ramping profile; edit its stages".into(),
                     )
                 }
+                Some(LoadProfile::FindLimit { .. }) => return Err(
+                    "--duration cannot change a find_limit profile; edit its `every` or `max_rate`"
+                        .into(),
+                ),
                 None => {}
             }
         }
@@ -250,6 +255,14 @@ fn describe(profile: &LoadProfile) -> String {
                 profile.total_duration()
             )
         }
+        LoadProfile::FindLimit {
+            start_rate,
+            increase,
+            every,
+            max_rate,
+        } => format!(
+            "finding the limit: {start_rate}/s, then +{increase}/s every {every} up to {max_rate}/s, until a threshold breaks"
+        ),
         LoadProfile::VirtualUsers {
             count,
             duration,
@@ -299,6 +312,16 @@ impl ProgressLine {
             if let Some(memory) = latest.memory_bytes {
                 let _ = write!(line, "  mem {}", bytes(memory));
             }
+        }
+        // find_limit: the last step that ended, and how it went.
+        if let Some(step) = p.limit_steps.last() {
+            let mark = if step.passed { "✓" } else { "✗" };
+            let _ = write!(
+                line,
+                "  step {} {mark} {}/s",
+                p.limit_steps.len(),
+                step.rate
+            );
         }
         // Any monitored API that is not healthy right now.
         for series in p.resources {
@@ -493,6 +516,10 @@ fn render_text(report: &LoadReport, title: Option<String>) -> String {
         render_resources(&mut out, series);
     }
 
+    if let Some(limit) = &report.limit {
+        render_limit(&mut out, limit);
+    }
+
     if report.thresholds.is_empty() {
         let _ = writeln!(
             out,
@@ -506,6 +533,143 @@ fn render_text(report: &LoadReport, title: Option<String>) -> String {
         }
     }
     out
+}
+
+/// The steps of a `find_limit` test, the limit and the pods it means.
+fn render_limit(out: &mut String, limit: &stormix_engine::LimitSearch) {
+    let _ = writeln!(out, "\n  limit steps (each checked on its own)");
+    let _ = writeln!(
+        out,
+        "      {:>8}  {:>9}  {:>9}  {:>9}  {:>7}  {:>8}",
+        "rate", "req/s", "avg", "p95", "errors", "api cpu"
+    );
+    for (i, step) in limit.steps.iter().enumerate() {
+        let mark = match (step.partial, step.passed) {
+            (true, _) => "…",
+            (false, true) => "✓",
+            (false, false) => "✗",
+        };
+        let cpu = step.api_cpu.map_or("-".to_owned(), |c| format!("{c:.0}%"));
+        let broke: Vec<String> = step
+            .thresholds
+            .iter()
+            .filter(|t| !t.passed)
+            .map(|t| format!("{} ({})", t.threshold, measured(t)))
+            .collect();
+        let note = if limit.sustained == Some(i as u32) {
+            "  ← sustained".to_owned()
+        } else if step.partial {
+            "  stopped during this step".to_owned()
+        } else if broke.is_empty() {
+            String::new()
+        } else {
+            format!("  broke {}", broke.join(", "))
+        };
+        let _ = writeln!(
+            out,
+            "    {mark} {:>6}/s  {:>9.1}  {:>9}  {:>9}  {:>6.2}%  {cpu:>8}{note}",
+            step.rate,
+            step.rps,
+            ms(step.latency.avg),
+            ms(step.latency.p95),
+            step.error_rate,
+        );
+    }
+    let Some(held) = limit.sustained.and_then(|i| limit.steps.get(i as usize)) else {
+        let _ = writeln!(
+            out,
+            "\n  limit       not found: even the first step broke a threshold; start lower"
+        );
+        return;
+    };
+    if limit.reached {
+        let _ = writeln!(
+            out,
+            "\n  limit       {:.1} req/s sustained ({}/s iterations); the next step broke a threshold",
+            held.rps, held.rate
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "\n  limit       not reached: {:.1} req/s held at the max rate, so it can take at least that; raise max_rate",
+            held.rps
+        );
+    }
+    let Some(s) = &limit.sizing else {
+        let _ = writeln!(
+            out,
+            "              add a `capacity` section (peak_rps, growth, current_pods) to size pods from it"
+        );
+        return;
+    };
+    let c = &s.capacity;
+    let per_pod = if c.tested_pods > 1 {
+        format!(" ({} pods served the test)", c.tested_pods)
+    } else {
+        String::new()
+    };
+    let _ = writeln!(out, "\n  pods needed {}", s.pods);
+    let _ = writeln!(
+        out,
+        "    one pod held   {:.1} req/s{per_pod}{}",
+        s.tested_rps_per_pod,
+        s.tested_cpu
+            .map(|cpu| format!(" at {cpu:.0}% CPU of {} core(s)", round(s.pod_cores)))
+            .unwrap_or_default()
+    );
+    let reference = s
+        .cpu_step
+        .filter(|i| Some(*i) != limit.sustained)
+        .and_then(|i| limit.steps.get(i as usize));
+    let why = match (s.basis.as_str(), reference) {
+        ("cpu", Some(r)) => format!(
+            "CPU was saturated at the top, so scaled from the {}/s step at {:.0}% CPU to the {:.0}% target",
+            r.rate,
+            r.api_cpu.unwrap_or_default() / s.pod_cores,
+            c.target_cpu.0
+        ),
+        ("cpu", None) => format!("scaled to the {:.0}% CPU target", c.target_cpu.0),
+        ("latency", _) => format!(
+            "CPU stayed under the {:.0}% target, so latency or errors set the limit",
+            c.target_cpu.0
+        ),
+        _ => format!(
+            "no CPU reading, so the step is taken as saturated and run at {:.0}%",
+            c.target_cpu.0
+        ),
+    };
+    let _ = writeln!(
+        out,
+        "    usable per pod {:.1} req/s ({why})",
+        s.usable_rps_per_pod
+    );
+    let _ = writeln!(
+        out,
+        "    design rate    {:.1} req/s = peak {} × (1 + {:.0}% growth)",
+        s.design_rps,
+        round(c.peak_rps),
+        c.growth.0
+    );
+    let _ = writeln!(
+        out,
+        "    pods           ⌈{:.1} ÷ {:.1}⌉ = {} + {} spare = {}",
+        s.design_rps, s.usable_rps_per_pod, s.pods_for_traffic, c.spare_pods, s.pods
+    );
+    if let Some(current) = c.current_pods {
+        let verdict = match s.pods.cmp(&current) {
+            std::cmp::Ordering::Greater => format!("add {}", s.pods - current),
+            std::cmp::Ordering::Less => format!("{} more than needed", current - s.pods),
+            std::cmp::Ordering::Equal => "just right".to_owned(),
+        };
+        let _ = writeln!(out, "    running now    {current}: {verdict}");
+    }
+    let _ = writeln!(
+        out,
+        "    in flight      about {} requests per pod, {} in all (rate × {} avg latency); size thread and connection pools above that",
+        count(s.in_flight_per_pod),
+        count(s.in_flight_total),
+        ms(s.latency_ms)
+    );
 }
 
 /// Writes one monitored API's CPU and memory summary to the report.
@@ -624,6 +788,10 @@ fn measured(t: &stormix_metrics::ThresholdResult) -> String {
         .unwrap_or_default();
     match metric {
         "errors" | "checks" => format!("{:.2}%", t.actual),
+        "cpu" => match &t.note {
+            Some(note) => note.clone(),
+            None => format!("{:.0}%", t.actual),
+        },
         "rps" => format!("{:.1}/s", t.actual),
         _ => ms(t.actual),
     }
@@ -636,6 +804,15 @@ fn ms(value: f64) -> String {
         format!("{value:.0} ms")
     } else {
         format!("{value:.1} ms")
+    }
+}
+
+/// A count that may be small: one decimal under 10.
+fn count(value: f64) -> String {
+    if value < 10.0 {
+        format!("{value:.1}")
+    } else {
+        format!("{value:.0}")
     }
 }
 
