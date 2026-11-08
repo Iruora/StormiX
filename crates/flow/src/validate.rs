@@ -300,6 +300,18 @@ impl TestFile {
             if capacity.tested_pods == 0 {
                 issues.error("capacity.tested_pods", "at least 1 pod served the test");
             }
+            if capacity
+                .pod_memory_mb
+                .is_some_and(|m| !(m.is_finite() && m > 0.0))
+            {
+                issues.error("capacity.pod_memory_mb", "a pod has more than 0 MiB");
+            }
+            if !(1.0..=100.0).contains(&capacity.target_memory.0) {
+                issues.error(
+                    "capacity.target_memory",
+                    "the target memory is a percentage from 1% to 100%",
+                );
+            }
             if capacity.pod_cores.is_some_and(|c| c <= 0.0) {
                 issues.error("capacity.pod_cores", "a pod has more than 0 cores");
             }

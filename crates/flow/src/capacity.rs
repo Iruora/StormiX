@@ -28,6 +28,17 @@ pub struct Capacity {
     /// when it says, else taken as 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pod_cores: Option<f64>,
+    /// The memory one pod may use (its memory limit), in MiB. With it the
+    /// pods are also sized for memory, from how the API's memory grew with
+    /// the requests in flight across the steps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pod_memory_mb: Option<f64>,
+    /// The share of the memory limit a pod should use at the peak, in
+    /// percent, so a burst or a slow garbage collection stays clear of an
+    /// out-of-memory kill.
+    #[serde(default = "default_target_memory")]
+    #[cfg_attr(feature = "specta", specta(type = f64))]
+    pub target_memory: Percent,
     /// Extra pods on top of what the traffic needs, so one can fail or be
     /// redeployed without overloading the rest.
     #[serde(default = "one")]
@@ -43,6 +54,10 @@ fn default_growth() -> Percent {
 
 fn default_target_cpu() -> Percent {
     Percent(65.0)
+}
+
+fn default_target_memory() -> Percent {
+    Percent(80.0)
 }
 
 fn one() -> u32 {

@@ -355,7 +355,8 @@ fn limit_html(out: &mut String, limit: &LimitSearch) {
 <li>One pod held <b>{held:.1} req/s</b>{cpu}{tested}</li>
 <li>Usable per pod: <b>{usable:.1} req/s</b> ({basis})</li>
 <li>Design rate: <b>{design:.1} req/s</b> = peak {peak} × (1 + {growth:.0}% growth)</li>
-<li>Pods: ⌈{design:.1} ÷ {usable:.1}⌉ = {traffic} + {spare} spare = <b>{pods}</b></li>
+<li>CPU pods: ⌈{design:.1} ÷ {usable:.1}⌉ = {cpu_pods}</li>{memory}
+<li>Pods: {traffic} + {spare} spare = <b>{pods}</b></li>
 <li>In flight (Little's law, rate × {lat} avg latency): about {fp:.1} requests per pod, {ft:.0} in all. Size thread and connection pools above that.</li></ul>"#,
             pods = s.pods,
             verdict = esc(&verdict),
@@ -375,6 +376,8 @@ fn limit_html(out: &mut String, limit: &LimitSearch) {
             peak = c.peak_rps,
             growth = c.growth.0,
             traffic = s.pods_for_traffic,
+            cpu_pods = s.pods_by_cpu,
+            memory = memory_html(s),
             spare = c.spare_pods,
             lat = ms(s.latency_ms),
             fp = s.in_flight_per_pod,
@@ -384,6 +387,39 @@ fn limit_html(out: &mut String, limit: &LimitSearch) {
         out.push_str(r#"<p class="muted">Add a <span class="mono">capacity</span> section (peak_rps, growth, current_pods) to the test file to size pods from this limit.</p>"#);
     }
     out.push_str("</section>");
+}
+
+/// The memory side of the sizing, as list items.
+fn memory_html(s: &stormix_engine::Sizing) -> String {
+    let c = &s.capacity;
+    let mut out = String::new();
+    if let (Some(fixed), Some(per_request)) = (s.fixed_memory_bytes, s.memory_per_request_bytes) {
+        let _ = write!(
+            out,
+            "<li>Memory: {} fixed + {:.2} MB per request in flight, fitted across the steps</li>",
+            bytes(fixed),
+            per_request / 1_048_576.0
+        );
+    }
+    match (s.pods_by_memory, c.pod_memory_mb) {
+        (Some(pods), Some(mb)) => {
+            let _ = write!(
+                out,
+                "<li>Memory pods: <b>{pods}</b>, to keep {:.0} requests in flight within {:.0}% of {} per pod</li>",
+                s.in_flight_total,
+                c.target_memory.0,
+                bytes(mb * 1_048_576.0)
+            );
+        }
+        (None, None) => out.push_str(
+            r#"<li class="muted">Memory not sized: add <span class="mono">pod_memory_mb</span> to the capacity section.</li>"#,
+        ),
+        _ => {}
+    }
+    if let Some(note) = &s.memory_note {
+        let _ = write!(out, r#"<li class="muted">{}</li>"#, esc(note));
+    }
+    out
 }
 
 /// Requests per second as bars (failures stacked in red) and p95 as a line.

@@ -201,6 +201,7 @@ fn a_find_limit_report_shows_each_step_and_the_pods_needed() {
             ..Default::default()
         },
         api_cpu: Some(cpu),
+        api_memory_bytes: None,
         thresholds: vec![ThresholdResult {
             threshold: "cpu < 85%".into(),
             actual: cpu,

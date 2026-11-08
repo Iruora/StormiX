@@ -60,6 +60,8 @@ function CapacityFields({ value, onChange }: { value: CapacityInput; onChange: (
       <NumField label="pods in the test" title="Pods behind the URL during the test; the limit is divided by it" value={value.tested_pods} onChange={(v) => set("tested_pods", Math.max(1, Math.round(v ?? 1)))} />
       <NumField label="spare pods" title="Extra pods so one can fail or be redeployed" value={value.spare_pods} onChange={(v) => set("spare_pods", Math.round(v ?? 0))} />
       <NumField label="running now" optional title="Pods in production today, to compare with" value={value.current_pods} onChange={(v) => set("current_pods", v == null ? null : Math.round(v))} />
+      <NumField label="memory per pod" suffix="MiB" optional title="The pod's memory limit; sizes for memory too, from how memory grew with load across the steps" value={value.pod_memory_mb} onChange={(v) => set("pod_memory_mb", v)} />
+      <NumField label="target memory" suffix="%" title="Share of the memory limit a pod should use at the peak" value={value.target_memory} onChange={(v) => set("target_memory", v ?? 0)} />
       <NumField label="cores per pod" optional title="The pod's CPU limit in cores. Left empty: what the monitor reports, else 1" value={value.pod_cores} onChange={(v) => set("pod_cores", v)} />
     </div>
   );
@@ -113,6 +115,8 @@ function measuredText(threshold: string, actual: number): string {
   return formatMs(actual);
 }
 
+const mib = (bytes: number) => `${Math.round(bytes / 1048576)} MiB`;
+
 const n1 = (v: number) => (v < 10 ? v.toFixed(1) : v.toFixed(0));
 
 /**
@@ -164,7 +168,8 @@ export function LimitResult({ limit, capacity }: { limit: LimitSearch; capacity:
               <th className="py-1 pr-2 text-right font-medium">avg</th>
               <th className="py-1 pr-2 text-right font-medium">p95</th>
               <th className="py-1 pr-2 text-right font-medium">errors</th>
-              <th className="py-1 pr-2 text-right font-medium">API CPU</th>
+              <th className="py-1 pr-2 text-right font-medium" title="The API's average CPU during the step">CPU</th>
+              <th className="py-1 pr-2 text-right font-medium" title="The API's average memory during the step, in MiB">mem</th>
             </tr>
           </thead>
           <tbody className="mono whitespace-nowrap">
@@ -189,11 +194,11 @@ export function LimitResult({ limit, capacity }: { limit: LimitSearch; capacity:
                     </span>
                   </td>
                   <td className="py-1 pr-2">
-                    <span className="flex min-w-24 items-center gap-1.5">
+                    <span className="flex items-center gap-1.5">
                       <span className="w-10 shrink-0 text-right">{(s.rps ?? 0).toFixed(1)}</span>
                       <span
                         className={`h-1.5 rounded-sm ${s.passed ? "bg-accent/60" : s.partial ? "bg-line" : "bg-bad"}`}
-                        style={{ width: `${((s.rps ?? 0) / maxRps) * 100}%` }}
+                        style={{ width: `${((s.rps ?? 0) / maxRps) * 2.5}rem` }}
                       />
                     </span>
                   </td>
@@ -201,6 +206,7 @@ export function LimitResult({ limit, capacity }: { limit: LimitSearch; capacity:
                   <td className="py-1 pr-2 text-right">{formatMs(s.latency.p95 ?? 0)}</td>
                   <td className={`py-1 pr-2 text-right ${s.failedRequests > 0 ? "text-bad" : ""}`}>{(s.errorRate ?? 0).toFixed(2)}%</td>
                   <td className="py-1 pr-2 text-right">{s.apiCpu == null ? "–" : `${Math.round(s.apiCpu)}%`}</td>
+                  <td className="py-1 pr-2 text-right">{s.apiMemoryBytes == null ? "–" : `${Math.round(s.apiMemoryBytes / 1048576)}M`}</td>
                 </tr>
               );
             })}
@@ -250,8 +256,30 @@ export function LimitResult({ limit, capacity }: { limit: LimitSearch; capacity:
                 <span className="text-muted"> ({why})</span>
               </li>
               <li className="mono text-xs text-muted">
-                ⌈{inputs.peak_rps} × {(1 + inputs.growth / 100).toFixed(2)} ÷ {sizing.usableRpsPerPod.toFixed(1)}⌉ ={" "}
-                {sizing.podsForTraffic} + {inputs.spare_pods} spare = <b className="text-ink">{sizing.pods} pods</b>
+                CPU: ⌈{inputs.peak_rps} × {(1 + inputs.growth / 100).toFixed(2)} ÷ {sizing.usableRpsPerPod.toFixed(1)}⌉ ={" "}
+                {sizing.podsByCpu} pods
+              </li>
+              {sizing.fixedMemoryBytes != null && sizing.memoryPerRequestBytes != null && (
+                <li>
+                  Memory: {mib(sizing.fixedMemoryBytes)} fixed + {(sizing.memoryPerRequestBytes / 1048576).toFixed(2)} MiB per
+                  request in flight<span className="text-muted"> (fitted across the steps)</span>
+                </li>
+              )}
+              {sizing.podsByMemory != null && inputs.pod_memory_mb != null && (
+                <li className="mono text-xs text-muted">
+                  Memory: {n1(sizing.inFlightTotal)} in flight × {(sizing.memoryPerRequestBytes! / 1048576).toFixed(2)} MiB ÷ (
+                  {inputs.pod_memory_mb} MiB × {inputs.target_memory}% − {mib(sizing.fixedMemoryBytes!)}) ={" "}
+                  {sizing.podsByMemory} pods
+                </li>
+              )}
+              {inputs.pod_memory_mb == null && (
+                <li className="text-xs text-subtle">Add the memory per pod to size for memory too.</li>
+              )}
+              {sizing.memoryNote && <li className="text-xs text-warn">{sizing.memoryNote}</li>}
+              <li className="mono text-xs text-muted">
+                max({sizing.podsByCpu}, {sizing.podsByMemory ?? "–"}) = {sizing.podsForTraffic} + {inputs.spare_pods} spare ={" "}
+                <b className="text-ink">{sizing.pods} pods</b>
+                {(sizing.podsByMemory ?? 0) > sizing.podsByCpu ? ", set by memory" : ""}
               </li>
               <li className="text-muted">
                 In flight: about {n1(sizing.inFlightPerPod)} requests per pod, {n1(sizing.inFlightTotal)} in all (rate ×{" "}

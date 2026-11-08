@@ -422,6 +422,7 @@ impl<'a> LimitTracker<'a> {
         let summary = window.summary(length);
         let (start_s, end_s) = (start.as_secs_f64(), end.as_secs_f64());
         let api_cpu = capacity::average_cpu(resources, start_s, end_s);
+        let api_memory_bytes = capacity::average_memory(resources, start_s, end_s);
         let mut thresholds = check_thresholds(&self.thresholds, &summary, &window, api_cpu);
         // Monitors read every few seconds (Dynatrace once a minute), so a
         // step can end without a CPU reading: that decides nothing, as long
@@ -448,6 +449,7 @@ impl<'a> LimitTracker<'a> {
             error_rate: summary.error_rate(),
             latency: summary.latency,
             api_cpu,
+            api_memory_bytes,
             thresholds,
             passed,
             partial,

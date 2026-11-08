@@ -540,8 +540,8 @@ fn render_limit(out: &mut String, limit: &stormix_engine::LimitSearch) {
     let _ = writeln!(out, "\n  limit steps (each checked on its own)");
     let _ = writeln!(
         out,
-        "      {:>8}  {:>9}  {:>9}  {:>9}  {:>7}  {:>8}",
-        "rate", "req/s", "avg", "p95", "errors", "api cpu"
+        "      {:>8}  {:>9}  {:>9}  {:>9}  {:>7}  {:>8}  {:>8}",
+        "rate", "req/s", "avg", "p95", "errors", "api cpu", "api mem"
     );
     for (i, step) in limit.steps.iter().enumerate() {
         let mark = match (step.partial, step.passed) {
@@ -550,6 +550,7 @@ fn render_limit(out: &mut String, limit: &stormix_engine::LimitSearch) {
             (false, false) => "✗",
         };
         let cpu = step.api_cpu.map_or("-".to_owned(), |c| format!("{c:.0}%"));
+        let mem = step.api_memory_bytes.map_or("-".to_owned(), bytes);
         let broke: Vec<String> = step
             .thresholds
             .iter()
@@ -567,7 +568,7 @@ fn render_limit(out: &mut String, limit: &stormix_engine::LimitSearch) {
         };
         let _ = writeln!(
             out,
-            "    {mark} {:>6}/s  {:>9.1}  {:>9}  {:>9}  {:>6.2}%  {cpu:>8}{note}",
+            "    {mark} {:>6}/s  {:>9.1}  {:>9}  {:>9}  {:>6.2}%  {cpu:>8}  {mem:>8}{note}",
             step.rate,
             step.rps,
             ms(step.latency.avg),
@@ -652,8 +653,44 @@ fn render_limit(out: &mut String, limit: &stormix_engine::LimitSearch) {
     );
     let _ = writeln!(
         out,
-        "    pods           ⌈{:.1} ÷ {:.1}⌉ = {} + {} spare = {}",
-        s.design_rps, s.usable_rps_per_pod, s.pods_for_traffic, c.spare_pods, s.pods
+        "    cpu pods       ⌈{:.1} ÷ {:.1}⌉ = {}",
+        s.design_rps, s.usable_rps_per_pod, s.pods_by_cpu
+    );
+    if let (Some(fixed), Some(per_request)) = (s.fixed_memory_bytes, s.memory_per_request_bytes) {
+        let _ = writeln!(
+            out,
+            "    memory         {} fixed + {:.2} MB per request in flight (fitted across the steps)",
+            bytes(fixed),
+            per_request / (1024.0 * 1024.0)
+        );
+    }
+    if let (Some(pods), Some(limit_mb)) = (s.pods_by_memory, c.pod_memory_mb) {
+        let _ = writeln!(
+            out,
+            "    memory pods    {} (about {} requests in flight in all, within {:.0}% of {} per pod)",
+            pods,
+            count(s.in_flight_total),
+            c.target_memory.0,
+            bytes(limit_mb * 1024.0 * 1024.0)
+        );
+    } else if c.pod_memory_mb.is_none() {
+        let _ = writeln!(
+            out,
+            "    memory pods    not sized; add pod_memory_mb (the pod's memory limit) to the capacity section"
+        );
+    }
+    if let Some(note) = &s.memory_note {
+        let _ = writeln!(out, "                   {note}");
+    }
+    let by = if s.pods_by_memory.is_some_and(|m| m > s.pods_by_cpu) {
+        "memory"
+    } else {
+        "cpu"
+    };
+    let _ = writeln!(
+        out,
+        "    pods           {} (set by {by}) + {} spare = {}",
+        s.pods_for_traffic, c.spare_pods, s.pods
     );
     if let Some(current) = c.current_pods {
         let verdict = match s.pods.cmp(&current) {

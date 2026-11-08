@@ -40,6 +40,7 @@ capacity:
   target_cpu: 65%      # CPU each pod should run at during the peak (default 65%)
   current_pods: 4      # pods running today, to compare with (optional)
   spare_pods: 1        # so one pod can fail or redeploy (default 1)
+  pod_memory_mb: 512   # the pod's memory limit; sizes memory too (optional)
 ```
 
 The result then shows:
@@ -55,6 +56,31 @@ pods                = ⌈peak × (1 + growth) ÷ usable rate per pod⌉ + spare 
 - **Without a monitor** the sustained step is taken as saturated, so the usable rate is that rate × the target CPU.
 
 In the app, the result's **Pods needed** box starts from the `capacity` section, and you can change the peak, growth and pod counts there to try other numbers without running the test again.
+
+## Memory
+
+Memory scales with pods too, but only part of it. A pod's memory is about
+
+```text
+memory per pod ≈ fixed part + memory per request × requests in flight on that pod
+```
+
+The fixed part (the runtime, code, caches, pools) is paid by every pod whatever the traffic. The rest grows with the requests in flight, which is the pod's share of the rate × latency (Little's law). Adding pods shrinks each pod's share, which is why a service that was OOM killed on 3 pods can hold the same load on 5.
+
+Give the pod's memory limit as `pod_memory_mb` (and optionally `target_memory`, 80% by default) and Stormix sizes memory as well. It reads the API's memory at every step, fits a straight line through each step's (requests in flight, memory), and works out:
+
+```text
+memory pods = ⌈design rate × latency × memory per request ÷ (limit × target memory − fixed part)⌉
+pods        = max(CPU pods, memory pods) + spare pods
+```
+
+What the fit can tell you:
+
+- **The fixed part is over the target already**: more pods will not help. Raise the memory limit, or find what holds the memory: a cache, a leak.
+- **Memory did not grow with the requests in flight**: memory does not limit the pod count.
+- **A leak** looks like memory growing with time at a steady rate. Steps raise the rate over time too, so a leak inflates the memory per request. Check with a `constant_rate` test: memory that keeps climbing and never levels off is a leak, and more pods only delay the kill.
+
+A JVM's heap also grows lazily up to its maximum before collecting, so its memory per request reads high. Heap sizes (`-Xmx`, `MaxRAMPercentage`) plus threads and native memory must stay under the container limit, or the kernel kills the pod before Java throws an `OutOfMemoryError`.
 
 ## Pools: Little's law
 

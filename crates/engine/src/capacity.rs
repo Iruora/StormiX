@@ -11,7 +11,15 @@
 //! - pods = ⌈peak × (1 + growth) ÷ usable rate per pod⌉ + spare pods.
 //!
 //! Without a CPU reading the step is taken as saturated, so the usable rate
-//! is that rate × the target CPU. Little's law (in flight = rate × time in
+//! is that rate × the target CPU.
+//!
+//! Memory is sized too when the pod's memory limit is given. A pod's memory
+//! is about a fixed part (runtime, code, caches) plus a share per request in
+//! flight, so a straight line through each step's (requests in flight,
+//! memory) gives both. The traffic then needs
+//! ⌈design rate × latency × memory per request ÷ (limit × target − fixed)⌉
+//! pods for its in-flight requests to fit, and the answer is the larger of
+//! the CPU and memory counts. Little's law (in flight = rate × time in
 //! the system) gives the requests one pod has in flight at its usable rate,
 //! a floor for its thread and connection pools.
 
@@ -43,6 +51,10 @@ pub struct LimitStep {
     /// busiest monitored API's when there are several.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_cpu: Option<f64>,
+    /// The API's average memory during the step, in bytes, as the monitor
+    /// measures it (see `ResourceSeries::memory_kind`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_memory_bytes: Option<f64>,
     /// The thresholds checked against this step alone (`rps` ones are
     /// left out: the step sets the rate).
     pub thresholds: Vec<ThresholdResult>,
@@ -106,6 +118,25 @@ pub struct Sizing {
     pub in_flight_per_pod: f64,
     /// Requests all pods have in flight at the design rate.
     pub in_flight_total: f64,
+    /// Pods the CPU needs, before the spare ones.
+    pub pods_by_cpu: u32,
+    /// Pods the memory needs, before the spare ones. None without
+    /// `pod_memory_mb`, or when the steps say too little about memory
+    /// (see `memory_note`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pods_by_memory: Option<u32>,
+    /// A pod's memory that does not depend on load, in bytes, from the fit
+    /// across the steps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_memory_bytes: Option<f64>,
+    /// The memory each request in flight adds, in bytes, from the fit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_per_request_bytes: Option<f64>,
+    /// Why memory was not sized, or what to watch: too few steps with a
+    /// memory reading, memory that did not grow with load, or a fixed part
+    /// over the target already.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_note: Option<String>,
     /// How the usable rate was found: `cpu` (scaled to the target CPU),
     /// `latency` (CPU was below the target when a threshold broke, so the
     /// tested rate is the cap) or `assumed` (no CPU reading; the step is
@@ -157,8 +188,10 @@ pub fn size(limit: &LimitSearch, capacity: &Capacity) -> Option<Sizing> {
         None => (tested_rps_per_pod * target / 100.0, "assumed"),
     };
     let design_rps = capacity.peak_rps.max(0.0) * (1.0 + capacity.growth.max(0.0) / 100.0);
-    let pods_for_traffic = ((design_rps / usable_rps_per_pod).ceil() as u32).max(1);
+    let pods_by_cpu = ((design_rps / usable_rps_per_pod).ceil() as u32).max(1);
     let latency_ms = step.latency.avg;
+    let memory = memory_pods(limit, capacity, design_rps * latency_ms / 1000.0);
+    let pods_for_traffic = pods_by_cpu.max(memory.pods.unwrap_or(0));
     Some(Sizing {
         capacity: capacity.clone(),
         tested_rps_per_pod,
@@ -172,8 +205,98 @@ pub fn size(limit: &LimitSearch, capacity: &Capacity) -> Option<Sizing> {
         latency_ms,
         in_flight_per_pod: usable_rps_per_pod * latency_ms / 1000.0,
         in_flight_total: design_rps * latency_ms / 1000.0,
+        pods_by_cpu,
+        pods_by_memory: memory.pods,
+        fixed_memory_bytes: memory.fixed,
+        memory_per_request_bytes: memory.per_request,
+        memory_note: memory.note,
         basis: basis.into(),
     })
+}
+
+#[derive(Default)]
+struct MemoryFit {
+    pods: Option<u32>,
+    fixed: Option<f64>,
+    per_request: Option<f64>,
+    note: Option<String>,
+}
+
+const MIB: f64 = 1024.0 * 1024.0;
+
+/// Fits memory = fixed + per request × requests in flight through the
+/// steps that ran to the end, one pod's share each, then sizes for
+/// `in_flight_total` requests in flight across all pods.
+fn memory_pods(limit: &LimitSearch, capacity: &Capacity, in_flight_total: f64) -> MemoryFit {
+    let Some(limit_mb) = capacity.pod_memory_mb.filter(|m| m.is_finite() && *m > 0.0) else {
+        return MemoryFit::default();
+    };
+    let tested_pods = f64::from(capacity.tested_pods.max(1));
+    let points: Vec<(f64, f64)> = limit
+        .steps
+        .iter()
+        .filter(|s| !s.partial)
+        .filter_map(|s| {
+            let in_flight = s.rps * s.latency.avg / 1000.0 / tested_pods;
+            s.api_memory_bytes.map(|m| (in_flight, m))
+        })
+        .collect();
+    let note = |text: &str| MemoryFit {
+        note: Some(text.to_owned()),
+        ..MemoryFit::default()
+    };
+    if points.len() < 2 {
+        return note("fewer than two steps read the API's memory; add a monitor to size memory");
+    }
+    let n = points.len() as f64;
+    let mean_x = points.iter().map(|p| p.0).sum::<f64>() / n;
+    let mean_y = points.iter().map(|p| p.1).sum::<f64>() / n;
+    let sxx: f64 = points.iter().map(|p| (p.0 - mean_x).powi(2)).sum();
+    let sxy: f64 = points.iter().map(|p| (p.0 - mean_x) * (p.1 - mean_y)).sum();
+    let per_request = if sxx > 0.0 { (sxy / sxx).max(0.0) } else { 0.0 };
+    let fixed = (mean_y - per_request * mean_x).max(0.0);
+    let budget = limit_mb * MIB * capacity.target_memory.clamp(1.0, 100.0) / 100.0;
+    let mut fit = MemoryFit {
+        fixed: Some(fixed),
+        per_request: Some(per_request),
+        ..MemoryFit::default()
+    };
+    if fixed >= budget {
+        fit.note = Some(
+            "the fixed part alone is over the memory target, so more pods will not help; raise the memory limit or find what holds it (a cache, a leak)".into(),
+        );
+        return fit;
+    }
+    if per_request == 0.0 {
+        fit.pods = Some(1);
+        fit.note = Some(
+            "memory did not grow with the requests in flight, so it does not limit the pod count"
+                .into(),
+        );
+        return fit;
+    }
+    fit.pods = Some((((in_flight_total * per_request) / (budget - fixed)).ceil() as u32).max(1));
+    fit
+}
+
+/// The busiest API's average memory from `start_s` to `end_s`.
+pub(crate) fn average_memory(
+    resources: &[ResourceSeries],
+    start_s: f64,
+    end_s: f64,
+) -> Option<f64> {
+    resources
+        .iter()
+        .filter_map(|series| {
+            let memory: Vec<f64> = series
+                .samples
+                .iter()
+                .filter(|s| s.t > start_s && s.t <= end_s)
+                .filter_map(|s| s.memory_bytes)
+                .collect();
+            (!memory.is_empty()).then(|| memory.iter().sum::<f64>() / memory.len() as f64)
+        })
+        .max_by(f64::total_cmp)
 }
 
 /// The busiest API's average CPU from `start_s` to `end_s` (seconds since
@@ -211,6 +334,7 @@ mod tests {
                 ..Latency::default()
             },
             api_cpu: cpu,
+            api_memory_bytes: None,
             thresholds: Vec::new(),
             passed,
             partial: false,
@@ -275,6 +399,38 @@ mod tests {
         assert_eq!(s.basis, "cpu");
         // 40 req/s at 80% -> 32.5 at 65%.
         assert!((s.usable_rps_per_pod - 32.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn memory_is_fitted_across_the_steps_and_can_need_more_pods_than_cpu() {
+        // 100 MiB fixed + 10 MiB per request in flight. rps × 100 ms gives
+        // 1, 2, 3 and 4 in flight.
+        let mut steps = vec![
+            step(10, 10.0, Some(20.0), 100.0, true),
+            step(20, 20.0, Some(40.0), 100.0, true),
+            step(30, 30.0, Some(60.0), 100.0, true),
+            step(40, 40.0, Some(80.0), 100.0, false),
+        ];
+        for s in &mut steps {
+            s.api_memory_bytes = Some((100.0 + 10.0 * s.rps / 10.0) * MIB);
+        }
+        let limit = search(steps, Some(2), Some(1.0));
+        let mut c = capacity(300.0);
+        c.growth = stormix_flow::Percent(0.0);
+        c.pod_memory_mb = Some(200.0);
+        let s = size(&limit, &c).unwrap();
+        assert!((s.fixed_memory_bytes.unwrap() - 100.0 * MIB).abs() < 1.0);
+        assert!((s.memory_per_request_bytes.unwrap() - 10.0 * MIB).abs() < 1.0);
+        // 300 req/s × 0.1 s = 30 in flight × 10 MiB = 300 MiB over pods
+        // with 200 × 80% − 100 = 60 MiB each to spare: 5 pods. CPU: 30
+        // req/s at 60% -> 32.5 at 65%, capped at 30: 10 pods.
+        assert_eq!(s.pods_by_memory, Some(5));
+        assert_eq!(s.pods_by_cpu, 10);
+        assert_eq!(s.pods_for_traffic, 10);
+        c.pod_memory_mb = Some(120.0);
+        let s = size(&limit, &c).unwrap();
+        assert_eq!(s.pods_by_memory, None);
+        assert!(s.memory_note.unwrap().contains("fixed part"));
     }
 
     #[test]

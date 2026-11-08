@@ -215,6 +215,18 @@ export type Capacity_Deserialize = {
 	 */
 	pod_cores?: number | null,
 	/**
+	 *  The memory one pod may use (its memory limit), in MiB. With it the
+	 *  pods are also sized for memory, from how the API's memory grew with
+	 *  the requests in flight across the steps.
+	 */
+	pod_memory_mb?: number | null,
+	/**
+	 *  The share of the memory limit a pod should use at the peak, in
+	 *  percent, so a burst or a slow garbage collection stays clear of an
+	 *  out-of-memory kill.
+	 */
+	target_memory?: number | null,
+	/**
 	 *  Extra pods on top of what the traffic needs, so one can fail or be
 	 *  redeployed without overloading the rest.
 	 */
@@ -244,6 +256,18 @@ export type Capacity_Serialize = {
 	 *  when it says, else taken as 1.
 	 */
 	pod_cores?: number | null,
+	/**
+	 *  The memory one pod may use (its memory limit), in MiB. With it the
+	 *  pods are also sized for memory, from how the API's memory grew with
+	 *  the requests in flight across the steps.
+	 */
+	pod_memory_mb?: number | null,
+	/**
+	 *  The share of the memory limit a pod should use at the peak, in
+	 *  percent, so a burst or a slow garbage collection stays clear of an
+	 *  out-of-memory kill.
+	 */
+	target_memory: number | null,
 	/**
 	 *  Extra pods on top of what the traffic needs, so one can fail or be
 	 *  redeployed without overloading the rest.
@@ -779,6 +803,11 @@ export type LimitStep_Deserialize = {
 	 */
 	apiCpu?: number | null,
 	/**
+	 *  The API's average memory during the step, in bytes, as the monitor
+	 *  measures it (see `ResourceSeries::memory_kind`).
+	 */
+	apiMemoryBytes?: number | null,
+	/**
 	 *  The thresholds checked against this step alone (`rps` ones are
 	 *  left out: the step sets the rate).
 	 */
@@ -810,6 +839,11 @@ export type LimitStep_Serialize = {
 	 *  busiest monitored API's when there are several.
 	 */
 	apiCpu?: number | null,
+	/**
+	 *  The API's average memory during the step, in bytes, as the monitor
+	 *  measures it (see `ResourceSeries::memory_kind`).
+	 */
+	apiMemoryBytes?: number | null,
 	/**
 	 *  The thresholds checked against this step alone (`rps` ones are
 	 *  left out: the step sets the rate).
@@ -1582,6 +1616,27 @@ export type Sizing_Deserialize = {
 	inFlightPerPod: number | null,
 	/**  Requests all pods have in flight at the design rate. */
 	inFlightTotal: number | null,
+	/**  Pods the CPU needs, before the spare ones. */
+	podsByCpu: number,
+	/**
+	 *  Pods the memory needs, before the spare ones. None without
+	 *  `pod_memory_mb`, or when the steps say too little about memory
+	 *  (see `memory_note`).
+	 */
+	podsByMemory?: number | null,
+	/**
+	 *  A pod's memory that does not depend on load, in bytes, from the fit
+	 *  across the steps.
+	 */
+	fixedMemoryBytes?: number | null,
+	/**  The memory each request in flight adds, in bytes, from the fit. */
+	memoryPerRequestBytes?: number | null,
+	/**
+	 *  Why memory was not sized, or what to watch: too few steps with a
+	 *  memory reading, memory that did not grow with load, or a fixed part
+	 *  over the target already.
+	 */
+	memoryNote?: string | null,
 	/**
 	 *  How the usable rate was found: `cpu` (scaled to the target CPU),
 	 *  `latency` (CPU was below the target when a threshold broke, so the
@@ -1622,6 +1677,27 @@ export type Sizing_Serialize = {
 	inFlightPerPod: number | null,
 	/**  Requests all pods have in flight at the design rate. */
 	inFlightTotal: number | null,
+	/**  Pods the CPU needs, before the spare ones. */
+	podsByCpu: number,
+	/**
+	 *  Pods the memory needs, before the spare ones. None without
+	 *  `pod_memory_mb`, or when the steps say too little about memory
+	 *  (see `memory_note`).
+	 */
+	podsByMemory?: number,
+	/**
+	 *  A pod's memory that does not depend on load, in bytes, from the fit
+	 *  across the steps.
+	 */
+	fixedMemoryBytes?: number | null,
+	/**  The memory each request in flight adds, in bytes, from the fit. */
+	memoryPerRequestBytes?: number | null,
+	/**
+	 *  Why memory was not sized, or what to watch: too few steps with a
+	 *  memory reading, memory that did not grow with load, or a fixed part
+	 *  over the target already.
+	 */
+	memoryNote?: string,
 	/**
 	 *  How the usable rate was found: `cpu` (scaled to the target CPU),
 	 *  `latency` (CPU was below the target when a threshold broke, so the

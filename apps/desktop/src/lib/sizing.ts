@@ -13,6 +13,9 @@ export type CapacityInput = {
   target_cpu: number;
   tested_pods: number;
   pod_cores: number | null;
+  /** The pod's memory limit in MiB; sizes memory too when set. */
+  pod_memory_mb: number | null;
+  target_memory: number;
   spare_pods: number;
   current_pods: number | null;
 };
@@ -23,6 +26,8 @@ export const DEFAULT_CAPACITY: CapacityInput = {
   target_cpu: 65,
   tested_pods: 1,
   pod_cores: null,
+  pod_memory_mb: null,
+  target_memory: 80,
   spare_pods: 1,
   current_pods: null,
 };
@@ -36,6 +41,8 @@ export function capacityInput(c: Capacity | null | undefined): CapacityInput {
     target_cpu: c.target_cpu ?? DEFAULT_CAPACITY.target_cpu,
     tested_pods: c.tested_pods ?? 1,
     pod_cores: c.pod_cores ?? null,
+    pod_memory_mb: c.pod_memory_mb ?? null,
+    target_memory: c.target_memory ?? 80,
     spare_pods: c.spare_pods ?? 1,
     current_pods: c.current_pods ?? null,
   };
@@ -54,8 +61,51 @@ export type SizingResult = {
   latencyMs: number;
   inFlightPerPod: number;
   inFlightTotal: number;
+  podsByCpu: number;
+  podsByMemory: number | null;
+  fixedMemoryBytes: number | null;
+  memoryPerRequestBytes: number | null;
+  memoryNote: string | null;
   basis: "cpu" | "latency" | "assumed";
 };
+
+const MIB = 1024 * 1024;
+
+/** Memory = fixed + per request × in flight, fitted through the steps (engine: `memory_pods`). */
+function memoryPods(steps: LimitStep[], c: CapacityInput, inFlightTotal: number) {
+  const none = { pods: null, fixed: null, perRequest: null, note: null } as {
+    pods: number | null;
+    fixed: number | null;
+    perRequest: number | null;
+    note: string | null;
+  };
+  const limitMb = c.pod_memory_mb;
+  if (!limitMb || !(limitMb > 0)) return none;
+  const testedPods = Math.max(1, c.tested_pods || 1);
+  const points = steps
+    .filter((s) => !s.partial && s.apiMemoryBytes != null)
+    .map((s) => [((s.rps ?? 0) * (s.latency.avg ?? 0)) / 1000 / testedPods, s.apiMemoryBytes as number]);
+  if (points.length < 2)
+    return { ...none, note: "fewer than two steps read the API's memory; add a monitor to size memory" };
+  const n = points.length;
+  const mx = points.reduce((a, p) => a + p[0], 0) / n;
+  const my = points.reduce((a, p) => a + p[1], 0) / n;
+  const sxx = points.reduce((a, p) => a + (p[0] - mx) ** 2, 0);
+  const sxy = points.reduce((a, p) => a + (p[0] - mx) * (p[1] - my), 0);
+  const perRequest = sxx > 0 ? Math.max(0, sxy / sxx) : 0;
+  const fixed = Math.max(0, my - perRequest * mx);
+  const budget = (limitMb * MIB * Math.min(100, Math.max(1, c.target_memory || 0))) / 100;
+  if (fixed >= budget)
+    return {
+      pods: null,
+      fixed,
+      perRequest,
+      note: "the fixed part alone is over the memory target, so more pods will not help; raise the memory limit or find what holds it (a cache, a leak)",
+    };
+  if (perRequest === 0)
+    return { pods: 1, fixed, perRequest, note: "memory did not grow with the requests in flight, so it does not limit the pod count" };
+  return { pods: Math.max(1, Math.ceil((inFlightTotal * perRequest) / (budget - fixed))), fixed, perRequest, note: null };
+}
 
 /** A pod's CPU share, in percent, from which it counts as saturated. */
 const SATURATED = 90;
@@ -104,8 +154,10 @@ export function sizePods(limit: LimitSearch, c: CapacityInput): SizingResult | n
     basis = "assumed";
   }
   const designRps = Math.max(0, c.peak_rps || 0) * (1 + Math.max(0, c.growth || 0) / 100);
-  const podsForTraffic = Math.max(1, Math.ceil(designRps / usableRpsPerPod));
+  const podsByCpu = Math.max(1, Math.ceil(designRps / usableRpsPerPod));
   const latencyMs = step.latency.avg ?? 0;
+  const memory = memoryPods(steps, c, (designRps * latencyMs) / 1000);
+  const podsForTraffic = Math.max(podsByCpu, memory.pods ?? 0);
   return {
     testedRpsPerPod,
     testedCpu,
@@ -118,6 +170,11 @@ export function sizePods(limit: LimitSearch, c: CapacityInput): SizingResult | n
     latencyMs,
     inFlightPerPod: (usableRpsPerPod * latencyMs) / 1000,
     inFlightTotal: (designRps * latencyMs) / 1000,
+    podsByCpu,
+    podsByMemory: memory.pods,
+    fixedMemoryBytes: memory.fixed,
+    memoryPerRequestBytes: memory.perRequest,
+    memoryNote: memory.note,
     basis,
   };
 }
