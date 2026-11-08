@@ -1056,6 +1056,12 @@ load:
     .await;
     let limit = report.limit.as_ref().unwrap();
     assert_eq!(limit.steps.len(), 1);
+    let step = &limit.steps[0];
+    // The step served requests, so the CPU threshold alone broke it.
+    assert!(step.requests > 0);
+    assert!(!step.passed);
+    assert_eq!(step.thresholds.len(), 1);
+    assert!(!step.thresholds[0].passed);
     assert_eq!(limit.sustained, None);
     assert!(!report.passed());
 }

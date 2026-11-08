@@ -276,6 +276,12 @@ pub async fn run_load(
         tokio::select! {
             Some(result) = rx.recv() => {
                 if let Some(limit) = &mut limit {
+                    // A result that arrives after a step's end belongs to
+                    // the next step, even when the tick that closes the step
+                    // has not been handled yet: close it first.
+                    if limit.close_due(started.elapsed(), &resources) {
+                        halt.stop();
+                    }
                     limit.add(&result);
                 }
                 record(&mut recorder, &mut samples, &mut slowest, result);
