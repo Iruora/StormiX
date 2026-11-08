@@ -424,8 +424,12 @@ impl<'a> LimitTracker<'a> {
         let api_cpu = capacity::average_cpu(resources, start_s, end_s);
         let mut thresholds = check_thresholds(&self.thresholds, &summary, &window, api_cpu);
         // Monitors read every few seconds (Dynatrace once a minute), so a
-        // step can end without a CPU reading: that decides nothing.
-        if api_cpu.is_none() {
+        // step can end without a CPU reading: that decides nothing, as long
+        // as some reading came in. Without any, the threshold fails.
+        let cpu_read = resources
+            .iter()
+            .any(|r| r.samples.iter().any(|s| s.cpu_percent.is_some()));
+        if api_cpu.is_none() && cpu_read {
             for (result, t) in thresholds.iter_mut().zip(&self.thresholds) {
                 if t.metric == Metric::ApiCpu && !partial {
                     result.passed = true;

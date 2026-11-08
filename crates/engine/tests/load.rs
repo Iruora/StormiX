@@ -1028,3 +1028,34 @@ capacity: { peak_rps: 100, growth: 0%, target_cpu: 50%, spare_pods: 1 }
         (100.0 / sizing.usable_rps_per_pod).ceil() as u32 + 1
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cpu_threshold_without_a_monitor_breaks_the_first_find_limit_step() {
+    let url = serve().await;
+    let test = test_file(
+        r#"
+flow:
+  name: fast
+  steps:
+    - name: fast
+      request: { method: GET, url: "{{base}}/fast" }
+load:
+  find_limit: { start_rate: 5, increase: 5, every: 1s, max_rate: 20 }
+"#,
+    );
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(&url),
+        test.load.as_ref().unwrap(),
+        &thresholds(&["cpu < 90%"]),
+        &LoadOptions::default(),
+        |_| {},
+    )
+    .await;
+    let limit = report.limit.as_ref().unwrap();
+    assert_eq!(limit.steps.len(), 1);
+    assert_eq!(limit.sustained, None);
+    assert!(!report.passed());
+}

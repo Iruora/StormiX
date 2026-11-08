@@ -222,6 +222,12 @@ impl TestFile {
                         "load.find_limit.every",
                         "each step must last longer than 0s",
                     );
+                } else if every.as_millis() % 1000 != 0 {
+                    // Steps are closed on the once-a-second tick.
+                    issues.error(
+                        "load.find_limit.every",
+                        "each step lasts a whole number of seconds, like 30s",
+                    );
                 } else if every.as_millis() < 10_000 {
                     issues.warning(
                         "load.find_limit.every",
@@ -279,7 +285,7 @@ impl TestFile {
             }
         }
         if let Some(capacity) = &self.capacity {
-            if capacity.peak_rps <= 0.0 {
+            if !(capacity.peak_rps.is_finite() && capacity.peak_rps > 0.0) {
                 issues.error("capacity.peak_rps", "the peak must be above 0 requests/s");
             }
             if !(1.0..=100.0).contains(&capacity.target_cpu.0) {
@@ -763,5 +769,10 @@ thresholds: [p95 < 300ms]
 capacity: { peak_rps: 900, growth: 30%, current_pods: 4 }
 "#;
         assert_eq!(issues(ok), []);
+        let fractional = ok.replace("every: 30s", "every: 1500ms");
+        assert_eq!(
+            issues(&fractional),
+            [(Severity::Error, "load.find_limit.every".into())]
+        );
     }
 }

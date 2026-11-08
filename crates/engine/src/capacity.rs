@@ -168,7 +168,7 @@ pub fn size(limit: &LimitSearch, capacity: &Capacity) -> Option<Sizing> {
         usable_rps_per_pod,
         design_rps,
         pods_for_traffic,
-        pods: pods_for_traffic + capacity.spare_pods,
+        pods: pods_for_traffic.saturating_add(capacity.spare_pods),
         latency_ms,
         in_flight_per_pod: usable_rps_per_pod * latency_ms / 1000.0,
         in_flight_total: design_rps * latency_ms / 1000.0,
