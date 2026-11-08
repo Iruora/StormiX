@@ -424,11 +424,14 @@ function TestFileView({
           return res.data;
         };
   const [points, setPoints] = useState<LoadProgress[]>([]);
+  // Set once this view is left, so a load test still starting up never begins.
+  const left = useRef(false);
   const load = useMutation({
     mutationFn: async (yaml: string) => {
       setPoints([]);
       const unlisten = await events.loadProgress.listen((e) => setPoints((p) => [...p, e.payload]));
       try {
+        if (left.current) throw new Error("the workspace was closed before the load test started");
         const res = await commands.runLoadTest(yaml, envVars, path);
         if (res.status === "error") throw new Error(res.error);
         return res.data;
@@ -444,13 +447,17 @@ function TestFileView({
   // Leaving this workspace unmounts this view: stop its load test, which
   // would otherwise run on unseen, with no Stop button, and block the next one.
   const loadPending = useRef(false);
-  loadPending.current = load.isPending;
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    loadPending.current = load.isPending;
+  }, [load.isPending]);
+  useEffect(() => {
+    // Set again on mount: StrictMode unmounts and remounts once in development.
+    left.current = false;
+    return () => {
+      left.current = true;
       if (loadPending.current) void commands.stopLoadTest().catch(() => {});
-    },
-    [],
-  );
+    };
+  }, []);
   const busy = run.isPending || load.isPending;
   // Set from Stop until the stopped test returns what it measured.
   const [stopping, setStopping] = useState(false);
