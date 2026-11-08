@@ -58,6 +58,8 @@ export function LoadSetup({
   const [monitor, setMonitor] = useState<Monitor[]>((test.monitor ?? []) as Monitor[]);
   const [capacity, setCapacity] = useState<Capacity | null>(test.capacity ?? null);
   const findLimit = "find_limit" in load && !!load.find_limit;
+  // find_limit ends at the first step that breaks a threshold; `rps` doesn't count.
+  const noLimitThreshold = findLimit && !thresholds.some((t) => !/^\s*rps\b/.test(t));
   const selected = checked.filter(Boolean).length;
   const all = selected === offered;
   const toggleAll = useRef<HTMLInputElement>(null);
@@ -222,6 +224,9 @@ export function LoadSetup({
               <Eraser size="0.75rem" /> Clear cache ({keptCount} endpoint{keptCount === 1 ? "" : "s"})
             </button>
           )}
+          {noLimitThreshold && (
+            <span className="mr-auto text-xs text-warn">Find the limit needs a threshold to stop at, like p95 &lt; 500ms</span>
+          )}
           <button
             type="button"
             onClick={onCancel}
@@ -231,7 +236,7 @@ export function LoadSetup({
           </button>
           <button
             type="button"
-            disabled={selected === 0}
+            disabled={selected === 0 || noLimitThreshold}
             onClick={run}
             className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
           >
