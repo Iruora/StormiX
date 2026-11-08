@@ -266,8 +266,15 @@ pub struct LiveResource {
 pub struct RunningLoad(Mutex<Option<StopSignal>>);
 
 impl RunningLoad {
-    fn start(&self, stop: StopSignal) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(stop);
+    /// Takes the slot for `stop`; refused while another test runs, so two
+    /// tests never measure the same API at once or mix their progress.
+    fn start(&self, stop: StopSignal) -> Result<(), String> {
+        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.is_some() {
+            return Err("a load test is already running; stop it or wait for it to end".into());
+        }
+        *slot = Some(stop);
+        Ok(())
     }
 
     /// Forgets `stop`, unless a newer test has taken its place.
@@ -319,7 +326,7 @@ pub async fn run_load_test(
         capacity: test.capacity.clone(),
         ..LoadOptions::default()
     };
-    running.start(options.stop.clone());
+    running.start(options.stop.clone())?;
     let report = run_load(
         &runner.get(),
         &test.flow,

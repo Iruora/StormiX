@@ -525,7 +525,7 @@ function TestFileView({
     setEnvs((current) => ({ ...current, ...added }));
     if (select !== null) setEnvName(select);
     setEnvError(null);
-    run.reset();
+    if (!run.isPending) run.reset();
   };
   // What the hidden panel would show: errors or failures first.
   const panelAlert =
@@ -542,18 +542,24 @@ function TestFileView({
     () => variableTable(shown, envVars, envName, lastRun, sessionOnly),
     [shown, envVars, envName, lastRun, sessionOnly],
   );
+  /**
+   * Clears results that no longer match the file. A run still going is kept:
+   * resetting it would hide its progress while the backend carries on.
+   */
+  const clearResults = () => {
+    if (!run.isPending) run.reset();
+    if (!load.isPending) load.reset();
+  };
   const edit = (next: string | null) => {
     writes.current += 1;
     setDraft(null);
     setText(next);
-    run.reset();
-    load.reset();
+    clearResults();
   };
   /** The steps editor changed the file: show it at once, then write its YAML. */
   const editSteps = async (next: TestFile) => {
     setDraft(next);
-    run.reset();
-    load.reset();
+    clearResults();
     const id = ++writes.current;
     const yaml = await commands.testFileToYaml(next as TestFile_Deserialize);
     if (id === writes.current) setText(yaml);
@@ -808,7 +814,7 @@ function TestFileView({
   };
   const chooseEnv = (name: string) => {
     setEnvName(name);
-    run.reset();
+    if (!run.isPending) run.reset();
   };
   /** Shows step `i` in the Steps tab. */
   const openStep = (i: number) => {
@@ -952,7 +958,7 @@ function TestFileView({
     saveEnvVar: (name, value) => saveVars([name], { [name]: value }),
     setSecret: (name, value) => {
       setSecretValues((v) => ({ ...v, [name]: value }));
-      run.reset();
+      if (!run.isPending) run.reset();
     },
     setFlowVar: (name, value) => {
       if (shown) editSteps({ ...shown, flow: { ...shown.flow, variables: { ...shown.flow.variables, [name]: value } } });
@@ -1175,12 +1181,12 @@ function TestFileView({
     setEnvs(({ [name]: _, ...rest }) => rest);
     setOverrides(({ [name]: _, ...rest }) => rest);
     setEnvName("");
-    run.reset();
+    if (!run.isPending) run.reset();
   };
   /** Changes a variable of the chosen environment for this session only. */
   const overrideVar = (name: string, value: string | null) => {
     setOverrides((all) => ({ ...all, [envName]: { ...all[envName], [name]: value } }));
-    run.reset();
+    if (!run.isPending) run.reset();
   };
   /** Drops this session's change to one variable, or to all of them. */
   const resetVar = (name: string | null) => {
@@ -1189,7 +1195,7 @@ function TestFileView({
       const { [name]: _, ...kept } = current;
       return Object.keys(kept).length ? { ...rest, [envName]: kept } : rest;
     });
-    run.reset();
+    if (!run.isPending) run.reset();
   };
   /** Writes this session's changes to these variables (all when null) to the environment's file. */
   const saveVars = async (names: string[] | null, values?: EnvOverrides) => {
@@ -1452,7 +1458,7 @@ function TestFileView({
           onSave={saveVars}
           onSecret={(name, value) => {
             setSecretValues((v) => ({ ...v, [name]: value }));
-            run.reset();
+            if (!run.isPending) run.reset();
           }}
           onClose={() => setEnvEditorOpen(false)}
         />
