@@ -159,7 +159,10 @@ export function StepsEditor({
                 value={test.flow.trace ?? null}
                 onChange={(trace) => onChange({ ...test, flow: { ...test.flow, trace } })}
               />
-              <LoadEditor load={test.load ?? null} onChange={(load) => onChange({ ...test, load })} />
+              <LoadEditor
+                load={test.load ?? null}
+                onChange={(load) => onChange({ ...test, load, thresholds: thresholdsFor(load, test.thresholds ?? []) })}
+              />
               <ThresholdsEditor
                 thresholds={test.thresholds ?? []}
                 onChange={(thresholds) => onChange({ ...test, thresholds })}
@@ -716,6 +719,17 @@ const LOAD_LABELS: Record<LoadKind, string> = {
   find_limit: "Find the limit",
   virtual_users: "Virtual users",
 };
+
+/**
+ * Thresholds for a load profile: `find_limit` ends at the first step that
+ * breaks one (`rps` doesn't count), so switching to it adds two when the
+ * test has none, instead of leaving the file invalid.
+ */
+export function thresholdsFor(load: LoadProfile | null, thresholds: string[]): string[] {
+  const findLimit = !!load && "find_limit" in load && !!load.find_limit;
+  if (!findLimit || thresholds.some((t) => !/^\s*rps\b/.test(t))) return thresholds;
+  return [...thresholds, "p95 < 500ms", "errors < 1%"];
+}
 
 /** Picks and edits the load profile. `required` leaves out "None (run once)". */
 export function LoadEditor({

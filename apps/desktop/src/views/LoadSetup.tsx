@@ -5,7 +5,7 @@ import type { Capacity, LoadProfile, Monitor, Step, TestFile, TraceMode } from "
 import { cachedTitle, useResponseCache } from "../lib/cache";
 import { describeLoad } from "../lib/describe";
 import { methodText } from "../lib/methods";
-import { DEFAULT_LOAD, LoadEditor, ThresholdsEditor } from "./StepsEditor";
+import { DEFAULT_LOAD, LoadEditor, ThresholdsEditor, thresholdsFor } from "./StepsEditor";
 import { CapacitySetting } from "./Capacity";
 import { MonitorSetting } from "./MonitorSetting";
 import { TraceSetting } from "./TraceSetting";
@@ -191,7 +191,15 @@ export function LoadSetup({
             )}
           </section>
 
-          <LoadEditor load={load} required onChange={(next) => next && setLoad(next)} />
+          <LoadEditor
+            load={load}
+            required
+            onChange={(next) => {
+              if (!next) return;
+              setLoad(next);
+              setThresholds((t) => thresholdsFor(next, t));
+            }}
+          />
           <ThresholdsEditor thresholds={thresholds} onChange={setThresholds} />
           {findLimit && <CapacitySetting value={capacity} onChange={setCapacity} />}
           <TraceSetting value={trace} onChange={setTrace} />
