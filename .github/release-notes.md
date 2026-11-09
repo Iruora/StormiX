@@ -1,8 +1,8 @@
 Stormix 1.11.0 tells you how far your API goes and how many pods it needs, and lets you watch its CPU, memory and health during a load test.
 
-- **Find the limit.** A `find_limit` load profile raises the rate step by step, checks each step against the thresholds on its own, and stops at the first step that breaks one. The last step that held is what one instance sustains.
+- **Find the limit.** A `find_limit` load profile raises the rate step by step, checks each step against the thresholds on its own (all but `rps`, which is checked on the whole run), and stops at the first step that breaks one. The last step that held is what the tested pods sustain together; set `tested_pods` and the sizing divides it per pod.
 - **`cpu` threshold**, like `cpu < 85%`, so a step can also break on a CPU ceiling.
-- **Pods needed.** Give the production peak, growth, target CPU and pod memory limit, and the result works out how many pods you need for CPU and for memory, compared with the pods you run today, plus the requests in flight per pod for sizing thread and connection pools.
+- **Pods needed.** Give the production peak, growth, target CPU and pod memory limit, and the result works out how many pods you need for CPU and for memory, compared with the pods you run today, plus the requests in flight per pod for sizing thread and connection pools. The memory count needs a monitor that read the API's memory on at least two steps.
 - **Stop and Replay load tests.** **Stop** ends a running test and keeps what was measured so far (Ctrl+C in the CLI). **Replay** runs a finished test again with the same profile and thresholds.
 - **API CPU and memory during a load test**, read from Spring Boot Actuator, Prometheus `/metrics` endpoints (Quarkus, prom-client, prometheus-net, Go) or Dynatrace, shown live, in the results, the HTML report and the run history.
 - **Health of the API during the test**: when it went `DOWN` or stopped answering, what was down, and when it came back.
