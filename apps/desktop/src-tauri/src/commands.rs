@@ -228,6 +228,10 @@ pub struct LoadProgress {
     pub active: u32,
     /// The API's latest CPU and memory, one per `monitor` entry.
     pub resources: Vec<LiveResource>,
+    /// `find_limit` only: the steps finished so far.
+    pub limit_steps: Vec<stormix_engine::LimitStep>,
+    /// The rate aimed for now: iterations/s, or users for virtual users.
+    pub target: f64,
 }
 
 /// A monitored API's latest reading while a load test runs.
@@ -262,8 +266,15 @@ pub struct LiveResource {
 pub struct RunningLoad(Mutex<Option<StopSignal>>);
 
 impl RunningLoad {
-    fn start(&self, stop: StopSignal) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(stop);
+    /// Takes the slot for `stop`; refused while another test runs, so two
+    /// tests never measure the same API at once or mix their progress.
+    fn start(&self, stop: StopSignal) -> Result<(), String> {
+        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.is_some() {
+            return Err("a load test is already running; stop it or wait for it to end".into());
+        }
+        *slot = Some(stop);
+        Ok(())
     }
 
     /// Forgets `stop`, unless a newer test has taken its place.
@@ -312,9 +323,10 @@ pub async fn run_load_test(
     vars.extend(variables);
     let options = LoadOptions {
         monitor: test.monitor.clone(),
+        capacity: test.capacity.clone(),
         ..LoadOptions::default()
     };
-    running.start(options.stop.clone());
+    running.start(options.stop.clone())?;
     let report = run_load(
         &runner.get(),
         &test.flow,
@@ -347,6 +359,8 @@ pub async fn run_load_test(
                         samples: (r.format == "dynatrace").then(|| r.samples.clone()),
                     })
                     .collect(),
+                limit_steps: p.limit_steps.to_vec(),
+                target: p.target,
             }
             .emit(&app);
         },

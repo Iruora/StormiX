@@ -10,11 +10,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use stormix_flow::{Flow, LoadProfile, Monitor, Threshold};
+use stormix_flow::{Capacity, Flow, LoadProfile, Metric, Monitor, Threshold};
 use stormix_metrics::{check_thresholds, Recorder, Sample, Second, Summary, ThresholdResult};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 
+use crate::capacity::{self, LimitSearch, LimitStep};
 use crate::monitor::{self, ResourceSeries};
 use crate::{Exchanges, FlowResult, Runner, StepResult, Variables};
 
@@ -33,6 +34,9 @@ pub struct LoadOptions {
     /// Metrics endpoints of the API, read throughout the test for its CPU
     /// and memory use: the test file's `monitor` section.
     pub monitor: Vec<Monitor>,
+    /// `find_limit` only: the production traffic to size pods for, from
+    /// the test file's `capacity` section.
+    pub capacity: Option<Capacity>,
 }
 
 impl Default for LoadOptions {
@@ -43,6 +47,7 @@ impl Default for LoadOptions {
             stop: StopSignal::default(),
             stop_grace: Duration::from_secs(3),
             monitor: Vec::new(),
+            capacity: None,
         }
     }
 }
@@ -96,6 +101,8 @@ pub struct Progress<'a> {
     pub target: f64,
     /// The API's CPU and memory so far, one series per `monitor` entry.
     pub resources: &'a [ResourceSeries],
+    /// `find_limit` only: the steps finished so far.
+    pub limit_steps: &'a [LimitStep],
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -129,6 +136,10 @@ pub struct LoadReport {
     /// `monitor` entry. Empty when the file has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub resources: Vec<ResourceSeries>,
+    /// `find_limit` only: each step's figures, the most the API sustained
+    /// and, with a `capacity` section, the pods that means.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<LimitSearch>,
 }
 
 /// One traced request from a load test.
@@ -159,6 +170,8 @@ impl LoadReport {
 }
 
 /// Runs `flow` under `profile` and checks `thresholds` at the end.
+/// Under `find_limit` the thresholds are checked at the end of each step
+/// instead, and the test ends at the first step that breaks one.
 /// `on_second` is called once a second with live figures.
 /// Configured monitors read a baseline before load begins, waiting up to ten
 /// seconds or until stopped. Monitor failures are recorded in the returned
@@ -230,13 +243,27 @@ pub async fn run_load(
     let started = Instant::now();
     set_origin.send_replace(Some(started));
     let (tx, mut rx) = mpsc::unbounded_channel();
+    // The driver stops on the user's stop, or once a `find_limit` step
+    // breaks a threshold, which is how that test is meant to end.
+    let halt = StopSignal::default();
+    let forward = {
+        let (user, halt) = (stop.clone(), halt.clone());
+        tokio::spawn(async move {
+            user.stopped().await;
+            halt.stop();
+        })
+    };
     let mut driver = tokio::spawn(drive(
         shared.clone(),
         profile.clone(),
-        options.clone(),
+        LoadOptions {
+            stop: halt.clone(),
+            ..options.clone()
+        },
         started,
         tx,
     ));
+    let mut limit = LimitTracker::new(profile, thresholds);
 
     let mut recorder = Recorder::new();
     let mut samples = Vec::new();
@@ -247,19 +274,37 @@ pub async fn run_load(
     );
     let outcome = loop {
         tokio::select! {
-            Some(result) = rx.recv() => record(&mut recorder, &mut samples, &mut slowest, result),
+            Some(result) = rx.recv() => {
+                if let Some(limit) = &mut limit {
+                    // A result that arrives after a step's end belongs to
+                    // the next step, even when the tick that closes the step
+                    // has not been handled yet: close it first.
+                    if limit.close_due(started.elapsed(), &resources) {
+                        halt.stop();
+                    }
+                    limit.add(&result);
+                }
+                record(&mut recorder, &mut samples, &mut slowest, result);
+            }
             Some(update) = monitor_rx.recv() => resources[update.index].apply(update),
             _ = tick.tick() => {
                 let elapsed = started.elapsed();
+                if let Some(limit) = &mut limit {
+                    if limit.close_due(elapsed, &resources) {
+                        halt.stop();
+                    }
+                }
                 let target = target(profile, elapsed.min(total));
                 let requests = recorder.requests();
                 let second = recorder.close_second(shared.active.load(Ordering::Relaxed));
-                on_second(&Progress { elapsed, total, second, requests, target, resources: &resources });
+                let limit_steps = limit.as_ref().map_or(&[][..], |l| &l.steps[..]);
+                on_second(&Progress { elapsed, total, second, requests, target, resources: &resources, limit_steps });
             }
             outcome = &mut driver => break outcome.unwrap_or_default(),
         }
     };
     let elapsed = started.elapsed();
+    forward.abort();
     monitors.abort_all();
     // Dynatrace reads once more for the minutes the test ended in, unless
     // the test was stopped. A read gives up within 10 s.
@@ -282,15 +327,174 @@ pub async fn run_load(
     recorder.interrupted(outcome.interrupted);
 
     let summary = recorder.summary(elapsed);
+    let api_cpu = capacity::average_cpu(&resources, 0.0, f64::INFINITY);
+    let mut checked = check_thresholds(thresholds, &summary, &recorder, api_cpu);
+    // A stop the user made; a found limit ends the test as planned.
+    let aborted = outcome.aborted && stop.is_stopped();
+    let limit = limit.map(|tracker| {
+        let mut search = tracker.finish(elapsed, aborted, &resources);
+        if let Some(step) = search
+            .sustained
+            .or(search.steps.first().map(|_| 0))
+            .and_then(|i| search.steps.get(i as usize))
+        {
+            // The test passes when some step held: its checks stand for
+            // the test's, since every later one was meant to break.
+            checked = step.thresholds.clone();
+            checked.extend(
+                check_thresholds(thresholds, &summary, &recorder, api_cpu)
+                    .into_iter()
+                    .zip(thresholds)
+                    .filter(|(_, t)| t.metric == Metric::Throughput)
+                    .map(|(r, _)| r),
+            );
+        }
+        search.sizing = options
+            .capacity
+            .as_ref()
+            .and_then(|c| capacity::size(&search, c));
+        search
+    });
     LoadReport {
         name: flow.name.clone(),
-        thresholds: check_thresholds(thresholds, &summary, &recorder),
+        thresholds: checked,
         summary,
         samples,
         setup,
         slowest: slowest.into_list(),
-        aborted: outcome.aborted,
+        aborted,
         resources,
+        limit,
+    }
+}
+
+/// Measures each `find_limit` step on its own and checks the thresholds
+/// against it as it ends.
+struct LimitTracker<'a> {
+    profile: &'a LoadProfile,
+    every: Duration,
+    /// Thresholds a step can break: all but `rps`, which the step sets.
+    thresholds: Vec<Threshold>,
+    window: Recorder,
+    steps: Vec<LimitStep>,
+    /// Set once a step broke a threshold, or the last one ended.
+    done: bool,
+}
+
+impl<'a> LimitTracker<'a> {
+    fn new(profile: &'a LoadProfile, thresholds: &[Threshold]) -> Option<Self> {
+        let LoadProfile::FindLimit { every, .. } = profile else {
+            return None;
+        };
+        Some(Self {
+            profile,
+            every: (*every).into(),
+            thresholds: thresholds
+                .iter()
+                .filter(|t| t.metric != Metric::Throughput)
+                .copied()
+                .collect(),
+            window: Recorder::new(),
+            steps: Vec::new(),
+            done: false,
+        })
+    }
+
+    fn add(&mut self, result: &FlowResult) {
+        if !self.done {
+            add_samples(&mut self.window, result);
+        }
+    }
+
+    /// Closes the current step once its time is up. True when it broke a
+    /// threshold, so the test should end.
+    fn close_due(&mut self, elapsed: Duration, resources: &[ResourceSeries]) -> bool {
+        let index = self.steps.len() as u32;
+        if self.done || elapsed < self.every * (index + 1) {
+            return false;
+        }
+        let step = self.close(self.every * (index + 1), false, resources);
+        let failed = !step.passed;
+        self.steps.push(step);
+        self.done = failed || index + 1 >= self.profile.limit_steps();
+        failed
+    }
+
+    fn close(&mut self, end: Duration, partial: bool, resources: &[ResourceSeries]) -> LimitStep {
+        let index = self.steps.len() as u32;
+        let start = self.every * index;
+        let length = end.saturating_sub(start);
+        let window = std::mem::take(&mut self.window);
+        let summary = window.summary(length);
+        let (start_s, end_s) = (start.as_secs_f64(), end.as_secs_f64());
+        let api_cpu = capacity::average_cpu(resources, start_s, end_s);
+        let api_memory_bytes = capacity::average_memory(resources, start_s, end_s);
+        let mut thresholds = check_thresholds(&self.thresholds, &summary, &window, api_cpu);
+        // Monitors read every few seconds (Dynatrace once a minute), so a
+        // step can end without a CPU reading: that decides nothing, as long
+        // as some reading came in. Without any, the threshold fails.
+        let cpu_read = resources
+            .iter()
+            .any(|r| r.samples.iter().any(|s| s.cpu_percent.is_some()));
+        if api_cpu.is_none() && cpu_read {
+            for (result, t) in thresholds.iter_mut().zip(&self.thresholds) {
+                if t.metric == Metric::ApiCpu && !partial {
+                    result.passed = true;
+                    result.note = Some("no CPU reading during this step".into());
+                }
+            }
+        }
+        let passed = !partial && summary.requests > 0 && thresholds.iter().all(|t| t.passed);
+        LimitStep {
+            rate: self.profile.limit_rate(index),
+            start_s,
+            end_s,
+            rps: summary.rps,
+            requests: summary.requests,
+            failed_requests: summary.failed_requests,
+            error_rate: summary.error_rate(),
+            latency: summary.latency,
+            api_cpu,
+            api_memory_bytes,
+            thresholds,
+            passed,
+            partial,
+        }
+    }
+
+    /// The search so far, with a step cut short by a stop kept as partial.
+    fn finish(
+        mut self,
+        elapsed: Duration,
+        aborted: bool,
+        resources: &[ResourceSeries],
+    ) -> LimitSearch {
+        if !self.done {
+            let index = self.steps.len() as u32;
+            let end = self.every * (index + 1);
+            if elapsed + Duration::from_millis(500) >= end {
+                // The driver ended right at the step's end, before a tick
+                // closed it.
+                let step = self.close(end, false, resources);
+                self.steps.push(step);
+            } else if aborted && elapsed > self.every * index {
+                let step = self.close(elapsed, true, resources);
+                self.steps.push(step);
+            }
+        }
+        let first_failed = self.steps.iter().position(|s| !s.passed && !s.partial);
+        let held = first_failed.unwrap_or(self.steps.len());
+        let sustained = self.steps[..held]
+            .iter()
+            .rposition(|s| s.passed)
+            .map(|i| i as u32);
+        LimitSearch {
+            steps: self.steps,
+            sustained,
+            reached: first_failed.is_some(),
+            cpu_cores: resources.iter().find_map(|r| r.cpu_cores),
+            sizing: None,
+        }
     }
 }
 
@@ -505,12 +709,28 @@ fn record(
     slowest: &mut Slowest,
     result: FlowResult,
 ) {
+    for step in result.steps.iter().filter(|s| !s.skipped && !s.cached) {
+        slowest.offer(step);
+    }
+    add_samples(recorder, &result);
+    for step in result.steps {
+        if samples.len() < MAX_SAMPLES
+            && !step.skipped
+            && (!step.passed() || step.status.is_some_and(|s| s >= 400))
+            && !samples.iter().any(|s| s.name == step.name)
+        {
+            samples.push(step);
+        }
+    }
+}
+
+/// Counts one iteration's requests in `recorder`.
+fn add_samples(recorder: &mut Recorder, result: &FlowResult) {
     for step in result.steps.iter().filter(|s| !s.skipped) {
         if step.cached {
             recorder.cached(&step.name);
             continue;
         }
-        slowest.offer(step);
         let failed: Vec<&str> = step
             .checks
             .iter()
@@ -528,15 +748,6 @@ fn record(
         });
     }
     recorder.iteration(result.passed());
-    for step in result.steps {
-        if samples.len() < MAX_SAMPLES
-            && !step.skipped
-            && (!step.passed() || step.status.is_some_and(|s| s >= 400))
-            && !samples.iter().any(|s| s.name == step.name)
-        {
-            samples.push(step);
-        }
-    }
 }
 
 fn target(profile: &LoadProfile, elapsed: Duration) -> f64 {
@@ -572,6 +783,12 @@ impl Schedule {
                     })
                     .collect()
             }
+            LoadProfile::FindLimit { every, .. } => (0..profile.limit_steps())
+                .map(|i| {
+                    let rate = f64::from(profile.limit_rate(i));
+                    (secs(*every), rate, rate)
+                })
+                .collect(),
             LoadProfile::VirtualUsers { .. } => Vec::new(),
         };
         Self { segments }

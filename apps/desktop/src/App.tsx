@@ -424,11 +424,14 @@ function TestFileView({
           return res.data;
         };
   const [points, setPoints] = useState<LoadProgress[]>([]);
+  // Set once this view is left, so a load test still starting up never begins.
+  const left = useRef(false);
   const load = useMutation({
     mutationFn: async (yaml: string) => {
       setPoints([]);
       const unlisten = await events.loadProgress.listen((e) => setPoints((p) => [...p, e.payload]));
       try {
+        if (left.current) throw new Error("the workspace was closed before the load test started");
         const res = await commands.runLoadTest(yaml, envVars, path);
         if (res.status === "error") throw new Error(res.error);
         return res.data;
@@ -441,6 +444,20 @@ function TestFileView({
       client.invalidateQueries({ queryKey: CACHE_KEY });
     },
   });
+  // Leaving this workspace unmounts this view: stop its load test, which
+  // would otherwise run on unseen, with no Stop button, and block the next one.
+  const loadPending = useRef(false);
+  useEffect(() => {
+    loadPending.current = load.isPending;
+  }, [load.isPending]);
+  useEffect(() => {
+    // Set again on mount: StrictMode unmounts and remounts once in development.
+    left.current = false;
+    return () => {
+      left.current = true;
+      if (loadPending.current) void commands.stopLoadTest().catch(() => {});
+    };
+  }, []);
   const busy = run.isPending || load.isPending;
   // Set from Stop until the stopped test returns what it measured.
   const [stopping, setStopping] = useState(false);
@@ -482,7 +499,7 @@ function TestFileView({
   // Steps left out of the last load test, by name, offered again next time.
   const [excluded, setExcluded] = useState<string[]>(ws.excluded);
   /** Saves changed load, threshold, monitor, tracing and cache settings, then runs the chosen steps. */
-  const startLoad = async ({ included, cache, load: profile, thresholds, trace, monitor }: LoadSetupChoice) => {
+  const startLoad = async ({ included, cache, load: profile, thresholds, trace, monitor, capacity }: LoadSetupChoice) => {
     const test = result?.test;
     if (!test) return;
     setSetupOpen(false);
@@ -497,13 +514,14 @@ function TestFileView({
       load: profile,
       thresholds,
       monitor,
+      capacity,
       flow: {
         ...test.flow,
         trace,
         steps: cacheChanged ? test.flow.steps.map((s, i) => ({ ...s, cache: cache[i] })) : test.flow.steps,
       },
     };
-    if (cacheChanged || traceChanged || JSON.stringify([test.load, test.thresholds ?? [], test.monitor ?? []]) !== JSON.stringify([profile, thresholds, monitor])) {
+    if (cacheChanged || traceChanged || JSON.stringify([test.load, test.thresholds ?? [], test.monitor ?? [], test.capacity ?? null]) !== JSON.stringify([profile, thresholds, monitor, capacity])) {
       await editSteps(configured);
     }
     const steps = configured.flow.steps.filter((_, i) => included.includes(i));
@@ -524,7 +542,7 @@ function TestFileView({
     setEnvs((current) => ({ ...current, ...added }));
     if (select !== null) setEnvName(select);
     setEnvError(null);
-    run.reset();
+    if (!run.isPending) run.reset();
   };
   // What the hidden panel would show: errors or failures first.
   const panelAlert =
@@ -541,18 +559,24 @@ function TestFileView({
     () => variableTable(shown, envVars, envName, lastRun, sessionOnly),
     [shown, envVars, envName, lastRun, sessionOnly],
   );
+  /**
+   * Clears results that no longer match the file. A run still going is kept:
+   * resetting it would hide its progress while the backend carries on.
+   */
+  const clearResults = () => {
+    if (!run.isPending) run.reset();
+    if (!load.isPending) load.reset();
+  };
   const edit = (next: string | null) => {
     writes.current += 1;
     setDraft(null);
     setText(next);
-    run.reset();
-    load.reset();
+    clearResults();
   };
   /** The steps editor changed the file: show it at once, then write its YAML. */
   const editSteps = async (next: TestFile) => {
     setDraft(next);
-    run.reset();
-    load.reset();
+    clearResults();
     const id = ++writes.current;
     const yaml = await commands.testFileToYaml(next as TestFile_Deserialize);
     if (id === writes.current) setText(yaml);
@@ -807,7 +831,7 @@ function TestFileView({
   };
   const chooseEnv = (name: string) => {
     setEnvName(name);
-    run.reset();
+    if (!run.isPending) run.reset();
   };
   /** Shows step `i` in the Steps tab. */
   const openStep = (i: number) => {
@@ -951,7 +975,7 @@ function TestFileView({
     saveEnvVar: (name, value) => saveVars([name], { [name]: value }),
     setSecret: (name, value) => {
       setSecretValues((v) => ({ ...v, [name]: value }));
-      run.reset();
+      if (!run.isPending) run.reset();
     },
     setFlowVar: (name, value) => {
       if (shown) editSteps({ ...shown, flow: { ...shown.flow, variables: { ...shown.flow.variables, [name]: value } } });
@@ -1174,12 +1198,12 @@ function TestFileView({
     setEnvs(({ [name]: _, ...rest }) => rest);
     setOverrides(({ [name]: _, ...rest }) => rest);
     setEnvName("");
-    run.reset();
+    if (!run.isPending) run.reset();
   };
   /** Changes a variable of the chosen environment for this session only. */
   const overrideVar = (name: string, value: string | null) => {
     setOverrides((all) => ({ ...all, [envName]: { ...all[envName], [name]: value } }));
-    run.reset();
+    if (!run.isPending) run.reset();
   };
   /** Drops this session's change to one variable, or to all of them. */
   const resetVar = (name: string | null) => {
@@ -1188,7 +1212,7 @@ function TestFileView({
       const { [name]: _, ...kept } = current;
       return Object.keys(kept).length ? { ...rest, [envName]: kept } : rest;
     });
-    run.reset();
+    if (!run.isPending) run.reset();
   };
   /** Writes this session's changes to these variables (all when null) to the environment's file. */
   const saveVars = async (names: string[] | null, values?: EnvOverrides) => {
@@ -1451,7 +1475,7 @@ function TestFileView({
           onSave={saveVars}
           onSecret={(name, value) => {
             setSecretValues((v) => ({ ...v, [name]: value }));
-            run.reset();
+            if (!run.isPending) run.reset();
           }}
           onClose={() => setEnvEditorOpen(false)}
         />

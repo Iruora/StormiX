@@ -159,7 +159,10 @@ export function StepsEditor({
                 value={test.flow.trace ?? null}
                 onChange={(trace) => onChange({ ...test, flow: { ...test.flow, trace } })}
               />
-              <LoadEditor load={test.load ?? null} onChange={(load) => onChange({ ...test, load })} />
+              <LoadEditor
+                load={test.load ?? null}
+                onChange={(load) => onChange({ ...test, load, thresholds: thresholdsFor(load, test.thresholds ?? []) })}
+              />
               <ThresholdsEditor
                 thresholds={test.thresholds ?? []}
                 onChange={(thresholds) => onChange({ ...test, thresholds })}
@@ -699,12 +702,13 @@ function encodeFields(fields: KeyValue[]): string {
 /** The profile a load test starts from when the file has none. */
 export const DEFAULT_LOAD: LoadProfile = { constant_rate: { rate: 10, duration: "30s" } };
 
-type LoadKind = "none" | "constant_rate" | "ramping" | "virtual_users";
+type LoadKind = "none" | "constant_rate" | "ramping" | "find_limit" | "virtual_users";
 
 function loadKind(load: LoadProfile | null): LoadKind {
   if (!load) return "none";
   if ("constant_rate" in load && load.constant_rate) return "constant_rate";
   if ("ramping" in load && load.ramping) return "ramping";
+  if ("find_limit" in load && load.find_limit) return "find_limit";
   return "virtual_users";
 }
 
@@ -712,8 +716,20 @@ const LOAD_LABELS: Record<LoadKind, string> = {
   none: "None (run once)",
   constant_rate: "Constant rate",
   ramping: "Ramping rate",
+  find_limit: "Find the limit",
   virtual_users: "Virtual users",
 };
+
+/**
+ * Thresholds for a load profile: `find_limit` ends at the first step that
+ * breaks one (`rps` doesn't count), so switching to it adds two when the
+ * test has none, instead of leaving the file invalid.
+ */
+export function thresholdsFor(load: LoadProfile | null, thresholds: string[]): string[] {
+  const findLimit = !!load && "find_limit" in load && !!load.find_limit;
+  if (!findLimit || thresholds.some((t) => !/^\s*rps\b/.test(t))) return thresholds;
+  return [...thresholds, "p95 < 500ms", "errors < 1%"];
+}
 
 /** Picks and edits the load profile. `required` leaves out "None (run once)". */
 export function LoadEditor({
@@ -731,6 +747,7 @@ export function LoadEditor({
     else if (next === "constant_rate") onChange(DEFAULT_LOAD);
     else if (next === "ramping")
       onChange({ ramping: { start_rate: 0, stages: [{ duration: "30s", target: 20 }, { duration: "1m", target: 20 }] } });
+    else if (next === "find_limit") onChange({ find_limit: { start_rate: 10, increase: 10, every: "30s", max_rate: 200 } });
     else onChange({ virtual_users: { count: 10, duration: "30s", think_time: null } });
   };
 
@@ -769,6 +786,18 @@ export function LoadEditor({
               placeholder="none"
               onChange={(v) => onChange({ virtual_users: { ...load.virtual_users!, think_time: v || null } })}
             />
+          </>
+        )}
+        {load && "find_limit" in load && load.find_limit && (
+          <>
+            <Field label="start at /s" value={load.find_limit.start_rate} number onChange={(v) => onChange({ find_limit: { ...load.find_limit!, start_rate: Number(v) } })} />
+            <Field label="add /s" value={load.find_limit.increase} number onChange={(v) => onChange({ find_limit: { ...load.find_limit!, increase: Number(v) } })} />
+            <Field label="every" value={load.find_limit.every} onChange={(v) => onChange({ find_limit: { ...load.find_limit!, every: v } })} />
+            <Field label="up to /s" value={load.find_limit.max_rate} number onChange={(v) => onChange({ find_limit: { ...load.find_limit!, max_rate: Number(v) } })} />
+            <span className="w-full text-subtle">
+              Raises the rate step by step and ends at the first step that breaks a threshold, like p95, errors or
+              cpu (from an API monitor). The last step that held is the limit of what the API served.
+            </span>
           </>
         )}
         {load && "ramping" in load && load.ramping && (

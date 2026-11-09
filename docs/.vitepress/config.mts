@@ -117,6 +117,7 @@ export default defineConfig({
           { text: 'Response cache', link: '/features/cache' },
           { text: 'Tracing in Dynatrace and APM tools', link: '/features/tracing' },
           { text: 'API CPU, memory and health', link: '/features/api-resources' },
+          { text: 'Capacity and pods', link: '/features/capacity' },
           { text: 'Proxies', link: '/features/proxies' },
           { text: 'Import and export collections', link: '/features/import-export' },
         ],

@@ -247,8 +247,9 @@ Without a `load` section, the flow runs once as a functional test. With one, `st
 | `constant_rate` | `rate`, `duration` | Hold a steady arrival rate: `rate` iterations start each second, however slow the API gets |
 | `ramping` | `start_rate` (default 0), `stages: [{ duration, target }]` | Ramp up, hold and ramp down. The rate moves linearly to each stage's `target` over its `duration` |
 | `virtual_users` | `count`, `duration`, `think_time` (optional) | Simulate a fixed number of users who each loop the flow, pausing `think_time` between loops |
+| `find_limit` | `start_rate`, `increase`, `every`, `max_rate` | Find how much one instance sustains: the rate goes up by `increase` every `every` until a step breaks a threshold. See [Capacity and pods](/features/capacity) |
 
-`constant_rate` and `ramping` are *open* models: the load does not drop when the API slows down, which is what real traffic does, and what exposes queueing. `virtual_users` is a *closed* model: a slow API gets fewer requests. In open models, if 1000 iterations (`--max-in-flight`) are already running, new ones are dropped and counted rather than delayed.
+`constant_rate`, `ramping` and `find_limit` are *open* models: the load does not drop when the API slows down, which is what real traffic does, and what exposes queueing. `virtual_users` is a *closed* model: a slow API gets fewer requests. In open models, if 1000 iterations (`--max-in-flight`) are already running, new ones are dropped and counted rather than delayed.
 
 Durations are whole numbers with a unit: `250ms`, `30s`, `2m`, `1h`.
 
@@ -273,8 +274,9 @@ A threshold is `<metric> <operator> <value>`. The operator is `<`, `<=`, `>` or 
 | `errors` | Failed requests, in percent | `errors < 1%` |
 | `checks` | Passed assertions and script tests, in percent | `checks > 99%` |
 | `rps` | Requests per second over the run, a plain number | `rps > 200` |
+| `cpu` | The API's average CPU from a [`monitor`](#monitor), in percent where 100% is one core | `cpu < 80%` |
 
-Thresholds apply only under load. `stormix load --threshold "p95 < 300ms"` adds one from the command line.
+Thresholds apply only under load. A `cpu` threshold fails when no monitor read the CPU. Under `find_limit` each step is checked on its own (`rps` thresholds only at the end). `stormix load --threshold "p95 < 300ms"` adds one from the command line.
 
 ## `monitor`
 
@@ -302,3 +304,26 @@ monitor:
 ```
 
 See [API CPU, memory and health](/features/api-resources) for which figures are read and how they are shown.
+
+## `capacity`
+
+What a `find_limit` test sizes pods (or containers, or servers) for. The result then says how many the traffic needs. See [Capacity and pods](/features/capacity) for the formula.
+
+| Field | |
+|---|---|
+| `peak_rps` | Requests per second at the busiest time in production, all pods together (required) |
+| `growth` | Traffic growth to plan for, in percent (optional, `30%`) |
+| `target_cpu` | The CPU each pod should run at during the peak, in percent of what it may use (optional, `65%`) |
+| `tested_pods` | How many pods served the test; the limit found is divided by it (optional, 1) |
+| `pod_cores` | CPU cores one pod may use (optional; from the monitor when it says, else 1) |
+| `pod_memory_mb` | The memory one pod may use (its memory limit), in MiB. With it, pods are also sized for memory (optional) |
+| `target_memory` | The share of that limit a pod should use at the peak, in percent (optional, `80%`) |
+| `spare_pods` | Extra pods so one can fail or be redeployed (optional, 1) |
+| `current_pods` | Pods running in production today, to compare with (optional) |
+
+```yaml
+load:
+  find_limit: { start_rate: 10, increase: 10, every: 30s, max_rate: 300 }
+thresholds: [p95 < 300ms, errors < 1%, cpu < 85%]
+capacity: { peak_rps: 600, growth: 30%, current_pods: 4, pod_memory_mb: 512 }
+```

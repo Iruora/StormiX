@@ -941,3 +941,127 @@ monitor:
     assert_eq!(samples[1].cpu_percent, Some(80.0));
     assert_eq!(samples[1].memory_bytes, Some(300e6));
 }
+
+/// An API that serves one request at a time in 20 ms: about 50 a second,
+/// with a queue building beyond that.
+async fn serve_capped() -> String {
+    let permit = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+    let app = Router::new().route(
+        "/capped",
+        get(move || {
+            let permit = permit.clone();
+            async move {
+                let _held = permit.acquire().await.unwrap();
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                "ok"
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{addr}")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn find_limit_stops_at_the_first_step_that_breaks_a_threshold() {
+    let url = serve_capped().await;
+    let test = test_file(
+        r#"
+flow:
+  name: capped
+  steps:
+    - name: capped
+      request: { method: GET, url: "{{base}}/capped" }
+load:
+  find_limit: { start_rate: 10, increase: 20, every: 1s, max_rate: 150 }
+capacity: { peak_rps: 100, growth: 0%, target_cpu: 50%, spare_pods: 1 }
+"#,
+    );
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let mut live = Vec::new();
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(&url),
+        test.load.as_ref().unwrap(),
+        &thresholds(&["p95 < 150ms", "errors < 1%", "rps > 1"]),
+        &LoadOptions {
+            capacity: test.capacity.clone(),
+            ..LoadOptions::default()
+        },
+        |p| live.push(p.limit_steps.len()),
+    )
+    .await;
+
+    let limit = report.limit.as_ref().expect("a find_limit report");
+    let rates: Vec<u32> = limit.steps.iter().map(|s| s.rate).collect();
+    assert!(limit.reached, "{rates:?}");
+    // 10 and 30 a second are well under the cap; 90 and above cannot hold.
+    let sustained = limit.sustained.expect("a step held") as usize;
+    assert!(
+        (1..=3).contains(&sustained) && rates.len() == sustained + 2,
+        "{rates:?}, sustained {sustained}"
+    );
+    assert!(rates.len() < 8, "it went on after a step broke: {rates:?}");
+    assert!(!limit.steps.last().unwrap().passed);
+    assert!(limit.steps[..=sustained].iter().all(|s| s.passed));
+    // The test ended at the limit, not at 150/s, and counts as passed with
+    // the sustained step's checks plus the run's own rps.
+    assert!(!report.aborted);
+    assert!(report.passed(), "{:?}", report.thresholds);
+    assert_eq!(report.thresholds.len(), 3);
+    assert!(report.summary.duration_ms < 7000.0);
+    assert!(live.windows(2).all(|w| w[0] <= w[1]));
+
+    // No monitor, so the sustained step is taken as saturated: half of
+    // its rate is usable at a 50% target.
+    let sizing = limit
+        .sizing
+        .as_ref()
+        .expect("sized from the capacity section");
+    assert_eq!(sizing.basis, "assumed");
+    let held = &limit.steps[sustained];
+    assert!((sizing.usable_rps_per_pod - held.rps / 2.0).abs() < 1e-9);
+    assert_eq!(
+        sizing.pods,
+        (100.0 / sizing.usable_rps_per_pod).ceil() as u32 + 1
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cpu_threshold_without_a_monitor_breaks_the_first_find_limit_step() {
+    let url = serve().await;
+    let test = test_file(
+        r#"
+flow:
+  name: fast
+  steps:
+    - name: fast
+      request: { method: GET, url: "{{base}}/fast" }
+load:
+  find_limit: { start_rate: 5, increase: 5, every: 1s, max_rate: 20 }
+"#,
+    );
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(&url),
+        test.load.as_ref().unwrap(),
+        &thresholds(&["cpu < 90%"]),
+        &LoadOptions::default(),
+        |_| {},
+    )
+    .await;
+    let limit = report.limit.as_ref().unwrap();
+    assert_eq!(limit.steps.len(), 1);
+    let step = &limit.steps[0];
+    // The step served requests, so the CPU threshold alone broke it.
+    assert!(step.requests > 0);
+    assert!(!step.passed);
+    assert_eq!(step.thresholds.len(), 1);
+    assert!(!step.thresholds[0].passed);
+    assert_eq!(limit.sustained, None);
+    assert!(!report.passed());
+}

@@ -5,7 +5,7 @@
 
 use std::fmt::Write;
 
-use stormix_engine::{FlowResult, LoadReport, ResourceSeries, StepResult};
+use stormix_engine::{FlowResult, LimitSearch, LoadReport, ResourceSeries, StepResult};
 use stormix_metrics::{Second, ThresholdResult};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -156,6 +156,10 @@ pub fn load_report(report: &LoadReport) -> String {
         );
     }
 
+    if let Some(limit) = &report.limit {
+        limit_html(&mut body, limit);
+    }
+
     if !report.thresholds.is_empty() {
         body.push_str("<section><h2>Thresholds</h2><ul class=\"thresholds\">");
         for t in &report.thresholds {
@@ -257,9 +261,11 @@ fn threshold_html(out: &mut String, t: &ThresholdResult) {
         .split([' ', '<', '>'])
         .next()
         .unwrap_or_default();
-    let actual = match metric {
-        "errors" | "checks" => format!("{:.2}%", t.actual),
-        "rps" => format!("{:.1}/s", t.actual),
+    let actual = match (metric, &t.note) {
+        (_, Some(note)) => esc(note),
+        ("errors" | "checks", _) => format!("{:.2}%", t.actual),
+        ("cpu", _) => format!("{:.0}%", t.actual),
+        ("rps", _) => format!("{:.1}/s", t.actual),
         _ => ms(t.actual),
     };
     let _ = write!(
@@ -270,6 +276,150 @@ fn threshold_html(out: &mut String, t: &ThresholdResult) {
         esc(&t.threshold),
         actual,
     );
+}
+
+/// A `find_limit` test: each step, the limit, and the pods it means.
+fn limit_html(out: &mut String, limit: &LimitSearch) {
+    let sustained = limit.sustained.and_then(|i| limit.steps.get(i as usize));
+    let headline = match (sustained, limit.reached) {
+        (None, _) => "Not found: even the first step broke a threshold. Start lower.".to_owned(),
+        (Some(s), true) => format!(
+            "{:.1} req/s sustained ({}/s iterations); the next step broke a threshold.",
+            s.rps, s.rate
+        ),
+        (Some(s), false) => format!(
+            "Not reached: {:.1} req/s held at the max rate, so the API takes at least that. Raise max_rate to find the limit.",
+            s.rps
+        ),
+    };
+    let _ = write!(
+        out,
+        r#"<section><h2>Limit</h2><p>{}</p><table><thead><tr><th>Rate</th><th>req/s</th><th>avg</th><th>p95</th><th>Errors</th><th>API CPU</th><th>Broke</th></tr></thead><tbody>"#,
+        esc(&headline)
+    );
+    for (i, step) in limit.steps.iter().enumerate() {
+        let tone = if step.partial {
+            ""
+        } else if step.passed {
+            "ok"
+        } else {
+            "bad"
+        };
+        let broke: Vec<String> = step
+            .thresholds
+            .iter()
+            .filter(|t| !t.passed)
+            .map(|t| esc(&t.threshold))
+            .collect();
+        let mark = if limit.sustained == Some(i as u32) {
+            " ← sustained"
+        } else if step.partial {
+            " (stopped)"
+        } else {
+            ""
+        };
+        let _ = write!(
+            out,
+            r#"<tr class="{tone}"><td>{}/s{mark}</td><td>{:.1}</td><td>{}</td><td>{}</td><td>{:.2}%</td><td>{}</td><td class="bad">{}</td></tr>"#,
+            step.rate,
+            step.rps,
+            ms(step.latency.avg),
+            ms(step.latency.p95),
+            step.error_rate,
+            step.api_cpu.map_or("–".to_owned(), |c| format!("{c:.0}%")),
+            broke.join(", ")
+        );
+    }
+    out.push_str("</tbody></table>");
+    if let Some(s) = &limit.sizing {
+        let c = &s.capacity;
+        let verdict = match c.current_pods {
+            Some(now) if s.pods > now => format!(" · {now} running now: add {}", s.pods - now),
+            Some(now) if s.pods < now => {
+                format!(" · {now} running now: {} more than needed", now - s.pods)
+            }
+            Some(now) => format!(" · {now} running now: just right"),
+            None => String::new(),
+        };
+        let basis = match s.basis.as_str() {
+            "cpu" => format!("scaled to {:.0}% CPU", c.target_cpu.0),
+            "latency" => "latency or errors set the limit before the CPU target".to_owned(),
+            _ => format!(
+                "no CPU reading, taken as saturated and run at {:.0}%",
+                c.target_cpu.0
+            ),
+        };
+        let _ = write!(
+            out,
+            r#"<h2 class="sizing">Pods needed: {pods}{verdict}</h2><ul class="sizing">
+<li>One pod held <b>{held:.1} req/s</b>{cpu}{tested}</li>
+<li>Usable per pod: <b>{usable:.1} req/s</b> ({basis})</li>
+<li>Design rate: <b>{design:.1} req/s</b> = peak {peak} × (1 + {growth:.0}% growth)</li>
+<li>CPU pods: ⌈{design:.1} ÷ {usable:.1}⌉ = {cpu_pods}</li>{memory}
+<li>Pods: {traffic} + {spare} spare = <b>{pods}</b></li>
+<li>In flight (Little's law, rate × {lat} avg latency): about {fp:.1} requests per pod, {ft:.0} in all. Size thread and connection pools above that.</li></ul>"#,
+            pods = s.pods,
+            verdict = esc(&verdict),
+            held = s.tested_rps_per_pod,
+            cpu = s
+                .tested_cpu
+                .map(|c| format!(" at {c:.0}% CPU of {} core(s)", s.pod_cores))
+                .unwrap_or_default(),
+            tested = if c.tested_pods > 1 {
+                format!(" ({} pods served the test)", c.tested_pods)
+            } else {
+                String::new()
+            },
+            usable = s.usable_rps_per_pod,
+            basis = esc(&basis),
+            design = s.design_rps,
+            peak = c.peak_rps,
+            growth = c.growth.0,
+            traffic = s.pods_for_traffic,
+            cpu_pods = s.pods_by_cpu,
+            memory = memory_html(s),
+            spare = c.spare_pods,
+            lat = ms(s.latency_ms),
+            fp = s.in_flight_per_pod,
+            ft = s.in_flight_total,
+        );
+    } else if sustained.is_some() {
+        out.push_str(r#"<p class="muted">Add a <span class="mono">capacity</span> section (peak_rps, growth, current_pods) to the test file to size pods from this limit.</p>"#);
+    }
+    out.push_str("</section>");
+}
+
+/// The memory side of the sizing, as list items.
+fn memory_html(s: &stormix_engine::Sizing) -> String {
+    let c = &s.capacity;
+    let mut out = String::new();
+    if let (Some(fixed), Some(per_request)) = (s.fixed_memory_bytes, s.memory_per_request_bytes) {
+        let _ = write!(
+            out,
+            "<li>Memory: {} fixed + {:.2} MB per request in flight, fitted across the steps</li>",
+            bytes(fixed),
+            per_request / 1_048_576.0
+        );
+    }
+    match (s.pods_by_memory, c.pod_memory_mb) {
+        (Some(pods), Some(mb)) => {
+            let _ = write!(
+                out,
+                "<li>Memory pods: <b>{pods}</b>, to keep {:.0} requests in flight within {:.0}% of {} per pod</li>",
+                s.in_flight_total,
+                c.target_memory.0,
+                bytes(mb * 1_048_576.0)
+            );
+        }
+        (None, None) => out.push_str(
+            r#"<li class="muted">Memory not sized: add <span class="mono">pod_memory_mb</span> to the capacity section.</li>"#,
+        ),
+        _ => {}
+    }
+    if let Some(note) = &s.memory_note {
+        let _ = write!(out, r#"<li class="muted">{}</li>"#, esc(note));
+    }
+    out
 }
 
 /// Requests per second as bars (failures stacked in red) and p95 as a line.
@@ -543,6 +693,8 @@ p.health.ok{color:var(--ok)}ul.health{list-style:none;margin:0 0 8px;padding:0;c
 .sw.cpu{height:2px;background:var(--accent);vertical-align:3px}.sw.mem{height:2px;background:var(--ok);vertical-align:3px}
 .sw.req{background:var(--accent);opacity:.55}.sw.fail{background:var(--bad)}.sw.p95{height:2px;background:var(--warn);vertical-align:3px}
 .trace{user-select:all}
+tr.ok td:first-child{color:var(--ok)}tr.bad td:first-child{color:var(--bad)}
+h2.sizing{margin-top:20px}ul.sizing{margin:0;padding-left:1.2em}ul.sizing li{padding:2px 0}
 .axis{display:flex;justify-content:space-between;color:var(--muted);font-size:11px}
 footer{color:var(--muted);font-size:12px;text-align:center;margin-top:24px}
 "#;

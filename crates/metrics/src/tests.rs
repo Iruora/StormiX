@@ -131,7 +131,7 @@ fn checks_thresholds() {
     .iter()
     .map(|t| t.parse().unwrap())
     .collect();
-    let results = check_thresholds(&thresholds, &s, &r);
+    let results = check_thresholds(&thresholds, &s, &r, None);
     let verdicts: Vec<_> = results
         .iter()
         .map(|r| (r.threshold.as_str(), r.passed))

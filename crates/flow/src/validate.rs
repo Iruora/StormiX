@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::graphql;
 use crate::template::variable_refs;
-use crate::{Assertion, Body, ExtractSource, LoadProfile, TestFile};
+use crate::{Assertion, Body, ExtractSource, LoadProfile, Metric, TestFile};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -196,6 +196,55 @@ impl TestFile {
                     );
                 }
             }
+            Some(LoadProfile::FindLimit {
+                start_rate,
+                increase,
+                every,
+                max_rate,
+            }) => {
+                if *start_rate == 0 {
+                    issues.error("load.find_limit.start_rate", "the rate must be at least 1");
+                }
+                if *increase == 0 {
+                    issues.error(
+                        "load.find_limit.increase",
+                        "the rate must go up by at least 1 at each step",
+                    );
+                }
+                if max_rate < start_rate {
+                    issues.error(
+                        "load.find_limit.max_rate",
+                        "the max rate is below the start rate",
+                    );
+                }
+                if every.is_zero() {
+                    issues.error(
+                        "load.find_limit.every",
+                        "each step must last longer than 0s",
+                    );
+                } else if every.as_millis() % 1000 != 0 {
+                    // Steps are closed on the once-a-second tick.
+                    issues.error(
+                        "load.find_limit.every",
+                        "each step lasts a whole number of seconds, like 30s",
+                    );
+                } else if every.as_millis() < 10_000 {
+                    issues.warning(
+                        "load.find_limit.every",
+                        "steps under 10s are too short for steady latency and CPU figures",
+                    );
+                }
+                if !self
+                    .thresholds
+                    .iter()
+                    .any(|t| !matches!(t.metric, Metric::Throughput))
+                {
+                    issues.error(
+                        "thresholds",
+                        "find_limit stops at the first step that breaks a threshold; add some, like `p95 < 500ms` and `errors < 1%`",
+                    );
+                }
+            }
             Some(LoadProfile::VirtualUsers {
                 count, duration, ..
             }) => {
@@ -220,6 +269,57 @@ impl TestFile {
                         );
                     }
                 }
+            }
+        }
+
+        if self.monitor.is_empty() {
+            for (t, threshold) in self.thresholds.iter().enumerate() {
+                if threshold.metric.needs_monitor() {
+                    issues.warning(
+                        &format!("thresholds[{t}]"),
+                        &format!(
+                            "`{threshold}` reads the API's CPU from a `monitor`; add one, or it always fails"
+                        ),
+                    );
+                }
+            }
+        }
+        if let Some(capacity) = &self.capacity {
+            if !(capacity.peak_rps.is_finite() && capacity.peak_rps > 0.0) {
+                issues.error("capacity.peak_rps", "the peak must be above 0 requests/s");
+            }
+            if !(1.0..=100.0).contains(&capacity.target_cpu.0) {
+                issues.error(
+                    "capacity.target_cpu",
+                    "the target CPU is a percentage from 1% to 100%",
+                );
+            }
+            if capacity.growth.0 < 0.0 {
+                issues.error("capacity.growth", "growth cannot be negative");
+            }
+            if capacity.tested_pods == 0 {
+                issues.error("capacity.tested_pods", "at least 1 pod served the test");
+            }
+            if capacity
+                .pod_memory_mb
+                .is_some_and(|m| !(m.is_finite() && m > 0.0))
+            {
+                issues.error("capacity.pod_memory_mb", "a pod has more than 0 MiB");
+            }
+            if !(1.0..=100.0).contains(&capacity.target_memory.0) {
+                issues.error(
+                    "capacity.target_memory",
+                    "the target memory is a percentage from 1% to 100%",
+                );
+            }
+            if capacity.pod_cores.is_some_and(|c| c <= 0.0) {
+                issues.error("capacity.pod_cores", "a pod has more than 0 cores");
+            }
+            if !matches!(self.load, Some(LoadProfile::FindLimit { .. })) {
+                issues.warning(
+                    "capacity",
+                    "capacity is sized from a `find_limit` load test; other profiles ignore it",
+                );
             }
         }
 
@@ -641,5 +741,50 @@ flow:
 thresholds: [rps > 10, p95 < 100ms]
 "#;
         assert_eq!(issues(yaml), [(Severity::Warning, "thresholds[0]".into())]);
+    }
+
+    #[test]
+    fn find_limit_needs_thresholds_and_sane_steps() {
+        let yaml = r#"
+version: 1
+flow:
+  name: limit
+  steps:
+    - name: ping
+      request: { method: GET, url: "https://example.com" }
+load:
+  find_limit: { start_rate: 10, increase: 0, every: 5s, max_rate: 5 }
+thresholds: [rps > 10, cpu < 80%]
+capacity: { peak_rps: 0, target_cpu: 120% }
+"#;
+        assert_eq!(
+            issues(yaml),
+            [
+                (Severity::Error, "load.find_limit.increase".into()),
+                (Severity::Error, "load.find_limit.max_rate".into()),
+                (Severity::Warning, "load.find_limit.every".into()),
+                (Severity::Warning, "thresholds[1]".into()),
+                (Severity::Error, "capacity.peak_rps".into()),
+                (Severity::Error, "capacity.target_cpu".into()),
+            ]
+        );
+        let ok = r#"
+version: 1
+flow:
+  name: limit
+  steps:
+    - name: ping
+      request: { method: GET, url: "https://example.com" }
+load:
+  find_limit: { start_rate: 10, increase: 10, every: 30s, max_rate: 200 }
+thresholds: [p95 < 300ms]
+capacity: { peak_rps: 900, growth: 30%, current_pods: 4 }
+"#;
+        assert_eq!(issues(ok), []);
+        let fractional = ok.replace("every: 30s", "every: 1500ms");
+        assert_eq!(
+            issues(&fractional),
+            [(Severity::Error, "load.find_limit.every".into())]
+        );
     }
 }

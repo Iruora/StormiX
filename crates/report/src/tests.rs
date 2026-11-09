@@ -75,12 +75,14 @@ fn load_report_has_thresholds_timeline_and_steps() {
             threshold: "p95 < 10ms".into(),
             actual: 13.0,
             passed: false,
+            note: None,
         }],
         samples: Vec::new(),
         setup: Vec::new(),
         slowest: Vec::new(),
         aborted: false,
         resources: Vec::new(),
+        limit: None,
     };
     let html = load_report(&report);
     assert!(html.contains("Thresholds failed"));
@@ -114,6 +116,7 @@ fn load_report_shows_the_apis_resources() {
         setup: Vec::new(),
         slowest: Vec::new(),
         aborted: false,
+        limit: None,
         resources: vec![
             ResourceSeries {
                 name: "orders-api".into(),
@@ -179,4 +182,71 @@ fn load_report_shows_the_apis_resources() {
     assert!(html.contains("Could not read it: 401 Unauthorized"));
     assert!(html.contains("<b>DOWN</b> at 1.0 s (db: DOWN), healthy again at 1.5 s, after 0.5 s"));
     assert_eq!(html.matches(r#"class="down""#).count(), 1);
+}
+
+#[test]
+fn a_find_limit_report_shows_each_step_and_the_pods_needed() {
+    use stormix_engine::{LimitSearch, LimitStep};
+    let limit_step = |rate: u32, rps: f64, cpu: f64, passed: bool| LimitStep {
+        rate,
+        start_s: 0.0,
+        end_s: 15.0,
+        rps,
+        requests: 100,
+        failed_requests: 0,
+        error_rate: 0.0,
+        latency: stormix_metrics::Latency {
+            avg: 10.0,
+            p95: 20.0,
+            ..Default::default()
+        },
+        api_cpu: Some(cpu),
+        api_memory_bytes: None,
+        thresholds: vec![ThresholdResult {
+            threshold: "cpu < 85%".into(),
+            actual: cpu,
+            passed,
+            note: None,
+        }],
+        passed,
+        partial: false,
+    };
+    let capacity = stormix_flow::TestFile::from_yaml(
+        "version: 1\nflow: { name: x, steps: [] }\ncapacity: { peak_rps: 600, current_pods: 4 }\n",
+    )
+    .unwrap()
+    .capacity
+    .unwrap();
+    let mut limit = LimitSearch {
+        steps: vec![
+            limit_step(10, 20.0, 22.0, true),
+            limit_step(40, 80.0, 80.0, true),
+            limit_step(50, 100.0, 100.0, false),
+        ],
+        sustained: Some(1),
+        reached: true,
+        cpu_cores: Some(1.0),
+        sizing: None,
+    };
+    limit.sizing = stormix_engine::size(&limit, &capacity);
+    let report = LoadReport {
+        name: "Limit".into(),
+        summary: Recorder::new().summary(Duration::from_secs(45)),
+        thresholds: Vec::new(),
+        samples: Vec::new(),
+        setup: Vec::new(),
+        slowest: Vec::new(),
+        aborted: false,
+        resources: Vec::new(),
+        limit: Some(limit),
+    };
+    let html = load_report(&report);
+    assert!(html.contains("80.0 req/s sustained (40/s iterations)"));
+    assert!(html.contains("40/s ← sustained"));
+    assert!(html.contains(r#"<td class="bad">cpu &lt; 85%</td>"#));
+    // 80 req/s at 80% -> 65 at 65%; 780 / 65 = 12, + 1 spare.
+    assert!(
+        html.contains("Pods needed: 13 · 4 running now: add 9"),
+        "{html}"
+    );
 }

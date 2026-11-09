@@ -401,18 +401,32 @@ pub struct ThresholdResult {
     /// In the threshold's unit: ms, percent or requests per second.
     pub actual: f64,
     pub passed: bool,
+    /// Why it could not be measured, like a `cpu` threshold with no
+    /// monitor. It fails then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// Checks each threshold against the run. Percentiles are read from the
-/// recorder, so `p97` is as exact as `p95`.
+/// recorder, so `p97` is as exact as `p95`. `api_cpu` is the API's average
+/// CPU over the run, from its monitor, when one was read.
 pub fn check_thresholds(
     thresholds: &[Threshold],
     summary: &Summary,
     recorder: &Recorder,
+    api_cpu: Option<f64>,
 ) -> Vec<ThresholdResult> {
     thresholds
         .iter()
         .map(|t| {
+            if t.metric == Metric::ApiCpu && api_cpu.is_none() {
+                return ThresholdResult {
+                    threshold: t.to_string(),
+                    actual: 0.0,
+                    passed: false,
+                    note: Some("the API's CPU was not read; add a monitor".into()),
+                };
+            }
             let actual = match t.metric {
                 Metric::Percentile(p) => recorder.percentile(f64::from(p)),
                 Metric::AvgLatency => summary.latency.avg,
@@ -420,11 +434,13 @@ pub fn check_thresholds(
                 Metric::ErrorRate => summary.error_rate(),
                 Metric::CheckRate => summary.check_rate(),
                 Metric::Throughput => summary.rps,
+                Metric::ApiCpu => api_cpu.unwrap_or_default(),
             };
             ThresholdResult {
                 threshold: t.to_string(),
                 actual,
                 passed: t.passes(actual),
+                note: None,
             }
         })
         .collect()

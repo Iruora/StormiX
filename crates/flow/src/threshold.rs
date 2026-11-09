@@ -17,6 +17,9 @@ pub enum Metric {
     CheckRate,
     /// Requests per second over the whole run.
     Throughput,
+    /// The API's own CPU, read by a `monitor`, in percent where 100 is one
+    /// full core: its average over the run.
+    ApiCpu,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -52,12 +55,17 @@ impl Metric {
     }
 
     fn is_rate(self) -> bool {
-        matches!(self, Self::ErrorRate | Self::CheckRate)
+        matches!(self, Self::ErrorRate | Self::CheckRate | Self::ApiCpu)
     }
 
     /// Only measured under load, not on a single functional run.
     pub fn needs_load(self) -> bool {
-        matches!(self, Self::Throughput)
+        matches!(self, Self::Throughput | Self::ApiCpu)
+    }
+
+    /// Read from a `monitor`, not from the requests Stormix sends.
+    pub fn needs_monitor(self) -> bool {
+        matches!(self, Self::ApiCpu)
     }
 }
 
@@ -115,13 +123,14 @@ impl FromStr for Threshold {
             "errors" => Metric::ErrorRate,
             "checks" => Metric::CheckRate,
             "rps" => Metric::Throughput,
+            "cpu" => Metric::ApiCpu,
             other => {
                 let p = other
                     .strip_prefix('p')
                     .and_then(|n| n.parse::<u8>().ok())
                     .filter(|p| (1..=100).contains(p))
                     .ok_or_else(|| {
-                        err("unknown metric; use p50, p95, p99, avg, max, errors, checks or rps")
+                        err("unknown metric; use p50, p95, p99, avg, max, errors, checks, rps or cpu")
                     })?;
                 Metric::Percentile(p)
             }
@@ -161,6 +170,7 @@ impl fmt::Display for Threshold {
             Metric::ErrorRate => "errors",
             Metric::CheckRate => "checks",
             Metric::Throughput => "rps",
+            Metric::ApiCpu => "cpu",
         };
         let unit = match self.metric {
             m if m.is_latency() => "ms",
@@ -216,6 +226,8 @@ mod tests {
         assert_eq!(t("errors < 1%").metric, Metric::ErrorRate);
         assert_eq!(t("checks > 99.5%").value, 99.5);
         assert_eq!(t("rps >= 100").metric, Metric::Throughput);
+        assert_eq!(t("cpu < 80%").metric, Metric::ApiCpu);
+        assert_eq!(t("cpu < 150%").value, 150.0);
     }
 
     #[test]
@@ -228,6 +240,7 @@ mod tests {
             "latency < 1ms",
             "p95 = 1ms",
             "p95 < fast",
+            "cpu < 80",
         ] {
             assert!(bad.parse::<Threshold>().is_err(), "{bad} should not parse");
         }
@@ -235,7 +248,13 @@ mod tests {
 
     #[test]
     fn round_trips_through_display() {
-        for s in ["p95 < 300ms", "max <= 1500ms", "errors < 1%", "rps >= 100"] {
+        for s in [
+            "p95 < 300ms",
+            "max <= 1500ms",
+            "errors < 1%",
+            "rps >= 100",
+            "cpu < 80%",
+        ] {
             assert_eq!(t(s).to_string(), s);
         }
     }

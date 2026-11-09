@@ -15,6 +15,7 @@ import { useMemo, useState } from "react";
 
 import type { LoadProgress, LoadReport, Second, SlowRequest, StepResult, StepSummary, ThresholdResult } from "../bindings";
 import { ProgressBar } from "./Busy";
+import { LimitResult, LiveLimitSteps } from "./Capacity";
 import { ApiResources, liveResources, reportResources, wentUnhealthy } from "./Resources";
 import { DetailsButton, stepPassed } from "./RunResult";
 import { CopyButton, StepDetails, type Diagnose } from "./StepDetails";
@@ -51,6 +52,7 @@ export function LoadLive({ points, onStop, stopping }: { points: LoadProgress[];
         <Stat label="failed/s" value={last ? String(last.failed) : "–"} tone={last && last.failed > 0 ? "bad" : undefined} />
         <Stat label="in flight" value={last ? String(last.active) : "–"} />
       </div>
+      <LiveLimitSteps steps={last?.limitSteps ?? []} />
       <Timeline seconds={points.map((p) => ({ t: p.elapsedS, requests: p.requests, failed: p.failed, p95Ms: p.p95Ms }))} />
       <ApiResources series={liveResources(points)} duration={total} live />
     </section>
@@ -110,6 +112,12 @@ export function LoadResult({
         <span className="font-semibold">
           {aborted
             ? "Stopped before the end"
+            : report.limit
+              ? report.limit.sustained == null
+                ? "No step held"
+                : report.limit.reached
+                  ? "Limit found"
+                  : "Limit not reached"
             : report.thresholds.length === 0
               ? "Load test finished"
               : passed
@@ -182,6 +190,8 @@ export function LoadResult({
           ))}
         </ul>
       )}
+
+      {report.limit && <LimitResult limit={report.limit} capacity={report.limit.sizing?.capacity} />}
 
       <Timeline seconds={s.timeline} />
       <ApiResources series={reportResources(report)} duration={(s.durationMs ?? 0) / 1000} />
@@ -416,10 +426,13 @@ function SlowestTraced({ requests }: { requests: SlowRequest[] }) {
 function Threshold({ result }: { result: ThresholdResult }) {
   const metric = result.threshold.split(/[\s<>]/)[0];
   const actual = result.actual ?? 0;
-  const measured =
-    metric === "errors" || metric === "checks"
+  const measured = result.note
+    ? result.note
+    : metric === "errors" || metric === "checks"
       ? `${actual.toFixed(2)}%`
-      : metric === "rps"
+      : metric === "cpu"
+        ? `${Math.round(actual)}%`
+        : metric === "rps"
         ? `${actual.toFixed(1)}/s`
         : formatMs(actual);
   return (

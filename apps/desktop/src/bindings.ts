@@ -191,6 +191,92 @@ export type CachedStep = {
 	storedAt: number | null,
 };
 
+export type Capacity = Capacity_Serialize | Capacity_Deserialize;
+
+export type Capacity_Deserialize = {
+	/**
+	 *  Requests per second at the busiest time in production, all pods
+	 *  together.
+	 */
+	peak_rps: number | null,
+	/**  Traffic growth to plan for, in percent: 30 sizes for 1.3 × the peak. */
+	growth?: number | null,
+	/**
+	 *  The CPU each pod should run at during the peak, in percent of what
+	 *  the pod may use. Below 100 leaves room for spikes, garbage
+	 *  collection and a pod restarting.
+	 */
+	target_cpu?: number | null,
+	/**  How many pods served the test. The limit found is divided by it. */
+	tested_pods?: number,
+	/**
+	 *  CPU cores one pod may use (its CPU limit). Read from the monitor
+	 *  when it says, else taken as 1.
+	 */
+	pod_cores?: number | null,
+	/**
+	 *  The memory one pod may use (its memory limit), in MiB. With it the
+	 *  pods are also sized for memory, from how the API's memory grew with
+	 *  the requests in flight across the steps.
+	 */
+	pod_memory_mb?: number | null,
+	/**
+	 *  The share of the memory limit a pod should use at the peak, in
+	 *  percent, so a burst or a slow garbage collection stays clear of an
+	 *  out-of-memory kill.
+	 */
+	target_memory?: number | null,
+	/**
+	 *  Extra pods on top of what the traffic needs, so one can fail or be
+	 *  redeployed without overloading the rest.
+	 */
+	spare_pods?: number,
+	/**  Pods running in production today, to compare with. */
+	current_pods?: number | null,
+};
+
+export type Capacity_Serialize = {
+	/**
+	 *  Requests per second at the busiest time in production, all pods
+	 *  together.
+	 */
+	peak_rps: number | null,
+	/**  Traffic growth to plan for, in percent: 30 sizes for 1.3 × the peak. */
+	growth: number | null,
+	/**
+	 *  The CPU each pod should run at during the peak, in percent of what
+	 *  the pod may use. Below 100 leaves room for spikes, garbage
+	 *  collection and a pod restarting.
+	 */
+	target_cpu: number | null,
+	/**  How many pods served the test. The limit found is divided by it. */
+	tested_pods: number,
+	/**
+	 *  CPU cores one pod may use (its CPU limit). Read from the monitor
+	 *  when it says, else taken as 1.
+	 */
+	pod_cores?: number | null,
+	/**
+	 *  The memory one pod may use (its memory limit), in MiB. With it the
+	 *  pods are also sized for memory, from how the API's memory grew with
+	 *  the requests in flight across the steps.
+	 */
+	pod_memory_mb?: number | null,
+	/**
+	 *  The share of the memory limit a pod should use at the peak, in
+	 *  percent, so a burst or a slow garbage collection stays clear of an
+	 *  out-of-memory kill.
+	 */
+	target_memory: number | null,
+	/**
+	 *  Extra pods on top of what the traffic needs, so one can fail or be
+	 *  redeployed without overloading the rest.
+	 */
+	spare_pods: number,
+	/**  Pods running in production today, to compare with. */
+	current_pods?: number,
+};
+
 export type Certificate = {
 	subject: string,
 	issuer: string,
@@ -645,6 +731,129 @@ export type Latency = {
 	max: number | null,
 };
 
+export type LimitSearch = LimitSearch_Serialize | LimitSearch_Deserialize;
+
+export type LimitSearch_Deserialize = {
+	/**  In the order they ran. */
+	steps: LimitStep_Deserialize[],
+	/**
+	 *  The index in `steps` of the last step where every threshold held:
+	 *  the most the API sustained. None when even the first step failed.
+	 */
+	sustained?: number | null,
+	/**
+	 *  A step broke a threshold. When false the max rate held, so the API
+	 *  can take at least that much and the real limit is higher.
+	 */
+	reached: boolean,
+	/**  The monitored API's CPU cores, when it says. */
+	cpuCores?: number | null,
+	/**
+	 *  How many pods the traffic in the `capacity` section needs. None
+	 *  without that section, or when no step held.
+	 */
+	sizing?: Sizing_Deserialize | null,
+};
+
+export type LimitSearch_Serialize = {
+	/**  In the order they ran. */
+	steps: LimitStep_Serialize[],
+	/**
+	 *  The index in `steps` of the last step where every threshold held:
+	 *  the most the API sustained. None when even the first step failed.
+	 */
+	sustained?: number,
+	/**
+	 *  A step broke a threshold. When false the max rate held, so the API
+	 *  can take at least that much and the real limit is higher.
+	 */
+	reached: boolean,
+	/**  The monitored API's CPU cores, when it says. */
+	cpuCores?: number | null,
+	/**
+	 *  How many pods the traffic in the `capacity` section needs. None
+	 *  without that section, or when no step held.
+	 */
+	sizing?: Sizing_Serialize,
+};
+
+/**  One step of a `find_limit` test, measured on its own. */
+export type LimitStep = LimitStep_Serialize | LimitStep_Deserialize;
+
+/**  One step of a `find_limit` test, measured on its own. */
+export type LimitStep_Deserialize = {
+	/**  The flow iterations started per second during the step. */
+	rate: number,
+	/**  Seconds since the load started. */
+	startS: number | null,
+	endS: number | null,
+	/**
+	 *  Requests per second the API answered during the step, every step
+	 *  of the flow counted.
+	 */
+	rps: number | null,
+	requests: number,
+	failedRequests: number,
+	/**  Failed requests, in percent. */
+	errorRate: number | null,
+	latency: Latency,
+	/**
+	 *  The API's average CPU during the step, where 100 is one core. The
+	 *  busiest monitored API's when there are several.
+	 */
+	apiCpu?: number | null,
+	/**
+	 *  The API's average memory during the step, in bytes, as the monitor
+	 *  measures it (see `ResourceSeries::memory_kind`).
+	 */
+	apiMemoryBytes?: number | null,
+	/**
+	 *  The thresholds checked against this step alone (`rps` ones are
+	 *  left out: the step sets the rate).
+	 */
+	thresholds: ThresholdResult_Deserialize[],
+	passed: boolean,
+	/**  Cut short by a stop, so it decides nothing. */
+	partial?: boolean,
+};
+
+/**  One step of a `find_limit` test, measured on its own. */
+export type LimitStep_Serialize = {
+	/**  The flow iterations started per second during the step. */
+	rate: number,
+	/**  Seconds since the load started. */
+	startS: number | null,
+	endS: number | null,
+	/**
+	 *  Requests per second the API answered during the step, every step
+	 *  of the flow counted.
+	 */
+	rps: number | null,
+	requests: number,
+	failedRequests: number,
+	/**  Failed requests, in percent. */
+	errorRate: number | null,
+	latency: Latency,
+	/**
+	 *  The API's average CPU during the step, where 100 is one core. The
+	 *  busiest monitored API's when there are several.
+	 */
+	apiCpu?: number | null,
+	/**
+	 *  The API's average memory during the step, in bytes, as the monitor
+	 *  measures it (see `ResourceSeries::memory_kind`).
+	 */
+	apiMemoryBytes?: number | null,
+	/**
+	 *  The thresholds checked against this step alone (`rps` ones are
+	 *  left out: the step sets the rate).
+	 */
+	thresholds: ThresholdResult_Serialize[],
+	passed: boolean,
+	/**  Cut short by a stop, so it decides nothing. */
+	partial?: boolean,
+};
+
 /**  A monitored API's latest reading while a load test runs. */
 export type LiveResource = LiveResource_Serialize | LiveResource_Deserialize;
 
@@ -723,51 +932,81 @@ export type LoadDiff_Serialize = {
 };
 
 /**
- *  Open models (`constant_rate`, `ramping`) start flow iterations on a clock,
- *  so a slow API does not lower the load. The closed model (`virtual_users`)
+ *  Open models (`constant_rate`, `ramping`, `find_limit`) start flow
+ *  iterations on a clock, so a slow API does not lower the load. The closed model (`virtual_users`)
  *  keeps a fixed number of users looping the flow.
  */
 export type LoadProfile = LoadProfile_Serialize | LoadProfile_Deserialize;
 
 /**
- *  Open models (`constant_rate`, `ramping`) start flow iterations on a clock,
- *  so a slow API does not lower the load. The closed model (`virtual_users`)
+ *  Open models (`constant_rate`, `ramping`, `find_limit`) start flow
+ *  iterations on a clock, so a slow API does not lower the load. The closed model (`virtual_users`)
  *  keeps a fixed number of users looping the flow.
  */
 export type LoadProfile_Deserialize = ({ constant_rate: {
 	/**  Flow iterations started per second. */
 	rate: number,
 	duration: string,
-} }) & { ramping?: never; virtual_users?: never } | ({ ramping: {
+} }) & { find_limit?: never; ramping?: never; virtual_users?: never } | ({ ramping: {
 	/**  The rate at the start of the first stage. */
 	start_rate?: number,
 	stages: Stage[],
-} }) & { constant_rate?: never; virtual_users?: never } | ({ virtual_users: {
+} }) & { constant_rate?: never; find_limit?: never; virtual_users?: never } | 
+/**
+ *  Raises the rate step by step until a threshold fails, to find how
+ *  much one instance of the API sustains. Each step is checked on its
+ *  own: the last one where every threshold held is the limit.
+ */
+({ find_limit: {
+	/**  The rate of the first step. */
+	start_rate: number,
+	/**  Added to the rate at each new step. */
+	increase: number,
+	/**  How long each step lasts. */
+	every: string,
+	/**  The highest rate tried; the test ends after that step. */
+	max_rate: number,
+} }) & { constant_rate?: never; ramping?: never; virtual_users?: never } | ({ virtual_users: {
 	count: number,
 	duration: string,
 	/**  Pause between iterations of one user. */
 	think_time?: string | null,
-} }) & { constant_rate?: never; ramping?: never };
+} }) & { constant_rate?: never; find_limit?: never; ramping?: never };
 
 /**
- *  Open models (`constant_rate`, `ramping`) start flow iterations on a clock,
- *  so a slow API does not lower the load. The closed model (`virtual_users`)
+ *  Open models (`constant_rate`, `ramping`, `find_limit`) start flow
+ *  iterations on a clock, so a slow API does not lower the load. The closed model (`virtual_users`)
  *  keeps a fixed number of users looping the flow.
  */
 export type LoadProfile_Serialize = ({ constant_rate: {
 	/**  Flow iterations started per second. */
 	rate: number,
 	duration: string,
-} }) & { ramping?: never; virtual_users?: never } | ({ ramping: {
+} }) & { find_limit?: never; ramping?: never; virtual_users?: never } | ({ ramping: {
 	/**  The rate at the start of the first stage. */
 	start_rate: number,
 	stages: Stage[],
-} }) & { constant_rate?: never; virtual_users?: never } | ({ virtual_users: {
+} }) & { constant_rate?: never; find_limit?: never; virtual_users?: never } | 
+/**
+ *  Raises the rate step by step until a threshold fails, to find how
+ *  much one instance of the API sustains. Each step is checked on its
+ *  own: the last one where every threshold held is the limit.
+ */
+({ find_limit: {
+	/**  The rate of the first step. */
+	start_rate: number,
+	/**  Added to the rate at each new step. */
+	increase: number,
+	/**  How long each step lasts. */
+	every: string,
+	/**  The highest rate tried; the test ends after that step. */
+	max_rate: number,
+} }) & { constant_rate?: never; ramping?: never; virtual_users?: never } | ({ virtual_users: {
 	count: number,
 	duration: string,
 	/**  Pause between iterations of one user. */
 	think_time?: string,
-} }) & { constant_rate?: never; ramping?: never };
+} }) & { constant_rate?: never; find_limit?: never; ramping?: never };
 
 /**  Sent once a second while a load test runs. */
 export type LoadProgress = LoadProgress_Serialize | LoadProgress_Deserialize;
@@ -782,6 +1021,10 @@ export type LoadProgress_Deserialize = {
 	active: number,
 	/**  The API's latest CPU and memory, one per `monitor` entry. */
 	resources: LiveResource_Deserialize[],
+	/**  `find_limit` only: the steps finished so far. */
+	limitSteps: LimitStep_Deserialize[],
+	/**  The rate aimed for now: iterations/s, or users for virtual users. */
+	target: number | null,
 };
 
 /**  Sent once a second while a load test runs. */
@@ -794,6 +1037,10 @@ export type LoadProgress_Serialize = {
 	active: number,
 	/**  The API's latest CPU and memory, one per `monitor` entry. */
 	resources: LiveResource_Serialize[],
+	/**  `find_limit` only: the steps finished so far. */
+	limitSteps: LimitStep_Serialize[],
+	/**  The rate aimed for now: iterations/s, or users for virtual users. */
+	target: number | null,
 };
 
 export type LoadReport = LoadReport_Serialize | LoadReport_Deserialize;
@@ -801,7 +1048,7 @@ export type LoadReport = LoadReport_Serialize | LoadReport_Deserialize;
 export type LoadReport_Deserialize = {
 	name: string,
 	summary: Summary_Deserialize,
-	thresholds: ThresholdResult[],
+	thresholds: ThresholdResult_Deserialize[],
 	/**
 	 *  The first failure of each step, with the request and response, so
 	 *  a failure count can be traced to a real exchange. Empty in reports
@@ -831,12 +1078,17 @@ export type LoadReport_Deserialize = {
 	 *  `monitor` entry. Empty when the file has none.
 	 */
 	resources?: ResourceSeries_Deserialize[],
+	/**
+	 *  `find_limit` only: each step's figures, the most the API sustained
+	 *  and, with a `capacity` section, the pods that means.
+	 */
+	limit?: LimitSearch_Deserialize | null,
 };
 
 export type LoadReport_Serialize = {
 	name: string,
 	summary: Summary_Serialize,
-	thresholds: ThresholdResult[],
+	thresholds: ThresholdResult_Serialize[],
 	/**
 	 *  The first failure of each step, with the request and response, so
 	 *  a failure count can be traced to a real exchange. Empty in reports
@@ -866,6 +1118,11 @@ export type LoadReport_Serialize = {
 	 *  `monitor` entry. Empty when the file has none.
 	 */
 	resources?: ResourceSeries_Serialize[],
+	/**
+	 *  `find_limit` only: each step's figures, the most the API sustained
+	 *  and, with a `capacity` section, the pods that means.
+	 */
+	limit?: LimitSearch_Serialize,
 };
 
 /**  An environment read from a file of its own. */
@@ -1326,6 +1583,130 @@ export type Severity =
 /**  The file cannot run. */
 "error";
 
+export type Sizing = Sizing_Serialize | Sizing_Deserialize;
+
+export type Sizing_Deserialize = {
+	/**  What it was sized for. */
+	capacity: Capacity_Deserialize,
+	/**  Requests per second one pod held at the sustained step. */
+	testedRpsPerPod: number | null,
+	/**
+	 *  The pod's CPU at that step, in percent of its cores. None without a
+	 *  monitor.
+	 */
+	testedCpu?: number | null,
+	/**
+	 *  The step the CPU was scaled from, an index in `steps`: the sustained
+	 *  one, or a lower one when the sustained one saturated the CPU.
+	 */
+	cpuStep?: number | null,
+	/**  The cores used to turn the API's CPU into a share of the pod. */
+	podCores: number | null,
+	/**  Requests per second one pod should take at the peak. */
+	usableRpsPerPod: number | null,
+	/**  The peak plus growth. */
+	designRps: number | null,
+	/**  Pods the traffic needs, before the spare ones. */
+	podsForTraffic: number,
+	/**  Including the spare pods: the answer. */
+	pods: number,
+	/**  Average latency at the sustained step, in milliseconds. */
+	latencyMs: number | null,
+	/**  Requests one pod has in flight at its usable rate (Little's law). */
+	inFlightPerPod: number | null,
+	/**  Requests all pods have in flight at the design rate. */
+	inFlightTotal: number | null,
+	/**  Pods the CPU needs, before the spare ones. */
+	podsByCpu: number,
+	/**
+	 *  Pods the memory needs, before the spare ones. None without
+	 *  `pod_memory_mb`, or when the steps say too little about memory
+	 *  (see `memory_note`).
+	 */
+	podsByMemory?: number | null,
+	/**
+	 *  A pod's memory that does not depend on load, in bytes, from the fit
+	 *  across the steps.
+	 */
+	fixedMemoryBytes?: number | null,
+	/**  The memory each request in flight adds, in bytes, from the fit. */
+	memoryPerRequestBytes?: number | null,
+	/**
+	 *  Why memory was not sized, or what to watch: too few steps with a
+	 *  memory reading, memory that did not grow with load, or a fixed part
+	 *  over the target already.
+	 */
+	memoryNote?: string | null,
+	/**
+	 *  How the usable rate was found: `cpu` (scaled to the target CPU),
+	 *  `latency` (CPU was below the target when a threshold broke, so the
+	 *  tested rate is the cap) or `assumed` (no CPU reading; the step is
+	 *  taken as saturated).
+	 */
+	basis: string,
+};
+
+export type Sizing_Serialize = {
+	/**  What it was sized for. */
+	capacity: Capacity_Serialize,
+	/**  Requests per second one pod held at the sustained step. */
+	testedRpsPerPod: number | null,
+	/**
+	 *  The pod's CPU at that step, in percent of its cores. None without a
+	 *  monitor.
+	 */
+	testedCpu?: number | null,
+	/**
+	 *  The step the CPU was scaled from, an index in `steps`: the sustained
+	 *  one, or a lower one when the sustained one saturated the CPU.
+	 */
+	cpuStep?: number,
+	/**  The cores used to turn the API's CPU into a share of the pod. */
+	podCores: number | null,
+	/**  Requests per second one pod should take at the peak. */
+	usableRpsPerPod: number | null,
+	/**  The peak plus growth. */
+	designRps: number | null,
+	/**  Pods the traffic needs, before the spare ones. */
+	podsForTraffic: number,
+	/**  Including the spare pods: the answer. */
+	pods: number,
+	/**  Average latency at the sustained step, in milliseconds. */
+	latencyMs: number | null,
+	/**  Requests one pod has in flight at its usable rate (Little's law). */
+	inFlightPerPod: number | null,
+	/**  Requests all pods have in flight at the design rate. */
+	inFlightTotal: number | null,
+	/**  Pods the CPU needs, before the spare ones. */
+	podsByCpu: number,
+	/**
+	 *  Pods the memory needs, before the spare ones. None without
+	 *  `pod_memory_mb`, or when the steps say too little about memory
+	 *  (see `memory_note`).
+	 */
+	podsByMemory?: number,
+	/**
+	 *  A pod's memory that does not depend on load, in bytes, from the fit
+	 *  across the steps.
+	 */
+	fixedMemoryBytes?: number | null,
+	/**  The memory each request in flight adds, in bytes, from the fit. */
+	memoryPerRequestBytes?: number | null,
+	/**
+	 *  Why memory was not sized, or what to watch: too few steps with a
+	 *  memory reading, memory that did not grow with load, or a fixed part
+	 *  over the target already.
+	 */
+	memoryNote?: string,
+	/**
+	 *  How the usable rate was found: `cpu` (scaled to the target CPU),
+	 *  `latency` (CPU was below the target when a threshold broke, so the
+	 *  tested rate is the cap) or `assumed` (no CPU reading; the step is
+	 *  taken as saturated).
+	 */
+	basis: string,
+};
+
 /**  One traced request from a load test. */
 export type SlowRequest = SlowRequest_Serialize | SlowRequest_Deserialize;
 
@@ -1682,6 +2063,8 @@ export type TestFile_Deserialize = {
 	 *  its CPU and memory beside the latency.
 	 */
 	monitor?: Monitor_Deserialize[],
+	/**  Production traffic to size for from a `find_limit` test's result. */
+	capacity?: Capacity_Deserialize | null,
 };
 
 export type TestFile_Serialize = {
@@ -1695,14 +2078,36 @@ export type TestFile_Serialize = {
 	 *  its CPU and memory beside the latency.
 	 */
 	monitor?: Monitor_Serialize[],
+	/**  Production traffic to size for from a `find_limit` test's result. */
+	capacity?: Capacity_Serialize,
 };
 
-export type ThresholdResult = {
+export type ThresholdResult = ThresholdResult_Serialize | ThresholdResult_Deserialize;
+
+export type ThresholdResult_Deserialize = {
 	/**  As written, like `p95 < 300ms`. */
 	threshold: string,
 	/**  In the threshold's unit: ms, percent or requests per second. */
 	actual: number | null,
 	passed: boolean,
+	/**
+	 *  Why it could not be measured, like a `cpu` threshold with no
+	 *  monitor. It fails then.
+	 */
+	note?: string | null,
+};
+
+export type ThresholdResult_Serialize = {
+	/**  As written, like `p95 < 300ms`. */
+	threshold: string,
+	/**  In the threshold's unit: ms, percent or requests per second. */
+	actual: number | null,
+	passed: boolean,
+	/**
+	 *  Why it could not be measured, like a `cpu` threshold with no
+	 *  monitor. It fails then.
+	 */
+	note?: string,
 };
 
 /**  How requests are grouped into traces. */
