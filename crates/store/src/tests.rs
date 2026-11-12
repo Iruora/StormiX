@@ -157,6 +157,8 @@ fn load(latency_ms: f64, failed: usize, seconds: u64) -> RunData {
         aborted: false,
         resources: Vec::new(),
         limit: None,
+        data: Vec::new(),
+        data_ran_out: false,
     })
 }
 

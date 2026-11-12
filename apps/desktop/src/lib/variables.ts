@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 
 import type { FlowResult, Step, TestFile } from "../bindings";
+import { dataColumns, dataRows, describePick } from "./data";
 
 /** What a `{{name}}` stands for, as far as the app can tell before sending. */
 export type VariableInfo = {
@@ -46,6 +47,19 @@ export function variableTable(
   for (const [name, value] of Object.entries(environment)) {
     const changed = sessionOnly?.has(name) ? ", changed for this session" : "";
     table.set(name, { value, source: `environment "${envName}"${changed}`, kind: "defined", origin: "environment" });
+  }
+  // Test data wins over the environment, as in a run.
+  for (const set of test?.data ?? []) {
+    const columns = dataColumns(set);
+    const first = dataRows(set)[0] ?? [];
+    const count = dataRows(set).length;
+    columns.forEach((name, i) => {
+      table.set(name, {
+        value: first[i] ?? null,
+        source: `test data: one of ${count} value${count === 1 ? "" : "s"}, ${describePick(set)}; a run once takes the first`,
+        kind: "defined",
+      });
+    });
   }
   // Disabled steps are not sent, so they set nothing.
   for (const step of (test?.flow.steps ?? []).filter((s) => s.enabled !== false)) {

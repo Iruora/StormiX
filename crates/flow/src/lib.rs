@@ -8,6 +8,7 @@
 //! optional load profile and the thresholds that decide pass or fail.
 
 mod capacity;
+mod data;
 mod duration;
 pub mod graphql;
 mod load;
@@ -19,6 +20,7 @@ mod threshold;
 mod validate;
 
 pub use capacity::{Capacity, Percent};
+pub use data::{parse_csv, DataSet, Per, Pick};
 pub use duration::{Duration, DurationError};
 pub use load::{LoadProfile, Stage};
 pub use model::{

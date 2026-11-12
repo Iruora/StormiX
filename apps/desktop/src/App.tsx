@@ -419,7 +419,7 @@ function TestFileView({
     yaml === undefined
       ? undefined
       : async (step) => {
-          const res = await commands.diagnoseStep(yaml, envVars, step);
+          const res = await commands.diagnoseStep(yaml, envVars, step, path);
           if (res.status === "error") throw new Error(res.error);
           return res.data;
         };
@@ -499,7 +499,7 @@ function TestFileView({
   // Steps left out of the last load test, by name, offered again next time.
   const [excluded, setExcluded] = useState<string[]>(ws.excluded);
   /** Saves changed load, threshold, monitor, tracing and cache settings, then runs the chosen steps. */
-  const startLoad = async ({ included, cache, load: profile, thresholds, trace, monitor, capacity }: LoadSetupChoice) => {
+  const startLoad = async ({ included, cache, load: profile, thresholds, trace, monitor, capacity, data }: LoadSetupChoice) => {
     const test = result?.test;
     if (!test) return;
     setSetupOpen(false);
@@ -515,13 +515,14 @@ function TestFileView({
       thresholds,
       monitor,
       capacity,
+      data,
       flow: {
         ...test.flow,
         trace,
         steps: cacheChanged ? test.flow.steps.map((s, i) => ({ ...s, cache: cache[i] })) : test.flow.steps,
       },
     };
-    if (cacheChanged || traceChanged || JSON.stringify([test.load, test.thresholds ?? [], test.monitor ?? [], test.capacity ?? null]) !== JSON.stringify([profile, thresholds, monitor, capacity])) {
+    if (cacheChanged || traceChanged || JSON.stringify([test.load, test.thresholds ?? [], test.monitor ?? [], test.capacity ?? null, test.data ?? []]) !== JSON.stringify([profile, thresholds, monitor, capacity, data])) {
       await editSteps(configured);
     }
     const steps = configured.flow.steps.filter((_, i) => included.includes(i));
@@ -1485,6 +1486,7 @@ function TestFileView({
         <LoadSetup
           test={result.test}
           excluded={excluded}
+          filePath={path}
           onRun={startLoad}
           onCancel={() => setSetupOpen(false)}
         />

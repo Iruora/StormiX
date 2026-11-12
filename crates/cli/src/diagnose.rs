@@ -22,11 +22,9 @@ pub struct DiagnoseArgs {
 
 /// Exit codes: 0 the request went through, 1 it failed somewhere, 2 it could not start.
 pub fn diagnose(args: DiagnoseArgs) -> Result<ExitCode, String> {
-    let Prepared {
-        source,
-        vars,
-        runner,
-    } = args.target.prepare(false, |_| Ok(()))?;
+    let prepared = args.target.prepare(false, |_| Ok(()))?;
+    let vars = prepared.once_vars();
+    let Prepared { source, runner, .. } = prepared;
     let flow = &source.test.flow;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

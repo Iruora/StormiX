@@ -9,11 +9,12 @@ Click **Load test** in the header. A setup dialog opens first, then the test run
 - **Endpoints**: every step of the flow, all selected, with a checkbox each and one to select or clear them all. Load test only the endpoints you care about; a warning shows when a selected step uses a variable that only a left-out step sets. Steps turned off in the flow are not listed. Your choice is kept in the [workspace](/app/workspaces) for next time.
 - **Cache**: turn a step's [response cache](/features/cache) on here to make it a prerequisite, such as a login run once before the load.
 - **Load profile**: constant rate, ramping rate with stages, or virtual users.
+- **Test data**: lists of values, such as user IDs, typed in or imported from a CSV file, that each iteration or virtual user picks from. See [Test data](/features/test-data).
 - **Thresholds**: such as `p95 < 300ms` or `errors < 1%`.
 - **Trace requests**: send a `traceparent` header for [APM tools](/features/tracing).
 - **API CPU and memory**: metrics endpoints of the API, such as `/actuator/prometheus`, to read its [CPU, memory and health](/features/api-resources) from during the test.
 
-The load profile and thresholds are saved into the test file. A file without a load profile starts from 10 iterations a second for 30 seconds. **Run** starts the test with the selected steps; **Cancel** closes the dialog.
+The load profile, test data and thresholds are saved into the test file. A file without a load profile starts from 10 iterations a second for 30 seconds. **Run** starts the test with the selected steps; **Cancel** closes the dialog.
 
 ## While it runs
 

@@ -21,7 +21,7 @@ export const commands = {
 	 *  checks each stage of its request: proxy, name lookup, connection, TLS and
 	 *  the response. Not saved to the run history.
 	 */
-	diagnoseStep: (text: string, variables: { [key in string]: string }, step: string) => typedError<Diagnosis_Serialize, string>(__TAURI_INVOKE("diagnose_step", { text, variables, step })),
+	diagnoseStep: (text: string, variables: { [key in string]: string }, step: string, source: string | null) => typedError<Diagnosis_Serialize, string>(__TAURI_INVOKE("diagnose_step", { text, variables, step, source })),
 	/**  The proxy requests go through. */
 	getProxy: () => __TAURI_INVOKE<ProxyChoice>("get_proxy"),
 	/**
@@ -103,6 +103,7 @@ export const commands = {
 	exportPostman: (yaml: string, environments: ExportEnvironment[], path: string) => typedError<string[], string>(__TAURI_INVOKE("export_postman", { yaml, environments, path })),
 	/**  Reads a test file the user picked. */
 	readTextFile: (path: string) => typedError<string, string>(__TAURI_INVOKE("read_text_file", { path })),
+	readCsvFile: (path: string) => typedError<CsvData, string>(__TAURI_INVOKE("read_csv_file", { path })),
 	/**  Saves the editor's text where the user chose. */
 	writeTextFile: (path: string, text: string) => typedError<null, string>(__TAURI_INVOKE("write_text_file", { path, text })),
 	/**  The visual editor works on the parsed file and writes YAML back. */
@@ -371,6 +372,114 @@ export type Connection_Serialize = {
 	 *  presented. A corporate issuer here means TLS inspection.
 	 */
 	certificate: Certificate | null,
+};
+
+/**
+ *  A CSV file's columns (its first line) and rows, to put into a test
+ *  file's `data`.
+ */
+export type CsvData = {
+	columns: string[],
+	rows: string[][],
+};
+
+/**
+ *  One list of values. Either a single `variable` with its `values`,
+ *  several variables together as `rows`, or a CSV `file` whose header row
+ *  names the variables. A run once takes the first row; a load test picks
+ *  rows as `pick` and `per` say.
+ */
+export type DataSet = DataSet_Serialize | DataSet_Deserialize;
+
+/**
+ *  One list of values. Either a single `variable` with its `values`,
+ *  several variables together as `rows`, or a CSV `file` whose header row
+ *  names the variables. A run once takes the first row; a load test picks
+ *  rows as `pick` and `per` say.
+ */
+export type DataSet_Deserialize = {
+	/**  The variable `values` fill. */
+	variable?: string | null,
+	/**  One value per row, for `variable`. */
+	values?: string[],
+	/**
+	 *  Rows of several variables that go together, like a user and their
+	 *  password.
+	 */
+	rows?: { [key in string]: string }[],
+	/**
+	 *  A CSV file, relative to the test file. Its first line names the
+	 *  variables.
+	 */
+	file?: string | null,
+	pick?: Pick,
+	per?: Per,
+};
+
+/**
+ *  One list of values. Either a single `variable` with its `values`,
+ *  several variables together as `rows`, or a CSV `file` whose header row
+ *  names the variables. A run once takes the first row; a load test picks
+ *  rows as `pick` and `per` say.
+ */
+export type DataSet_Serialize = {
+	/**  The variable `values` fill. */
+	variable?: string,
+	/**  One value per row, for `variable`. */
+	values?: string[],
+	/**
+	 *  Rows of several variables that go together, like a user and their
+	 *  password.
+	 */
+	rows?: { [key in string]: string }[],
+	/**
+	 *  A CSV file, relative to the test file. Its first line names the
+	 *  variables.
+	 */
+	file?: string,
+	pick?: Pick,
+	per?: Per,
+};
+
+/**  How one data set was used in a load test. */
+export type DataUse = DataUse_Serialize | DataUse_Deserialize;
+
+/**  How one data set was used in a load test. */
+export type DataUse_Deserialize = {
+	/**  The set's variables, or its file. */
+	label: string,
+	columns: string[],
+	rows: number,
+	pick: Pick,
+	per: Per,
+	/**  Rows handed out: one per iteration, or per user with `per: user`. */
+	picks: number | null,
+	/**  `pick: unique` only: every row was used, so the test ended early. */
+	ranOut?: boolean,
+	/**
+	 *  How often each row was picked, in file order. Left out for sets of
+	 *  more than [`MAX_ROW_COUNTS`] rows.
+	 */
+	counts?: RowCount[],
+};
+
+/**  How one data set was used in a load test. */
+export type DataUse_Serialize = {
+	/**  The set's variables, or its file. */
+	label: string,
+	columns: string[],
+	rows: number,
+	pick: Pick,
+	per: Per,
+	/**  Rows handed out: one per iteration, or per user with `per: user`. */
+	picks: number | null,
+	/**  `pick: unique` only: every row was used, so the test ended early. */
+	ranOut?: boolean,
+	/**
+	 *  How often each row was picked, in file order. Left out for sets of
+	 *  more than [`MAX_ROW_COUNTS`] rows.
+	 */
+	counts?: RowCount[],
 };
 
 /**  Where a request fails, stage by stage. */
@@ -1083,6 +1192,16 @@ export type LoadReport_Deserialize = {
 	 *  and, with a `capacity` section, the pods that means.
 	 */
 	limit?: LimitSearch_Deserialize | null,
+	/**
+	 *  How each test data set was used: rows picked, and how often each
+	 *  row was. Empty when the file has no `data`.
+	 */
+	data?: DataUse_Deserialize[],
+	/**
+	 *  A `pick: unique` data set used every row, so the test ended before
+	 *  the profile did. Not a stop: the thresholds still decide.
+	 */
+	dataRanOut?: boolean,
 };
 
 export type LoadReport_Serialize = {
@@ -1123,6 +1242,16 @@ export type LoadReport_Serialize = {
 	 *  and, with a `capacity` section, the pods that means.
 	 */
 	limit?: LimitSearch_Serialize,
+	/**
+	 *  How each test data set was used: rows picked, and how often each
+	 *  row was. Empty when the file has no `data`.
+	 */
+	data?: DataUse_Serialize[],
+	/**
+	 *  A `pick: unique` data set used every row, so the test ended before
+	 *  the profile did. Not a stop: the thresholds still decide.
+	 */
+	dataRanOut?: boolean,
 };
 
 /**  An environment read from a file of its own. */
@@ -1289,6 +1418,29 @@ export type Payload = {
 	/**  Not UTF-8; `text` only describes it. */
 	binary: boolean,
 };
+
+/**  When a new row is picked. */
+export type Per = 
+/**  Every iteration of the flow gets its own row. */
+"iteration" | 
+/**
+ *  `virtual_users` only: each user picks a row when it starts and
+ *  keeps it for all its iterations. Under the other load profiles
+ *  every iteration is a new user, so this is the same as `iteration`.
+ */
+"user";
+
+/**  How rows are chosen. */
+export type Pick = 
+/**  Any row, at random each time; rows repeat. */
+"random" | 
+/**  The rows in order, starting over after the last. */
+"sequential" | 
+/**
+ *  Each row once, in order. Once every row has been used the load
+ *  test starts no more iterations and ends early.
+ */
+"unique";
 
 /**  Which proxy requests go through. */
 export type ProxyChoice = 
@@ -1467,6 +1619,12 @@ export type ResponseRecord_Serialize = {
 	statusText: string,
 	headers: HeaderPair[],
 	body: Payload | null,
+};
+
+export type RowCount = {
+	/**  The row's values, in column order. */
+	values: string[],
+	count: number | null,
 };
 
 /**
@@ -2057,6 +2215,12 @@ export type TestFile_Deserialize = {
 	flow: Flow_Deserialize,
 	/**  Without a load profile the flow runs once, as a functional test. */
 	load?: LoadProfile_Deserialize | null,
+	/**
+	 *  Lists of values that fill variables differently from one load test
+	 *  iteration (or virtual user) to the next. A run once takes the first
+	 *  row of each.
+	 */
+	data?: DataSet_Deserialize[],
 	thresholds?: string[],
 	/**
 	 *  Metrics endpoints the API serves, read during a load test to show
@@ -2072,6 +2236,12 @@ export type TestFile_Serialize = {
 	flow: Flow_Serialize,
 	/**  Without a load profile the flow runs once, as a functional test. */
 	load?: LoadProfile_Serialize,
+	/**
+	 *  Lists of values that fill variables differently from one load test
+	 *  iteration (or virtual user) to the next. A run once takes the first
+	 *  row of each.
+	 */
+	data?: DataSet_Serialize[],
 	thresholds?: string[],
 	/**
 	 *  Metrics endpoints the API serves, read during a load test to show

@@ -149,6 +149,7 @@ pub fn from_dir_with_progress(
                 trace: None,
             },
             load: None,
+            data: Vec::new(),
             thresholds: Vec::new(),
             monitor: Vec::new(),
             capacity: None,

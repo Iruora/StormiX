@@ -43,6 +43,15 @@ const KEYS: Record<string, Key[]> = {
     { label: "thresholds", info: "Pass/fail rules under load, like `p95 < 300ms`" },
     { label: "monitor", info: "Metrics endpoints to read the API's CPU and memory from during a load test" },
     { label: "capacity", info: "Production traffic to size pods for from a find_limit test" },
+    { label: "data", info: "Test data: lists of values each load test iteration or user picks from, used as {{name}}" },
+  ],
+  "data/[]": [
+    { label: "variable", info: "The variable `values` fill, used as {{name}}" },
+    { label: "values", info: "One value per row, like [user-1, user-2]" },
+    { label: "rows", info: "Rows of several variables, like - { user: a, password: x }" },
+    { label: "file", info: "A CSV file next to the test file; its first line names the variables" },
+    { label: "pick", info: "random (default), sequential (in order, starting over) or unique (each once, then the test ends)", value: "random" },
+    { label: "per", info: "iteration (default): a new row each run of the flow; user: each virtual user keeps one", value: "iteration" },
   ],
   capacity: [
     { label: "peak_rps", info: "Requests per second at the production peak, all pods together" },
@@ -174,6 +183,8 @@ const VALUES: Record<string, string[]> = {
   "flow/steps/[]/enabled": ["true", "false"],
   "flow/steps/[]/cache": ["true", "false"],
   "flow/trace": ["request", "flow"],
+  "data/[]/pick": ["random", "sequential", "unique"],
+  "data/[]/per": ["iteration", "user"],
   "flow/steps/[]/request/body/graphql/allow_errors": ["true", "false"],
   version: ["1"],
 };

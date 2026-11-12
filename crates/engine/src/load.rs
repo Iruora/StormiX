@@ -10,14 +10,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use stormix_flow::{Capacity, Flow, LoadProfile, Metric, Monitor, Threshold};
+use stormix_flow::{Capacity, Flow, LoadProfile, Metric, Monitor, Per, Threshold};
 use stormix_metrics::{check_thresholds, Recorder, Sample, Second, Summary, ThresholdResult};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 
 use crate::capacity::{self, LimitSearch, LimitStep};
 use crate::monitor::{self, ResourceSeries};
-use crate::{Exchanges, FlowResult, Runner, StepResult, Variables};
+use crate::{DataFeed, DataUse, Exchanges, FlowResult, Row, Runner, StepResult, Variables};
 
 #[derive(Debug, Clone)]
 pub struct LoadOptions {
@@ -37,6 +37,9 @@ pub struct LoadOptions {
     /// `find_limit` only: the production traffic to size pods for, from
     /// the test file's `capacity` section.
     pub capacity: Option<Capacity>,
+    /// The test file's `data` sets, read with [`DataFeed::load`]: each
+    /// iteration (or virtual user) gets rows from them, over `overrides`.
+    pub data: Arc<DataFeed>,
 }
 
 impl Default for LoadOptions {
@@ -48,6 +51,7 @@ impl Default for LoadOptions {
             stop_grace: Duration::from_secs(3),
             monitor: Vec::new(),
             capacity: None,
+            data: Arc::default(),
         }
     }
 }
@@ -140,6 +144,14 @@ pub struct LoadReport {
     /// and, with a `capacity` section, the pods that means.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<LimitSearch>,
+    /// How each test data set was used: rows picked, and how often each
+    /// row was. Empty when the file has no `data`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub data: Vec<DataUse>,
+    /// A `pick: unique` data set used every row, so the test ended before
+    /// the profile did. Not a stop: the thresholds still decide.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub data_ran_out: bool,
 }
 
 /// One traced request from a load test.
@@ -186,9 +198,10 @@ pub async fn run_load(
     mut on_second: impl FnMut(&Progress<'_>),
 ) -> LoadReport {
     let stop = &options.stop;
+    let first = with_row(overrides, &options.data.first_row());
     let setup = match setup_flow(flow) {
         Some(prefix) => tokio::select! {
-            result = runner.run(&prefix, overrides) => result.steps,
+            result = runner.run(&prefix, &first) => result.steps,
             // The driver sees the stop too and starts nothing.
             () = stop.stopped() => Vec::new(),
         },
@@ -198,6 +211,7 @@ pub async fn run_load(
         runner: runner.keeping(Exchanges::FailedOnly),
         flow: flow.clone(),
         overrides: overrides.clone(),
+        data: options.data.clone(),
         active: AtomicU32::new(0),
     });
     let total: Duration = profile.total_duration().into();
@@ -365,7 +379,16 @@ pub async fn run_load(
         aborted,
         resources,
         limit,
+        data: options.data.usage(),
+        data_ran_out: outcome.ran_out,
     }
+}
+
+/// `vars` with `row` over it.
+fn with_row(vars: &Variables, row: &Row) -> Variables {
+    let mut vars = vars.clone();
+    vars.extend(row.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    vars
 }
 
 /// Measures each `find_limit` step on its own and checks the thresholds
@@ -564,14 +587,22 @@ struct Shared {
     runner: Runner,
     flow: Flow,
     overrides: Variables,
+    data: Arc<DataFeed>,
     /// Iterations running right now.
     active: AtomicU32,
 }
 
 impl Shared {
-    async fn iteration(&self) -> FlowResult {
+    /// Runs the flow once with `row`, a pick of test data, over the overrides.
+    async fn iteration(&self, row: &Row) -> FlowResult {
         self.active.fetch_add(1, Ordering::Relaxed);
-        let result = self.runner.run(&self.flow, &self.overrides).await;
+        let result = if row.is_empty() {
+            self.runner.run(&self.flow, &self.overrides).await
+        } else {
+            self.runner
+                .run(&self.flow, &with_row(&self.overrides, row))
+                .await
+        };
         self.active.fetch_sub(1, Ordering::Relaxed);
         result
     }
@@ -582,6 +613,8 @@ struct Outcome {
     dropped: u32,
     interrupted: u32,
     aborted: bool,
+    /// A `unique` data set ran out of rows.
+    ran_out: bool,
 }
 
 /// Starts iterations until the profile ends or the test is stopped, then
@@ -598,6 +631,9 @@ async fn drive(
     let stop = &options.stop;
     let mut tasks = JoinSet::new();
     let mut dropped = 0;
+    // Set when a `unique` data set has no rows left: nothing new starts and
+    // running iterations finish as at the planned end.
+    let ran_out = StopSignal::default();
 
     match &profile {
         _ if stop.is_stopped() => {}
@@ -606,10 +642,21 @@ async fn drive(
         } => {
             let think: Duration = think_time.map(Into::into).unwrap_or_default();
             for _ in 0..*count {
-                let (shared, tx, stop) = (shared.clone(), tx.clone(), stop.clone());
+                // A `per: user` row stays with the user; with `unique`,
+                // users beyond the rows do not start.
+                let Some(user_row) = shared.data.pick(Some(Per::User)) else {
+                    break;
+                };
+                let (shared, tx, stop, ran_out) =
+                    (shared.clone(), tx.clone(), stop.clone(), ran_out.clone());
                 tasks.spawn(async move {
-                    while Instant::now() < deadline && !stop.is_stopped() {
-                        let result = shared.iteration().await;
+                    while Instant::now() < deadline && !stop.is_stopped() && !ran_out.is_stopped() {
+                        let Some(mut row) = shared.data.pick(Some(Per::Iteration)) else {
+                            ran_out.stop();
+                            return;
+                        };
+                        row.extend(user_row.iter().cloned());
+                        let result = shared.iteration(&row).await;
                         if tx.send(result).is_err() {
                             return;
                         }
@@ -628,12 +675,13 @@ async fn drive(
             tokio::select! {
                 () = tokio::time::sleep_until(deadline.into()) => {}
                 () = stop.stopped() => {}
+                () = ran_out.stopped() => {}
             }
         }
         open => {
             let schedule = Schedule::new(open);
             let mut due_started = 0u64;
-            while !stop.is_stopped() {
+            'start: while !stop.is_stopped() {
                 let t = started.elapsed().min(total);
                 while tasks.try_join_next().is_some() {}
                 // Rounded a hair up, so float error cannot lose the last one.
@@ -644,9 +692,15 @@ async fn drive(
                         dropped += 1;
                         continue;
                     }
+                    // Every iteration is a new user here, so `per: user`
+                    // sets are picked each time too.
+                    let Some(row) = shared.data.pick(None) else {
+                        ran_out.stop();
+                        break 'start;
+                    };
                     let (shared, tx) = (shared.clone(), tx.clone());
                     tasks.spawn(async move {
-                        let _ = tx.send(shared.iteration().await);
+                        let _ = tx.send(shared.iteration(&row).await);
                     });
                 }
                 if t >= total {
@@ -700,6 +754,7 @@ async fn drive(
         dropped,
         interrupted,
         aborted,
+        ran_out: ran_out.is_stopped(),
     }
 }
 

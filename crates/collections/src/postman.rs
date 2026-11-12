@@ -63,6 +63,7 @@ pub fn from_json(text: &str) -> Result<Imported, ImportError> {
                 trace: None,
             },
             load: None,
+            data: Vec::new(),
             thresholds: Vec::new(),
             monitor: Vec::new(),
             capacity: None,

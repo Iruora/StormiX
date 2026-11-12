@@ -1065,3 +1065,126 @@ load:
     assert_eq!(limit.sustained, None);
     assert!(!report.passed());
 }
+
+/// Serves `/user/{id}`, counting the requests for each ID.
+async fn serve_users() -> (
+    String,
+    std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, u32>>>,
+) {
+    use std::sync::{Arc, Mutex};
+    let hits: Arc<Mutex<std::collections::BTreeMap<String, u32>>> = Arc::default();
+    let seen = hits.clone();
+    let app = Router::new().route(
+        "/user/{id}",
+        get(
+            move |axum::extract::Path(id): axum::extract::Path<String>| {
+                let seen = seen.clone();
+                async move {
+                    *seen.lock().unwrap().entry(id).or_default() += 1;
+                    "ok"
+                }
+            },
+        ),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (format!("http://{addr}"), hits)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_virtual_user_keeps_the_row_it_picked() {
+    let (url, hits) = serve_users().await;
+    let test = test_file(
+        r#"
+flow:
+  name: users
+  steps:
+    - name: user
+      request: { method: GET, url: "{{base}}/user/{{userId}}" }
+load:
+  virtual_users: { count: 5, duration: 1s, think_time: 100ms }
+data:
+  - variable: userId
+    values: [user-1, user-2]
+    pick: sequential
+    per: user
+"#,
+    );
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let options = LoadOptions {
+        data: std::sync::Arc::new(stormix_engine::DataFeed::load(&test.data, None).unwrap()),
+        ..LoadOptions::default()
+    };
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(&url),
+        test.load.as_ref().unwrap(),
+        &[],
+        &options,
+        |_| {},
+    )
+    .await;
+    // Users 1, 3 and 5 take user-1; users 2 and 4 take user-2.
+    let data = &report.data[0];
+    assert_eq!(data.picks, 5);
+    let counts: Vec<u64> = data.counts.iter().map(|c| c.count).collect();
+    assert_eq!(counts, [3, 2]);
+    let hits = hits.lock().unwrap().clone();
+    assert_eq!(hits.keys().collect::<Vec<_>>(), ["user-1", "user-2"]);
+    // Each user loops on its own ID, so user-1 gets about 3/5 of the traffic.
+    let total = hits.values().sum::<u32>() as f64;
+    let share = f64::from(hits["user-1"]) / total;
+    assert!((0.5..0.7).contains(&share), "{hits:?}");
+    assert_eq!(report.summary.failed_requests, 0);
+    assert!(!report.data_ran_out);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unique_data_ends_the_test_when_every_row_is_used() {
+    let (url, hits) = serve_users().await;
+    let test = test_file(
+        r#"
+flow:
+  name: users
+  steps:
+    - name: user
+      request: { method: GET, url: "{{base}}/user/{{userId}}" }
+load:
+  constant_rate: { rate: 50, duration: 5s }
+data:
+  - variable: userId
+    values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    pick: unique
+"#,
+    );
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let options = LoadOptions {
+        data: std::sync::Arc::new(stormix_engine::DataFeed::load(&test.data, None).unwrap()),
+        ..LoadOptions::default()
+    };
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(&url),
+        test.load.as_ref().unwrap(),
+        &thresholds(&["errors < 1%"]),
+        &options,
+        |_| {},
+    )
+    .await;
+    assert_eq!(report.summary.iterations, 10);
+    assert!(report.data_ran_out);
+    assert!(report.data[0].ran_out);
+    assert!(!report.aborted);
+    assert!(report.passed(), "{:?}", report.thresholds);
+    assert!(
+        report.summary.duration_ms < 2000.0,
+        "{}",
+        report.summary.duration_ms
+    );
+    let hits = hits.lock().unwrap().clone();
+    assert_eq!(hits.len(), 10);
+    assert!(hits.values().all(|&n| n == 1), "{hits:?}");
+}
