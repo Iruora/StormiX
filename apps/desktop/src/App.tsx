@@ -432,13 +432,15 @@ function TestFileView({
   // Set once this view is left, so a load test still starting up never begins.
   const left = useRef(false);
   const load = useMutation({
-    mutationFn: async (yaml: string) => {
-      ranFrom.current.load = path;
+    // `from`: the file the YAML's linked CSV files are relative to. A replay
+    // passes the first run's, which Save As may since have moved.
+    mutationFn: async ({ yaml, from }: { yaml: string; from: string | null }) => {
+      ranFrom.current.load = from;
       setPoints([]);
       const unlisten = await events.loadProgress.listen((e) => setPoints((p) => [...p, e.payload]));
       try {
         if (left.current) throw new Error("the workspace was closed before the load test started");
-        const res = await commands.runLoadTest(yaml, envVars, path);
+        const res = await commands.runLoadTest(yaml, envVars, from);
         if (res.status === "error") throw new Error(res.error);
         return res.data;
       } finally {
@@ -535,14 +537,14 @@ function TestFileView({
     const yaml = await commands.testFileToYaml({ ...configured, flow: { ...configured.flow, steps } } as TestFile_Deserialize);
     run.reset();
     panel.setOpen(true);
-    load.mutate(yaml);
+    load.mutate({ yaml, from: path });
   };
   /** Runs the last load test again: the same steps, load profile and thresholds. */
   const replayLoad = () => {
-    const yaml = load.variables;
-    if (!yaml || busy || fileBusy || !load.data) return;
+    const last = load.variables;
+    if (!last || busy || fileBusy || !load.data) return;
     panel.setOpen(true);
-    load.mutate(yaml);
+    load.mutate(last);
   };
   /** Adds environments, replacing ones with the same name, and picks `select`. */
   const addEnvs = (added: Record<string, Env>, select: string | null) => {
@@ -688,7 +690,7 @@ function TestFileView({
       // Linked CSV files are relative to the test file: keep them pointing at
       // the same files. Read from the text being saved, not the last
       // validation, which may lag behind the latest edit.
-      const current = source.includes("file:") ? (await commands.validateTestFile(source)).test : null;
+      const current = (await commands.validateTestFile(source)).test;
       const rebased = current && rebaseLinkedFiles(current.data ?? [], path, at);
       const text = rebased ? await commands.testFileToYaml({ ...current, data: rebased } as TestFile_Deserialize) : source;
       const res = await showing({ label: "Saving", detail: at }, () => commands.writeTextFile(at, text));
@@ -1155,7 +1157,7 @@ function TestFileView({
       {load.data && !load.isPending && (
         <LoadResult
           report={load.data}
-          diagnose={diagnoseIn(load.variables, ranFrom.current.load)}
+          diagnose={diagnoseIn(load.variables?.yaml, ranFrom.current.load)}
           onReplay={busy || fileBusy ? undefined : replayLoad}
         />
       )}
