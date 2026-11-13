@@ -54,15 +54,17 @@ export function CopyCurlButton({ step, variant }: { step: Step; variant: "icon" 
       if (!noteRef.current?.contains(t) && !buttonRef.current?.contains(t)) close();
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    // Scrolling a long note itself keeps it open.
+    const onScroll = (e: Event) => !noteRef.current?.contains(e.target as Node) && close();
     const timer = window.setInterval(() => !hovered.current && close(), 8000);
     window.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", close, true);
+    window.addEventListener("scroll", onScroll, true);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener("pointerdown", onDown);
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("scroll", onScroll, true);
     };
   }, [open, copied]);
 
