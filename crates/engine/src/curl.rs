@@ -59,9 +59,15 @@ pub fn curl_command(step: &Step, vars: &Variables, shell: Shell) -> CurlCommand 
     // `--data-raw` sends the text as is; `--form-string` never reads a file
     // for a value starting with `@` or `<`, unlike `-F`.
     let mut data: Vec<(&str, String)> = Vec::new();
+    let mut drop_content_type = false;
     match &outgoing.body {
         OutBody::None => {}
-        OutBody::Raw(text) => data.push(("--data-raw", render(text, &mut missing))),
+        OutBody::Raw(text) => {
+            data.push(("--data-raw", render(text, &mut missing)));
+            // A run sends raw text with no `Content-Type` unless the step sets
+            // one; `--data-raw` alone would add a form one.
+            drop_content_type = !has_content_type;
+        }
         OutBody::Json(value) => {
             json_default();
             data.push((
@@ -118,12 +124,21 @@ pub fn curl_command(step: &Step, vars: &Variables, shell: Shell) -> CurlCommand 
     let q = |text: &str| quote(text, shell);
     let mut parts = vec![match method.as_str() {
         "GET" if data.is_empty() => format!("curl {}", q(&url)),
+        // With a body curl sends POST by itself and, like a run, switches to
+        // GET on a 301, 302 or 303; `-X POST` would keep POST.
+        "POST" if !data.is_empty() => format!("curl {}", q(&url)),
         // `-X HEAD` waits for a body that never comes.
         "HEAD" => format!("curl --head {}", q(&url)),
         _ => format!("curl -X {method} {}", q(&url)),
     }];
+    // Brackets and braces in a URL, as in `?filter[status]=on`, are sent as
+    // written rather than read as curl ranges.
+    parts.push("--globoff".into());
     for (name, value) in &headers {
         parts.push(format!("-H {}", q(&format!("{name}: {value}"))));
+    }
+    if drop_content_type {
+        parts.push(format!("-H {}", q("Content-Type:")));
     }
     for (flag, value) in &data {
         parts.push(format!("{flag} {}", q(value)));
@@ -157,7 +172,18 @@ fn quote_cmd(text: &str) -> String {
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
-            '\\' => out.push_str("\\\\"),
+            // Backslashes are literal to the argument parser unless a quote
+            // follows them, including the closing one.
+            '\\' => {
+                let mut run = 1;
+                while chars.peek() == Some(&'\\') {
+                    chars.next();
+                    run += 1;
+                }
+                let before_quote = matches!(chars.peek(), Some('"') | None);
+                let n = if before_quote { run * 2 } else { run };
+                out.push_str(&"\\".repeat(n));
+            }
             '"' => out.push_str("\\^\""),
             '%' => {
                 out.push('%');
@@ -240,7 +266,7 @@ request:
         );
         assert_eq!(
             out.command,
-            "curl 'https://api.test/users/42?q={{query}}' \\\n  -H 'Authorization: Bearer s3cr'\\''et' \\\n  --location"
+            "curl 'https://api.test/users/42?q={{query}}' \\\n  --globoff \\\n  -H 'Authorization: Bearer s3cr'\\''et' \\\n  --location"
         );
         assert_eq!(out.missing, ["query"]);
         assert!(out.notes.is_empty());
@@ -264,7 +290,7 @@ request:
         );
         assert_eq!(
             out.command,
-            "curl -X POST 'https://api.test/items' \\\n  -H 'Content-Type: application/json' \\\n  --data-raw '{\"id\":\"42\",\"n\":3}' \\\n  --location"
+            "curl 'https://api.test/items' \\\n  --globoff \\\n  -H 'Content-Type: application/json' \\\n  --data-raw '{\"id\":\"42\",\"n\":3}' \\\n  --location"
         );
     }
 
@@ -352,6 +378,38 @@ scripts:
     }
 
     #[test]
+    fn raw_body_without_content_type_sends_none() {
+        let out = curl_command(
+            &step(
+                r#"
+name: r
+request:
+  method: PATCH
+  url: "{{base}}/items?filter[status]=on"
+  body: { raw: "id={{id}}" }
+"#,
+            ),
+            &vars(),
+            Shell::Posix,
+        );
+        assert_eq!(
+            out.command,
+            "curl -X PATCH 'https://api.test/items?filter[status]=on' \\\n  --globoff \\\n  -H 'Content-Type:' \\\n  --data-raw 'id=42' \\\n  --location"
+        );
+    }
+
+    #[test]
+    fn cmd_backslashes_reach_curl_unchanged() {
+        // Literal unless a quote follows: then doubled, with the quote escaped.
+        assert_eq!(quote_cmd(r"C:\dir\f"), r#"^"C:\dir\f^""#);
+        assert_eq!(
+            quote_cmd(r#"{"a":"x\"y\\"}"#),
+            r#"^"^{\^"a\^":\^"x\\\^"y\\\\\^"^}^""#
+        );
+        assert_eq!(quote_cmd(r"ends\"), r#"^"ends\\^""#);
+    }
+
+    #[test]
     fn cmd_quoting() {
         assert_eq!(quote_cmd(r#"{"a":"b"}"#), r#"^"^{\^"a\^":\^"b\^"^}^""#);
         assert_eq!(quote_cmd("100%path & %1"), "^\"100%^path ^& %^1^\"");
@@ -367,7 +425,7 @@ request: { method: DELETE, url: "{{base}}/x?a=1&b=2" }
         );
         assert_eq!(
             out.command,
-            "curl -X DELETE ^\"https://api.test/x?a=1^&b=2^\" ^\n  --location"
+            "curl -X DELETE ^\"https://api.test/x?a=1^&b=2^\" ^\n  --globoff ^\n  --location"
         );
     }
 }

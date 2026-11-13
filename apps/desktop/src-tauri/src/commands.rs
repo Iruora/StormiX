@@ -518,10 +518,9 @@ pub async fn step_as_curl(
     let mut vars = Variables::new();
     vars.extend(test.flow.variables.clone());
     vars.extend(variables);
-    // A CSV that cannot be read only leaves its variables unfilled.
-    if let Ok(feed) = data_feed(&test, source.as_deref()).await {
-        vars.extend(feed.first_row());
-    }
+    // A data file that cannot be read is an error, as in a run, rather than
+    // a command quietly holding other values for its variables.
+    vars.extend(data_feed(&test, source.as_deref()).await?.first_row());
     vars.extend(extracted);
     Ok(curl_command(&step, &vars, shell))
 }

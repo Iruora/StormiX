@@ -95,7 +95,7 @@ export function CopyCurlButton({ step, variant }: { step: Step; variant: "icon" 
           onPointerEnter={() => (hovered.current = true)}
           onPointerLeave={() => (hovered.current = false)}
           style={placeBelow(copied?.at ?? buttonRef.current?.getBoundingClientRect())}
-          className="fixed z-[60] w-80 max-w-[calc(100vw-1rem)] space-y-1.5 rounded-md border border-line bg-surface px-2.5 py-2 text-xs shadow-lg"
+          className="fixed z-[60] w-80 max-w-[calc(100vw-1rem)] space-y-1.5 overflow-y-auto rounded-md border border-line bg-surface px-2.5 py-2 text-xs shadow-lg"
         >
           {error ? (
             <div className="flex items-start gap-1.5 text-bad">
@@ -159,10 +159,17 @@ function CopiedNote({ copied, onOther }: { copied: Copied; onOther: (shell: Shel
   );
 }
 
-/** Under the button, kept inside the window. */
+/**
+ * Under the button, or above it when there is more room there, kept inside
+ * the window; a long note scrolls.
+ */
 function placeBelow(at: DOMRect | undefined): React.CSSProperties {
   if (!at) return { display: "none" };
   const width = Math.min(320, window.innerWidth - 16);
   const left = Math.max(8, Math.min(at.right - width, window.innerWidth - width - 8));
-  return { top: at.bottom + 6, left };
+  const below = window.innerHeight - at.bottom - 14;
+  const above = at.top - 14;
+  return below >= 160 || below >= above
+    ? { top: at.bottom + 6, left, maxHeight: below }
+    : { bottom: window.innerHeight - at.top + 6, left, maxHeight: above };
 }

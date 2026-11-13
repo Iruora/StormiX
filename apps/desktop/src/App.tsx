@@ -356,6 +356,8 @@ function TestFileView({
     ws.tab === "flow" || ws.tab === "yaml" ? ws.tab : "steps",
   );
   const [lastRun, setLastRun] = useState<FlowResult | null>(null);
+  // The file the last run came from, so another file's values stay out of Copy as cURL.
+  const [lastRunPath, setLastRunPath] = useState<string | null>(null);
   // What the steps editor shows while its YAML is being written.
   const [draft, setDraft] = useState<TestFile | null>(null);
   const writes = useRef(0);
@@ -413,7 +415,10 @@ function TestFileView({
       }
     },
     // Kept past edits, so hovering a variable a step extracts shows its last value.
-    onSuccess: (data) => setLastRun(data),
+    onSuccess: (data) => {
+      setLastRun(data);
+      setLastRunPath(ranFrom.current.run);
+    },
     onSettled: () => {
       client.invalidateQueries({ queryKey: RUNS_KEY });
       client.invalidateQueries({ queryKey: CACHE_KEY });
@@ -575,13 +580,13 @@ function TestFileView({
       shown && {
         secrets: env?.secrets ?? [],
         make: async (step, shell) => {
-          const extracted = extractedBefore(lastRun, step.name);
+          const extracted = lastRunPath === path ? extractedBefore(lastRun, step.name) : {};
           const res = await commands.stepAsCurl(shown, step, envVars, extracted, path, shell);
           if (res.status === "error") throw new Error(res.error);
           return res.data;
         },
       },
-    [shown, env, envVars, lastRun, path],
+    [shown, env, envVars, lastRun, lastRunPath, path],
   );
   /**
    * Clears results that no longer match the file. A run still going is kept:
