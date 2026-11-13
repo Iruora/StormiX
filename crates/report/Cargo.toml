@@ -8,8 +8,6 @@ license.workspace = true
 
 [dependencies]
 stormix-engine.workspace = true
+stormix-flow.workspace = true
 stormix-metrics.workspace = true
 
-
-[dev-dependencies]
-stormix-flow.workspace = true

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Capacity, Flow, LoadProfile, Monitor, Threshold};
+use crate::{Capacity, DataSet, Flow, LoadProfile, Monitor, Threshold};
 
 /// The only format version so far. A file with a newer one is refused rather
 /// than half-read.
@@ -17,6 +17,11 @@ pub struct TestFile {
     /// Without a load profile the flow runs once, as a functional test.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub load: Option<LoadProfile>,
+    /// Lists of values that fill variables differently from one load test
+    /// iteration (or virtual user) to the next. A run once takes the first
+    /// row of each.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub data: Vec<DataSet>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "specta", specta(type = Vec<String>))]
     pub thresholds: Vec<Threshold>,
@@ -187,6 +192,35 @@ thresholds:
         );
         let err = TestFile::from_yaml(&bad).unwrap_err().to_string();
         assert!(err.starts_with("flow.trace:"), "{err}");
+    }
+
+    #[test]
+    fn test_data_round_trips() {
+        use crate::{Per, Pick};
+        let yaml = format!(
+            "{LOGIN}data:\n  - variable: userId\n    values: [1, user-2, true]\n  - rows:\n      - {{ user: a, password: 1 }}\n    pick: sequential\n  - file: users.csv\n    pick: unique\n    per: user\n"
+        );
+        let file = TestFile::from_yaml(&yaml).unwrap();
+        assert_eq!(file.data.len(), 3);
+        assert_eq!(file.data[0].values, ["1", "user-2", "true"]);
+        assert_eq!(file.data[0].pick, Pick::Random);
+        assert_eq!(file.data[1].rows[0]["password"], "1");
+        assert_eq!(file.data[1].pick, Pick::Sequential);
+        assert_eq!(
+            (file.data[2].pick, file.data[2].per),
+            (Pick::Unique, Per::User)
+        );
+        let written = file.to_yaml();
+        assert!(!written.contains("pick: random"), "{written}");
+        assert!(!written.contains("per: iteration"), "{written}");
+        assert_eq!(TestFile::from_yaml(&written).unwrap(), file);
+        assert!(!TestFile::from_yaml(LOGIN)
+            .unwrap()
+            .to_yaml()
+            .contains("data"));
+        let bad = format!("{LOGIN}data:\n  - variable: id\n    values: [[1]]\n");
+        let err = TestFile::from_yaml(&bad).unwrap_err().to_string();
+        assert!(err.starts_with("data[0].values"), "{err}");
     }
 
     #[test]

@@ -223,7 +223,8 @@ Each `pm.test` or `test` becomes a check with that name. Scripts run sandboxed, 
 1. The flow's `variables`
 2. An environment: `--env FILE` on the CLI, or the environment picked in the app
 3. `--var NAME=VALUE` on the CLI
-4. Values that earlier steps extract or scripts set
+4. [Test data](#data): the row an iteration picked (the first row in a run once)
+5. Values that earlier steps extract or scripts set
 
 These are generated fresh each time they are used:
 
@@ -277,6 +278,33 @@ A threshold is `<metric> <operator> <value>`. The operator is `<`, `<=`, `>` or 
 | `cpu` | The API's average CPU from a [`monitor`](#monitor), in percent where 100% is one core | `cpu < 80%` |
 
 Thresholds apply only under load. A `cpu` threshold fails when no monitor read the CPU. Under `find_limit` each step is checked on its own (`rps` thresholds only at the end). `stormix load --threshold "p95 < 300ms"` adds one from the command line.
+
+## `data`
+
+Lists of values that fill variables differently from one load test iteration, or virtual user, to the next, such as user IDs. Each entry is one list:
+
+```yaml
+data:
+  - variable: userId          # one variable and its values
+    values: [user-1, user-2, user-3]
+  - rows:                     # several variables that go together
+      - { user: ada, password: x1 }
+      - { user: grace, password: x2 }
+    pick: sequential
+    per: user
+  - file: products.csv        # a CSV file next to this one; its first line names the variables
+    pick: unique
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `variable` + `values` | | One variable and its values; numbers are read as text |
+| `rows` | | Rows of several variables, picked together |
+| `file` | | A CSV file, relative to the test file |
+| `pick` | `random` | `random`: any row each time. `sequential`: in order, starting over. `unique`: each row once, then the test ends early |
+| `per` | `iteration` | `iteration`: a new row for every run of the flow. `user`: each `virtual_users` user keeps the row it picked first |
+
+A run once uses the first row of each list. See [Test data](/features/test-data).
 
 ## `monitor`
 

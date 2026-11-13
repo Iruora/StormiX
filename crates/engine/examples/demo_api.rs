@@ -43,6 +43,9 @@ async fn me(headers: HeaderMap) -> (StatusCode, Json<Value>) {
 async fn user(Path(id): Path<u32>) -> (StatusCode, Json<Value>) {
     match id {
         7 => (StatusCode::OK, Json(json!({ "id": 7, "name": "Ada" }))),
+        // More users, for test data that spreads a load test over several.
+        8 => (StatusCode::OK, Json(json!({ "id": 8, "name": "Grace" }))),
+        9 => (StatusCode::OK, Json(json!({ "id": 9, "name": "Alan" }))),
         _ => (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "no such user" })),

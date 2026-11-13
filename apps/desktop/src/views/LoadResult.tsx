@@ -1,4 +1,5 @@
 import {
+  Table2,
   ArrowDown,
   ArrowUp,
   ChevronsUpDown,
@@ -13,7 +14,8 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import type { LoadProgress, LoadReport, Second, SlowRequest, StepResult, StepSummary, ThresholdResult } from "../bindings";
+import type { DataUse, LoadProgress, LoadReport, Second, SlowRequest, StepResult, StepSummary, ThresholdResult } from "../bindings";
+import { describePick } from "../lib/data";
 import { ProgressBar } from "./Busy";
 import { LimitResult, LiveLimitSteps } from "./Capacity";
 import { ApiResources, liveResources, reportResources, wentUnhealthy } from "./Resources";
@@ -152,6 +154,13 @@ export function LoadResult({
         </div>
       )}
 
+      {report.dataRanOut && (
+        <div className="border-b border-line bg-accent-soft px-4 py-2 text-xs text-ink">
+          Ended after {formatMs(s.durationMs ?? 0)}: a test data list set to "Each once" ran out of rows. The thresholds still
+          decide whether it passed.
+        </div>
+      )}
+
       {(report.setup ?? []).length > 0 && (
         <div className="border-b border-line px-4 py-2 text-xs">
           <span className="text-subtle">Set up once before the load, not measured:</span>
@@ -197,6 +206,9 @@ export function LoadResult({
       <ApiResources series={reportResources(report)} duration={(s.durationMs ?? 0) / 1000} />
 
       {s.steps.length > 0 && <StepTable steps={s.steps} />}
+      {(report.data ?? []).map((d, i) => (
+        <DataUsed key={i} use={d} ended={!!report.dataRanOut} />
+      ))}
 
       {s.failures.length > 0 && (
         <div className="border-t border-line px-4 py-3">
@@ -230,6 +242,48 @@ export function LoadResult({
       )}
       {open && <StepDetails step={open} onClose={() => setOpen(null)} diagnose={diagnose} />}
     </section>
+  );
+}
+
+/** How one test data set was used: picks in all and, for small sets, each row's share. */
+function DataUsed({ use, ended }: { use: DataUse; ended: boolean }) {
+  const [all, setAll] = useState(false);
+  const counts = use.counts ?? [];
+  const max = Math.max(1, ...counts.map((c) => c.count ?? 0));
+  const shown = all ? counts : counts.slice(0, 10);
+  return (
+    <div className="border-t border-line px-4 py-3">
+      <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 text-xs">
+        <span className="flex items-center gap-1.5 font-medium text-subtle">
+          <Table2 size="0.75rem" /> Test data
+        </span>
+        <span className="mono text-accent">{use.label}</span>
+        <span className="text-muted">
+          {use.rows} rows, {describePick(use.pick, use.per)} · {use.picks ?? 0} picked
+          {use.ranOut && (ended ? " · all used" : " · fewer rows than users, so some did not start")}
+        </span>
+      </div>
+      {counts.length > 0 && (
+        <ul className="space-y-0.5">
+          {shown.map((c, i) => (
+            <li key={i} className="flex items-center gap-2 text-xs">
+              <span className="mono w-40 shrink-0 truncate" title={c.values.join(", ")}>
+                {c.values.join(", ")}
+              </span>
+              <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-2">
+                <span className="block h-full rounded-full bg-accent" style={{ width: `${((c.count ?? 0) / max) * 100}%` }} />
+              </span>
+              <span className="mono w-14 shrink-0 text-right text-muted">{c.count ?? 0}×</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {counts.length > 10 && (
+        <button type="button" onClick={() => setAll(!all)} className="mt-1 text-xs text-accent hover:underline">
+          {all ? "Show fewer" : `Show all ${counts.length} rows`}
+        </button>
+      )}
+    </div>
   );
 }
 

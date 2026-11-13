@@ -1,12 +1,13 @@
 import { Database, Eraser, Gauge, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { Capacity, LoadProfile, Monitor, Step, TestFile, TraceMode } from "../bindings";
+import type { Capacity, DataSet, LoadProfile, Monitor, Step, TestFile, TraceMode } from "../bindings";
 import { cachedTitle, useResponseCache } from "../lib/cache";
 import { describeLoad } from "../lib/describe";
 import { methodText } from "../lib/methods";
 import { DEFAULT_LOAD, LoadEditor, ThresholdsEditor, thresholdsFor } from "./StepsEditor";
 import { CapacitySetting } from "./Capacity";
+import { DataSetting } from "./DataSetting";
 import { MonitorSetting } from "./MonitorSetting";
 import { TraceSetting } from "./TraceSetting";
 
@@ -24,6 +25,8 @@ export type LoadSetupChoice = {
   monitor: Monitor[];
   /** Production traffic to size pods for from a find_limit test; saved into the file. */
   capacity: Capacity | null;
+  /** Test data the iterations pick from; saved into the file. */
+  data: DataSet[];
 };
 
 /**
@@ -34,10 +37,13 @@ export type LoadSetupChoice = {
 export function LoadSetup({
   test,
   excluded,
+  filePath = null,
   onRun,
   onCancel,
 }: {
   test: TestFile;
+  /** The test file's path, so a linked CSV file is kept relative to it. */
+  filePath?: string | null;
   /** Names of steps left out last time, so the choice carries over. */
   excluded: string[];
   onRun: (choice: LoadSetupChoice) => void;
@@ -57,6 +63,8 @@ export function LoadSetup({
   const [trace, setTrace] = useState<TraceMode | null>(test.flow.trace ?? null);
   const [monitor, setMonitor] = useState<Monitor[]>((test.monitor ?? []) as Monitor[]);
   const [capacity, setCapacity] = useState<Capacity | null>(test.capacity ?? null);
+  const [data, setData] = useState<DataSet[]>(test.data ?? []);
+  const [dataValid, setDataValid] = useState(true);
   const findLimit = "find_limit" in load && !!load.find_limit;
   // find_limit ends at the first step that breaks a threshold; `rps` doesn't count.
   const noLimitThreshold = findLimit && !thresholds.some((t) => !/^\s*rps\b/.test(t));
@@ -74,7 +82,7 @@ export function LoadSetup({
   }, [onCancel]);
 
   const broken = useMemo(() => missingVariables(steps, checked), [steps, checked]);
-  const run = () => onRun({ included: checked.flatMap((on, i) => (on ? [i] : [])), cache, load, thresholds, trace, monitor: monitor.filter((m) => Object.values(m)[0]?.url.trim()), capacity });
+  const run = () => onRun({ included: checked.flatMap((on, i) => (on ? [i] : [])), cache, load, thresholds, trace, monitor: monitor.filter((m) => Object.values(m)[0]?.url.trim()), capacity, data });
 
   return (
     <div
@@ -202,12 +210,21 @@ export function LoadSetup({
               setThresholds((t) => thresholdsFor(next, t));
             }}
           />
+          <DataSetting
+            value={data}
+            load={load}
+            filePath={filePath}
+            onChange={(next, valid) => {
+              setData(next);
+              setDataValid(valid);
+            }}
+          />
           <ThresholdsEditor thresholds={thresholds} onChange={setThresholds} />
           {findLimit && <CapacitySetting value={capacity} onChange={setCapacity} />}
           <TraceSetting value={trace} onChange={setTrace} />
           <MonitorSetting value={monitor} onChange={setMonitor} />
           <p className="text-xs text-subtle">
-            The load profile, thresholds, tracing, API metrics endpoints and cache settings are saved into the test file. The endpoint choice only
+            The load profile, test data, thresholds, tracing, API metrics endpoints and cache settings are saved into the test file. The endpoint choice only
             applies to this run. A cached endpoint runs once before the load starts and every iteration reuses its
             response, so prerequisites like a login stay out of the metrics.
           </p>
@@ -224,6 +241,7 @@ export function LoadSetup({
               <Eraser size="0.75rem" /> Clear cache ({keptCount} endpoint{keptCount === 1 ? "" : "s"})
             </button>
           )}
+          {!dataValid && <span className="mr-auto text-xs text-bad">Fix the test data list to run</span>}
           {noLimitThreshold && (
             <span className="mr-auto text-xs text-warn">Find the limit needs a threshold to stop at, like p95 &lt; 500ms</span>
           )}
@@ -236,7 +254,7 @@ export function LoadSetup({
           </button>
           <button
             type="button"
-            disabled={selected === 0 || noLimitThreshold}
+            disabled={selected === 0 || noLimitThreshold || !dataValid}
             onClick={run}
             className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
           >

@@ -48,6 +48,7 @@ import { CACHE_KEY } from "./lib/cache";
 import { describeLoad } from "./lib/describe";
 import { methodText } from "./lib/methods";
 import { VariableEditContext, type VariableEditing } from "./lib/variableEdit";
+import { rebaseLinkedFiles } from "./lib/data";
 import { VariablesContext, variableTable } from "./lib/variables";
 import { newWorkspace, WORKSPACES_KEY, workspaceTitle } from "./lib/workspace";
 import { type Activity, ActivityStrip, Loading } from "./views/Busy";
@@ -394,8 +395,12 @@ function TestFileView({
 
   // The step a single run is on, as it reports them.
   const [runStep, setRunStep] = useState<RunProgress | null>(null);
+  // The file each last run and load test came from, so Diagnose finds its
+  // linked CSV files even after Save As moved the file.
+  const ranFrom = useRef<{ run: string | null; load: string | null }>({ run: null, load: null });
   const run = useMutation({
     mutationFn: async (yaml: string) => {
+      ranFrom.current.run = path;
       setRunStep(null);
       const unlisten = await events.runProgress.listen((e) => setRunStep(e.payload));
       try {
@@ -415,11 +420,11 @@ function TestFileView({
   });
   // Diagnoses a step of the file a run was made from, with today's environment.
   const diagnoseIn =
-    (yaml: string | undefined): Diagnose | undefined =>
+    (yaml: string | undefined, from: string | null): Diagnose | undefined =>
     yaml === undefined
       ? undefined
       : async (step) => {
-          const res = await commands.diagnoseStep(yaml, envVars, step);
+          const res = await commands.diagnoseStep(yaml, envVars, step, from);
           if (res.status === "error") throw new Error(res.error);
           return res.data;
         };
@@ -427,12 +432,15 @@ function TestFileView({
   // Set once this view is left, so a load test still starting up never begins.
   const left = useRef(false);
   const load = useMutation({
-    mutationFn: async (yaml: string) => {
+    // `from`: the file the YAML's linked CSV files are relative to. A replay
+    // passes the first run's, which Save As may since have moved.
+    mutationFn: async ({ yaml, from }: { yaml: string; from: string | null }) => {
+      ranFrom.current.load = from;
       setPoints([]);
       const unlisten = await events.loadProgress.listen((e) => setPoints((p) => [...p, e.payload]));
       try {
         if (left.current) throw new Error("the workspace was closed before the load test started");
-        const res = await commands.runLoadTest(yaml, envVars, path);
+        const res = await commands.runLoadTest(yaml, envVars, from);
         if (res.status === "error") throw new Error(res.error);
         return res.data;
       } finally {
@@ -499,7 +507,7 @@ function TestFileView({
   // Steps left out of the last load test, by name, offered again next time.
   const [excluded, setExcluded] = useState<string[]>(ws.excluded);
   /** Saves changed load, threshold, monitor, tracing and cache settings, then runs the chosen steps. */
-  const startLoad = async ({ included, cache, load: profile, thresholds, trace, monitor, capacity }: LoadSetupChoice) => {
+  const startLoad = async ({ included, cache, load: profile, thresholds, trace, monitor, capacity, data }: LoadSetupChoice) => {
     const test = result?.test;
     if (!test) return;
     setSetupOpen(false);
@@ -515,27 +523,28 @@ function TestFileView({
       thresholds,
       monitor,
       capacity,
+      data,
       flow: {
         ...test.flow,
         trace,
         steps: cacheChanged ? test.flow.steps.map((s, i) => ({ ...s, cache: cache[i] })) : test.flow.steps,
       },
     };
-    if (cacheChanged || traceChanged || JSON.stringify([test.load, test.thresholds ?? [], test.monitor ?? [], test.capacity ?? null]) !== JSON.stringify([profile, thresholds, monitor, capacity])) {
+    if (cacheChanged || traceChanged || JSON.stringify([test.load, test.thresholds ?? [], test.monitor ?? [], test.capacity ?? null, test.data ?? []]) !== JSON.stringify([profile, thresholds, monitor, capacity, data])) {
       await editSteps(configured);
     }
     const steps = configured.flow.steps.filter((_, i) => included.includes(i));
     const yaml = await commands.testFileToYaml({ ...configured, flow: { ...configured.flow, steps } } as TestFile_Deserialize);
     run.reset();
     panel.setOpen(true);
-    load.mutate(yaml);
+    load.mutate({ yaml, from: path });
   };
   /** Runs the last load test again: the same steps, load profile and thresholds. */
   const replayLoad = () => {
-    const yaml = load.variables;
-    if (!yaml || busy || fileBusy || !load.data) return;
+    const last = load.variables;
+    if (!last || busy || fileBusy || !load.data) return;
     panel.setOpen(true);
-    load.mutate(yaml);
+    load.mutate(last);
   };
   /** Adds environments, replacing ones with the same name, and picks `select`. */
   const addEnvs = (added: Record<string, Env>, select: string | null) => {
@@ -678,10 +687,23 @@ function TestFileView({
         if (!target) return;
       }
       const at = target;
-      const res = await showing({ label: "Saving", detail: at }, () => commands.writeTextFile(at, source));
+      // Linked CSV files are relative to the test file: keep them pointing at
+      // the same files. Read from the text being saved, not the last
+      // validation, which may lag behind the latest edit.
+      const current = (await commands.validateTestFile(source)).test;
+      const rebased = current && rebaseLinkedFiles(current.data ?? [], path, at);
+      const text = rebased ? await commands.testFileToYaml({ ...current, data: rebased } as TestFile_Deserialize) : source;
+      const res = await showing({ label: "Saving", detail: at }, () => commands.writeTextFile(at, text));
       if (res.status === "error") throw new Error(res.error);
+      if (rebased) {
+        // The steps editor's draft still has the old links: drop it, and any
+        // of its YAML still being written, so the next edit starts from these.
+        writes.current += 1;
+        setDraft(null);
+        setText(text);
+      }
       setPath(target);
-      setSavedText(source);
+      setSavedText(text);
       setJustSaved(true);
     },
   });
@@ -1136,12 +1158,12 @@ function TestFileView({
         </div>
       )}
       {run.isPending && <RunLive name={result?.test?.flow.name ?? "the flow"} progress={runStep} />}
-      {run.data && <RunResult result={run.data} diagnose={diagnoseIn(run.variables)} />}
+      {run.data && <RunResult result={run.data} diagnose={diagnoseIn(run.variables, ranFrom.current.run)} />}
       {load.isPending && <LoadLive points={points} onStop={stopLoad} stopping={stopping} />}
       {load.data && !load.isPending && (
         <LoadResult
           report={load.data}
-          diagnose={diagnoseIn(load.variables)}
+          diagnose={diagnoseIn(load.variables?.yaml, ranFrom.current.load)}
           onReplay={busy || fileBusy ? undefined : replayLoad}
         />
       )}
@@ -1485,6 +1507,7 @@ function TestFileView({
         <LoadSetup
           test={result.test}
           excluded={excluded}
+          filePath={path}
           onRun={startLoad}
           onCancel={() => setSetupOpen(false)}
         />

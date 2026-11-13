@@ -83,6 +83,8 @@ fn load_report_has_thresholds_timeline_and_steps() {
         aborted: false,
         resources: Vec::new(),
         limit: None,
+        data: Vec::new(),
+        data_ran_out: false,
     };
     let html = load_report(&report);
     assert!(html.contains("Thresholds failed"));
@@ -117,6 +119,8 @@ fn load_report_shows_the_apis_resources() {
         slowest: Vec::new(),
         aborted: false,
         limit: None,
+        data: Vec::new(),
+        data_ran_out: false,
         resources: vec![
             ResourceSeries {
                 name: "orders-api".into(),
@@ -239,6 +243,8 @@ fn a_find_limit_report_shows_each_step_and_the_pods_needed() {
         aborted: false,
         resources: Vec::new(),
         limit: Some(limit),
+        data: Vec::new(),
+        data_ran_out: false,
     };
     let html = load_report(&report);
     assert!(html.contains("80.0 req/s sustained (40/s iterations)"));

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Test data for load tests
+
+- **Lists of values for each iteration or user.** A test file's new `data` section (**Test data** in the load test setup) holds lists of values, such as user IDs, that fill `{{variables}}` differently from one iteration to the next, so a load test spreads over many users instead of one. Type a list in, give several variables as rows, import a CSV file, or link one with `file:` to read when the test starts.
+- **Random, in order or each once.** `pick: random` (default) picks any row each time, `sequential` goes through them in order and starts over, and `unique` uses each row once and ends the test when they run out.
+- **Per iteration or per user.** With `per: user`, each virtual user picks a row when it starts and keeps it, so 5 users over 2 IDs in order puts 3 users on the first and 2 on the second. The setup dialog shows that split before the test starts.
+- **In the results.** The result, the HTML report and `stormix load` show how many rows were picked and how often each row was. A run once and Diagnose use the first row.
+
 ## 1.11.0 (2026-11-08)
 
 Everything in 1.11.0-rc.1 below, plus:

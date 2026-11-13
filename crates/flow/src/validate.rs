@@ -47,6 +47,11 @@ impl TestFile {
         // Variables a step may use: the flow's own, plus whatever earlier steps
         // extract. Anything else must come from an environment, so it warns.
         let mut known: BTreeSet<&str> = flow.variables.keys().map(String::as_str).collect();
+        let data_columns = self.check_data(&mut issues);
+        known.extend(data_columns.iter().map(String::as_str));
+        // A CSV file's columns are only known once it is read, so with one
+        // any variable may come from it.
+        let data_file = self.data.iter().find_map(|d| d.file.as_deref());
         let mut names = BTreeSet::new();
         // Scripts that have run by the time a step is sent; a variable they
         // name may well be one they set.
@@ -127,10 +132,10 @@ impl TestFile {
             }
             for (path, text) in templated {
                 for name in variable_refs(text) {
-                    if !known.contains(name) && !mentioned(&scripts, name) {
+                    if !known.contains(name) && !mentioned(&scripts, name) && data_file.is_none() {
                         issues.warning(
                             &path,
-                            &format!("`{{{{{name}}}}}` is not defined in the flow or extracted by an earlier step; it must come from an environment"),
+                            &format!("`{{{{{name}}}}}` is not defined in the flow, the test data or extracted by an earlier step; it must come from an environment"),
                         );
                     }
                 }
@@ -409,6 +414,102 @@ impl TestFile {
     }
 }
 
+impl TestFile {
+    /// Checks the `data` section and returns the variables its inline sets
+    /// fill.
+    fn check_data(&self, issues: &mut Issues) -> Vec<String> {
+        let mut columns: Vec<String> = Vec::new();
+        for (d, set) in self.data.iter().enumerate() {
+            let at = format!("data[{d}]");
+            let sources = [
+                set.variable.is_some() || !set.values.is_empty(),
+                !set.rows.is_empty(),
+                set.file.is_some(),
+            ];
+            match sources.iter().filter(|s| **s).count() {
+                0 => {
+                    issues.error(
+                        &at,
+                        "give a `variable` with its `values`, `rows` or a CSV `file`",
+                    );
+                    continue;
+                }
+                1 => {}
+                _ => {
+                    issues.error(
+                        &at,
+                        "use one of `variable` with `values`, `rows` or `file`, not several",
+                    );
+                    continue;
+                }
+            }
+            if let Some(file) = &set.file {
+                if file.trim().is_empty() {
+                    issues.error(&format!("{at}.file"), "the file path is empty");
+                }
+            } else if set.rows.is_empty() {
+                match &set.variable {
+                    None => issues.error(
+                        &format!("{at}.variable"),
+                        "name the variable these values fill, like `variable: userId`",
+                    ),
+                    Some(name) if !variable_name(name) => issues.error(
+                        &format!("{at}.variable"),
+                        &format!("`{name}` is not a usable variable name"),
+                    ),
+                    Some(_) if set.values.is_empty() => {
+                        issues.error(&format!("{at}.values"), "the list has no values");
+                    }
+                    Some(_) => {}
+                }
+            } else {
+                for (r, row) in set.rows.iter().enumerate() {
+                    if row.is_empty() {
+                        issues.error(&format!("{at}.rows[{r}]"), "the row is empty");
+                    }
+                    if let Some(name) = row.keys().find(|k| !variable_name(k)) {
+                        issues.error(
+                            &format!("{at}.rows[{r}]"),
+                            &format!("`{name}` is not a usable variable name"),
+                        );
+                    }
+                }
+            }
+            for name in set.columns() {
+                if columns.contains(&name) {
+                    issues.warning(
+                        &at,
+                        &format!("`{name}` is also filled by another data set; this one wins"),
+                    );
+                } else {
+                    columns.push(name);
+                }
+            }
+            if let (
+                crate::Pick::Unique,
+                crate::Per::User,
+                Some(LoadProfile::VirtualUsers { count, .. }),
+            ) = (set.pick, set.per, &self.load)
+            {
+                let rows = set.inline_rows().len();
+                if set.file.is_none() && (*count as usize) > rows {
+                    issues.warning(
+                        &at,
+                        &format!("{count} users but {rows} unique rows: only {rows} users run"),
+                    );
+                }
+            }
+        }
+        columns
+    }
+}
+
+/// A name `{{name}}` can refer to.
+fn variable_name(name: &str) -> bool {
+    let name = name.trim();
+    !name.is_empty() && !name.contains(['{', '}']) && !name.starts_with('$')
+}
+
 #[derive(Default)]
 struct Issues(Vec<Issue>);
 
@@ -592,6 +693,70 @@ flow:
             issues(yaml),
             [(Severity::Warning, "flow.steps[0].request.url".into())]
         );
+    }
+
+    #[test]
+    fn test_data_defines_variables() {
+        let base = r#"
+version: 1
+flow:
+  name: users
+  steps:
+    - name: user
+      request: { method: GET, url: "https://example.com/user/{{userId}}?as={{login}}" }
+"#;
+        let with = |data: &str| format!("{base}data:\n{data}");
+        assert_eq!(
+            issues(&with(
+                "  - { variable: userId, values: [1, 2] }\n  - rows: [{ login: a }]\n"
+            )),
+            []
+        );
+        // Only part of it defined: the other one warns.
+        assert_eq!(
+            issues(&with("  - { variable: userId, values: [1] }\n")),
+            [(Severity::Warning, "flow.steps[0].request.url".into())]
+        );
+        // A CSV file may hold any column.
+        assert_eq!(issues(&with("  - file: users.csv\n")), []);
+    }
+
+    #[test]
+    fn test_data_needs_one_source_with_values() {
+        let file = |data: &str| {
+            format!(
+                "version: 1\nflow:\n  name: x\n  steps:\n    - name: s\n      request: {{ method: GET, url: \"https://example.com\" }}\ndata:\n{data}"
+            )
+        };
+        assert_eq!(
+            issues(&file("  - { pick: random }\n")),
+            [(Severity::Error, "data[0]".into())]
+        );
+        assert_eq!(
+            issues(&file("  - { variable: id, values: [1], file: a.csv }\n")),
+            [(Severity::Error, "data[0]".into())]
+        );
+        assert_eq!(
+            issues(&file("  - { variable: id, values: [] }\n")),
+            [(Severity::Error, "data[0].values".into())]
+        );
+        assert_eq!(
+            issues(&file("  - { values: [1] }\n")),
+            [(Severity::Error, "data[0].variable".into())]
+        );
+        assert_eq!(
+            issues(&file("  - { variable: \"{{id}}\", values: [1] }\n")),
+            [(Severity::Error, "data[0].variable".into())]
+        );
+        assert_eq!(
+            issues(&file(
+                "  - { variable: id, values: [1] }\n  - { variable: id, values: [2] }\n"
+            )),
+            [(Severity::Warning, "data[1]".into())]
+        );
+        let users = file("  - { variable: id, values: [1, 2], pick: unique, per: user }\n")
+            + "load: { virtual_users: { count: 3, duration: 10s } }\n";
+        assert_eq!(issues(&users), [(Severity::Warning, "data[0]".into())]);
     }
 
     #[test]

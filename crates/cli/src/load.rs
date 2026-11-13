@@ -78,6 +78,7 @@ pub fn load(args: LoadArgs) -> Result<ExitCode, String> {
         source,
         vars,
         runner,
+        data,
     } = args.target.prepare(false, |test| overrides.apply(test))?;
     let test = &source.test;
     let profile = test.load.clone().expect("apply ensures a load profile");
@@ -87,6 +88,7 @@ pub fn load(args: LoadArgs) -> Result<ExitCode, String> {
         grace: args.grace.into(),
         monitor: test.monitor.clone(),
         capacity: test.capacity.clone(),
+        data,
         ..LoadOptions::default()
     };
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -520,6 +522,8 @@ fn render_text(report: &LoadReport, title: Option<String>) -> String {
         render_limit(&mut out, limit);
     }
 
+    render_data(&mut out, report);
+
     if report.thresholds.is_empty() {
         let _ = writeln!(
             out,
@@ -533,6 +537,41 @@ fn render_text(report: &LoadReport, title: Option<String>) -> String {
         }
     }
     out
+}
+
+/// How each test data set was used, with each row's share when there are few.
+fn render_data(out: &mut String, report: &LoadReport) {
+    for set in &report.data {
+        let how = match (set.pick, set.per) {
+            (stormix_flow::Pick::Random, _) => "random",
+            (stormix_flow::Pick::Sequential, _) => "in order",
+            (stormix_flow::Pick::Unique, _) => "each once",
+        };
+        let per = match set.per {
+            stormix_flow::Per::Iteration => "iteration",
+            stormix_flow::Per::User => "user",
+        };
+        let _ = writeln!(
+            out,
+            "\n  test data   {}: {} rows, {how} per {per}, {} picked{}",
+            set.label,
+            set.rows,
+            set.picks,
+            match (set.ran_out, report.data_ran_out) {
+                (false, _) => "",
+                (true, true) => ", all used so the test ended early",
+                // Only `per: user` sets run out without ending the test.
+                (true, false) => ", fewer rows than users so some users did not start",
+            }
+        );
+        let shown: Vec<_> = set.counts.iter().filter(|c| c.count > 0).collect();
+        for row in shown.iter().take(10) {
+            let _ = writeln!(out, "    {:<24} {}×", row.values.join(", "), row.count);
+        }
+        if shown.len() > 10 {
+            let _ = writeln!(out, "    and {} more rows", shown.len() - 10);
+        }
+    }
 }
 
 /// The steps of a `find_limit` test, the limit and the pods it means.

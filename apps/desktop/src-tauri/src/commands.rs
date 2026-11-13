@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use stormix_engine::{
-    run_load, CachedStep, Diagnosis, FlowResult, LoadOptions, LoadReport, ProxyChoice, Runner,
-    StepStart, StopSignal, Variables,
+    run_load, CachedStep, DataFeed, Diagnosis, FlowResult, LoadOptions, LoadReport, ProxyChoice,
+    Runner, StepStart, StopSignal, Variables,
 };
 use stormix_flow::{Issue, Severity, TestFile};
 use stormix_store::{RunData, RunDiff, RunSummary, Store, StoredRun};
@@ -324,6 +324,7 @@ pub async fn run_load_test(
     let options = LoadOptions {
         monitor: test.monitor.clone(),
         capacity: test.capacity.clone(),
+        data: std::sync::Arc::new(data_feed(&test, source.as_deref()).await?),
         ..LoadOptions::default()
     };
     running.start(options.stop.clone())?;
@@ -380,6 +381,46 @@ fn save(store: &Mutex<Store>, data: RunData, source: Option<&str>) {
     }
 }
 
+/// The file's test data, read. A CSV file's path is relative to the test
+/// file's folder: `source`'s parent, or `source` itself when it is a
+/// folder (a Bruno collection).
+/// Read on a blocking thread, since a CSV file may be large.
+async fn data_feed(test: &TestFile, source: Option<&str>) -> Result<DataFeed, String> {
+    if test.data.is_empty() {
+        return Ok(DataFeed::default());
+    }
+    let (sets, source) = (test.data.clone(), source.map(std::path::PathBuf::from));
+    tauri::async_runtime::spawn_blocking(move || {
+        let base = source.map(|p| {
+            if p.is_dir() {
+                p
+            } else {
+                p.parent().map(Into::into).unwrap_or_default()
+            }
+        });
+        DataFeed::load(&sets, base.as_deref())
+    })
+    .await
+    .map_err(|e| format!("cannot read the test data: {e}"))?
+}
+
+/// A CSV file's columns (its first line) and rows, to put into a test
+/// file's `data`.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CsvData {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+}
+
+#[tauri::command(async)]
+#[specta::specta]
+pub fn read_csv_file(path: String) -> Result<CsvData, String> {
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("cannot read {path}: {e}"))?;
+    let (columns, rows) = stormix_flow::parse_csv(&text).map_err(|e| format!("{path}: {e}"))?;
+    Ok(CsvData { columns, rows })
+}
+
 /// Parses the file and refuses it if it has errors; the editor already
 /// shows why.
 fn checked(text: &str) -> Result<TestFile, String> {
@@ -420,6 +461,7 @@ pub async fn run_test_file(
     let test = checked(&text)?;
     let mut vars = Variables::new();
     vars.extend(variables);
+    vars.extend(data_feed(&test, source.as_deref()).await?.first_row());
     let result = runner
         .get()
         .run_with_progress(&test.flow, &vars, |s: StepStart<'_>| {
@@ -448,11 +490,13 @@ pub async fn diagnose_step(
     text: String,
     variables: BTreeMap<String, String>,
     step: String,
+    source: Option<String>,
     runner: State<'_, SharedRunner>,
 ) -> Result<Diagnosis, String> {
     let test = checked(&text)?;
     let mut vars = Variables::new();
     vars.extend(variables);
+    vars.extend(data_feed(&test, source.as_deref()).await?.first_row());
     runner.get().diagnose(&test.flow, &vars, &step).await
 }
 

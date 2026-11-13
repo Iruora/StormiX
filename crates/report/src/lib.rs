@@ -252,7 +252,52 @@ pub fn load_report(report: &LoadReport) -> String {
         }
         body.push_str("</tbody></table></section>");
     }
+    for set in &report.data {
+        data_html(&mut body, set, report.data_ran_out);
+    }
     page(&format!("{} · Stormix load test", report.name), &body)
+}
+
+/// One test data set: how rows were picked and, for small sets, how often each was.
+fn data_html(out: &mut String, set: &stormix_engine::DataUse, ended: bool) {
+    use stormix_flow::{Per, Pick};
+    let how = match set.pick {
+        Pick::Random => "picked at random",
+        Pick::Sequential => "picked in order",
+        Pick::Unique => "each used once",
+    };
+    let per = match set.per {
+        Per::Iteration => "per iteration",
+        Per::User => "per virtual user",
+    };
+    let _ = write!(
+        out,
+        r#"<section><h2>Test data · {label}</h2><p class="muted">{rows} rows, {how} {per}: {picks} picked.{ran_out}</p>"#,
+        label = esc(&set.label),
+        rows = set.rows,
+        picks = set.picks,
+        ran_out = match (set.ran_out, ended) {
+            (false, _) => "",
+            (true, true) => " Every row was used, so the test ended early.",
+            (true, false) => " There were fewer rows than users, so some users did not start.",
+        },
+    );
+    if !set.counts.is_empty() {
+        out.push_str("<table><thead><tr>");
+        for c in &set.columns {
+            let _ = write!(out, "<th>{}</th>", esc(c));
+        }
+        out.push_str("<th>Picked</th></tr></thead><tbody>");
+        for row in &set.counts {
+            out.push_str("<tr>");
+            for v in &row.values {
+                let _ = write!(out, r#"<td class="mono">{}</td>"#, esc(v));
+            }
+            let _ = write!(out, "<td>{}</td></tr>", row.count);
+        }
+        out.push_str("</tbody></table>");
+    }
+    out.push_str("</section>");
 }
 
 fn threshold_html(out: &mut String, t: &ThresholdResult) {

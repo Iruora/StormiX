@@ -97,6 +97,18 @@ pub struct Prepared {
     pub source: source::Source,
     pub vars: Variables,
     pub runner: Runner,
+    /// The file's `data` sets, read. A run once takes their first row.
+    pub data: std::sync::Arc<stormix_engine::DataFeed>,
+}
+
+impl Prepared {
+    /// The variables for a run once: `vars` with the first row of each data set over them.
+    pub fn once_vars(&self) -> Variables {
+        let mut vars = self.vars.clone();
+        let row = self.data.first_row();
+        vars.extend(row.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        vars
+    }
 }
 
 impl Target {
@@ -172,6 +184,10 @@ impl Target {
             None => Variables::new(),
         };
         vars.extend(self.vars);
+        let data = stormix_engine::DataFeed::load(
+            &source.test.data,
+            self.file.parent().filter(|d| !d.as_os_str().is_empty()),
+        )?;
 
         let runner = Runner::new(RunOptions {
             timeout: self.timeout.into(),
@@ -189,6 +205,7 @@ impl Target {
             source,
             vars,
             runner,
+            data: std::sync::Arc::new(data),
         })
     }
 }
@@ -204,11 +221,9 @@ pub fn write_report(path: &Path, contents: &str) -> Result<(), String> {
 
 /// Exit codes: 0 every check passed, 1 something failed, 2 the run could not start.
 pub fn run(args: RunArgs) -> Result<ExitCode, String> {
-    let Prepared {
-        source,
-        vars,
-        runner,
-    } = args.target.prepare(args.bail, |_| Ok(()))?;
+    let prepared = args.target.prepare(args.bail, |_| Ok(()))?;
+    let vars = prepared.once_vars();
+    let Prepared { source, runner, .. } = prepared;
     let test = &source.test;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
