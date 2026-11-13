@@ -48,6 +48,7 @@ import { CACHE_KEY } from "./lib/cache";
 import { describeLoad } from "./lib/describe";
 import { methodText } from "./lib/methods";
 import { VariableEditContext, type VariableEditing } from "./lib/variableEdit";
+import { rebaseLinkedFiles } from "./lib/data";
 import { VariablesContext, variableTable } from "./lib/variables";
 import { newWorkspace, WORKSPACES_KEY, workspaceTitle } from "./lib/workspace";
 import { type Activity, ActivityStrip, Loading } from "./views/Busy";
@@ -679,10 +680,16 @@ function TestFileView({
         if (!target) return;
       }
       const at = target;
-      const res = await showing({ label: "Saving", detail: at }, () => commands.writeTextFile(at, source));
+      // Linked CSV files are relative to the test file: keep them pointing at the same files.
+      const rebased = result?.test && rebaseLinkedFiles(result.test.data ?? [], path, at);
+      const text = rebased
+        ? await commands.testFileToYaml({ ...result!.test!, data: rebased } as TestFile_Deserialize)
+        : source;
+      if (rebased) setText(text);
+      const res = await showing({ label: "Saving", detail: at }, () => commands.writeTextFile(at, text));
       if (res.status === "error") throw new Error(res.error);
       setPath(target);
-      setSavedText(source);
+      setSavedText(text);
       setJustSaved(true);
     },
   });

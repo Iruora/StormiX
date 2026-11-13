@@ -651,11 +651,11 @@ async fn drive(
                     (shared.clone(), tx.clone(), stop.clone(), ran_out.clone());
                 tasks.spawn(async move {
                     while Instant::now() < deadline && !stop.is_stopped() && !ran_out.is_stopped() {
-                        let Some(mut row) = shared.data.pick(Some(Per::Iteration)) else {
+                        let Some(picks) = shared.data.pick(Some(Per::Iteration)) else {
                             ran_out.stop();
                             return;
                         };
-                        row.extend(user_row.iter().cloned());
+                        let row = shared.data.row(&picks.and(&user_row));
                         let result = shared.iteration(&row).await;
                         if tx.send(result).is_err() {
                             return;
@@ -665,6 +665,7 @@ async fn drive(
                             tokio::select! {
                                 () = tokio::time::sleep(think.min(left)) => {}
                                 () = stop.stopped() => return,
+                                () = ran_out.stopped() => return,
                             }
                         }
                     }
@@ -694,10 +695,11 @@ async fn drive(
                     }
                     // Every iteration is a new user here, so `per: user`
                     // sets are picked each time too.
-                    let Some(row) = shared.data.pick(None) else {
+                    let Some(picks) = shared.data.pick(None) else {
                         ran_out.stop();
                         break 'start;
                     };
+                    let row = shared.data.row(&picks);
                     let (shared, tx) = (shared.clone(), tx.clone());
                     tasks.spawn(async move {
                         let _ = tx.send(shared.iteration(&row).await);

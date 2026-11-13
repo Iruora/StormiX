@@ -156,8 +156,8 @@ export function LoadResult({
 
       {report.dataRanOut && (
         <div className="border-b border-line bg-accent-soft px-4 py-2 text-xs text-ink">
-          Ended after {formatMs(s.durationMs ?? 0)}: every row of the test data was used once, as its "Each once" pick asks. The
-          thresholds still decide whether it passed.
+          Ended after {formatMs(s.durationMs ?? 0)}: a test data list set to "Each once" ran out of rows. The thresholds still
+          decide whether it passed.
         </div>
       )}
 
@@ -207,7 +207,7 @@ export function LoadResult({
 
       {s.steps.length > 0 && <StepTable steps={s.steps} />}
       {(report.data ?? []).map((d, i) => (
-        <DataUsed key={i} use={d} />
+        <DataUsed key={i} use={d} ended={!!report.dataRanOut} />
       ))}
 
       {s.failures.length > 0 && (
@@ -246,7 +246,7 @@ export function LoadResult({
 }
 
 /** How one test data set was used: picks in all and, for small sets, each row's share. */
-function DataUsed({ use }: { use: DataUse }) {
+function DataUsed({ use, ended }: { use: DataUse; ended: boolean }) {
   const [all, setAll] = useState(false);
   const counts = use.counts ?? [];
   const max = Math.max(1, ...counts.map((c) => c.count ?? 0));
@@ -260,7 +260,7 @@ function DataUsed({ use }: { use: DataUse }) {
         <span className="mono text-accent">{use.label}</span>
         <span className="text-muted">
           {use.rows} rows, {describePick(use.pick, use.per)} · {use.picks ?? 0} picked
-          {use.ranOut && " · all used"}
+          {use.ranOut && (ended ? " · all used" : " · fewer rows than users, so some did not start")}
         </span>
       </div>
       {counts.length > 0 && (

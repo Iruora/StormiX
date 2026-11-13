@@ -553,15 +553,15 @@ fn render_data(out: &mut String, report: &LoadReport) {
         };
         let _ = writeln!(
             out,
-            "
-  test data   {}: {} rows, {how} per {per}, {} picked{}",
+            "\n  test data   {}: {} rows, {how} per {per}, {} picked{}",
             set.label,
             set.rows,
             set.picks,
-            if set.ran_out {
-                ", all used so the test ended early"
-            } else {
-                ""
+            match (set.ran_out, report.data_ran_out) {
+                (false, _) => "",
+                (true, true) => ", all used so the test ended early",
+                // Only `per: user` sets run out without ending the test.
+                (true, false) => ", fewer rows than users so some users did not start",
             }
         );
         let shown: Vec<_> = set.counts.iter().filter(|c| c.count > 0).collect();

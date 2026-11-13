@@ -23,7 +23,7 @@ mod variables;
 pub use cache::{CachedStep, ResponseCache};
 pub use capacity::{size, LimitSearch, LimitStep, Sizing};
 pub use connection::ProxyChoice;
-pub use data::{DataFeed, DataUse, Row, RowCount, MAX_ROW_COUNTS};
+pub use data::{DataFeed, DataUse, Picks, Row, RowCount, MAX_ROW_COUNTS};
 pub use diagnose::{Diagnosis, DiagnosisStage, StageOutcome};
 pub use junit::{junit_load_report, junit_report};
 pub use load::{run_load, LoadOptions, LoadReport, Progress, SlowRequest, StopSignal};

@@ -120,3 +120,36 @@ export function inlineSet(columns: string[], rows: string[][], pick: Pick, per: 
   if (columns.length === 1) return { variable: columns[0], values: rows.map((r) => r[0]), ...how };
   return { rows: rows.map((r) => Object.fromEntries(columns.map((c, i) => [c, r[i] ?? ""]))), ...how };
 }
+
+function folderOf(path: string): string {
+  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return path.slice(0, cut + 1);
+}
+
+function isAbsolute(path: string): boolean {
+  return path.startsWith("/") || path.startsWith("\\") || /^[A-Za-z]:[\\/]/.test(path);
+}
+
+/** `path` relative to the folder of the file `base` when it is inside it, else as is. */
+export function relativeTo(path: string, base: string | null): string {
+  if (!base) return path;
+  const dir = folderOf(base);
+  return dir && path.startsWith(dir) ? path.slice(dir.length).split("\\").join("/") : path;
+}
+
+/**
+ * The sets with linked CSV files still pointing at the same files once the
+ * test file moves from `from` to `to` (Save As), or null when none needs it.
+ */
+export function rebaseLinkedFiles(data: DataSet[], from: string | null, to: string): DataSet[] | null {
+  if (!from || folderOf(from) === folderOf(to)) return null;
+  let changed = false;
+  const next = data.map((set) => {
+    if (set.file == null || isAbsolute(set.file)) return set;
+    const sep = from.includes("\\") ? "\\" : "/";
+    const absolute = folderOf(from) + set.file.split("/").join(sep);
+    changed = true;
+    return { ...set, file: relativeTo(absolute, to) };
+  });
+  return changed ? next : null;
+}

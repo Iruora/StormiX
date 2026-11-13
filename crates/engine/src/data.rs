@@ -64,6 +64,19 @@ pub const MAX_ROW_COUNTS: usize = 50;
 /// One picked row: variable names and values.
 pub type Row = Vec<(String, String)>;
 
+/// Rows picked from some of the sets, by set and row index. Turned into
+/// variables with [`DataFeed::row`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Picks(Vec<(usize, usize)>);
+
+impl Picks {
+    /// These picks and `other`'s together.
+    pub fn and(mut self, other: &Picks) -> Self {
+        self.0.extend_from_slice(&other.0);
+        self
+    }
+}
+
 impl DataFeed {
     /// Reads `sets`, files relative to `base` (the test file's folder).
     pub fn load(sets: &[DataSet], base: Option<&Path>) -> Result<Self, String> {
@@ -113,10 +126,14 @@ impl DataFeed {
     }
 
     /// A row from every set picked `per` that, or from every set when
-    /// `per` is `None`. `None` once a `unique` set has used every row.
-    pub fn pick(&self, per: Option<Per>) -> Option<Row> {
-        let mut row = Row::new();
-        for feed in self.sets.iter().filter(|f| per.is_none_or(|p| f.per == p)) {
+    /// `per` is `None`. `None` once a `unique` set has used every row;
+    /// nothing is counted then.
+    pub fn pick(&self, per: Option<Per>) -> Option<Picks> {
+        let mut picks = Vec::new();
+        for (set, feed) in self.sets.iter().enumerate() {
+            if per.is_some_and(|p| feed.per != p) {
+                continue;
+            }
             let index = match feed.pick {
                 Pick::Random => fastrand::usize(..feed.rows.len()),
                 Pick::Sequential => feed.next.fetch_add(1, Ordering::Relaxed) % feed.rows.len(),
@@ -129,15 +146,29 @@ impl DataFeed {
                     i
                 }
             };
-            feed.counts[index].fetch_add(1, Ordering::Relaxed);
-            row.extend(
+            picks.push((set, index));
+        }
+        for &(set, index) in &picks {
+            self.sets[set].counts[index].fetch_add(1, Ordering::Relaxed);
+        }
+        Some(Picks(picks))
+    }
+
+    /// The variables of `picks`, set by set in file order, so a later set
+    /// wins where two fill the same variable.
+    pub fn row(&self, picks: &Picks) -> Row {
+        let mut picks = picks.0.clone();
+        picks.sort_unstable_by_key(|&(set, _)| set);
+        picks
+            .into_iter()
+            .flat_map(|(set, index)| {
+                let feed = &self.sets[set];
                 feed.columns
                     .iter()
                     .cloned()
-                    .zip(feed.rows[index].iter().cloned()),
-            );
-        }
-        Some(row)
+                    .zip(feed.rows[index].iter().cloned())
+            })
+            .collect()
     }
 
     /// How each set was used so far.
@@ -196,15 +227,12 @@ mod tests {
         .unwrap();
         assert_eq!(values(&feed.first_row()), ["a", "1"]);
         let picked: Vec<_> = (0..3)
-            .map(|_| values(&feed.pick(None).unwrap()).join(""))
+            .map(|_| values(&feed.row(&feed.pick(None).unwrap())).join(""))
             .collect();
         assert_eq!(picked, ["a1", "b2", "a3"]);
         assert_eq!(feed.pick(None), None);
         let usage = feed.usage();
-        assert_eq!(
-            usage[0].picks, 4,
-            "the sequential set picked before the unique one ran out"
-        );
+        assert_eq!(usage[0].picks, 3, "a pick that ran out counts for no set");
         assert!(!usage[0].ran_out);
         assert!(usage[1].ran_out);
         assert_eq!(usage[1].picks, 3);
@@ -225,11 +253,11 @@ mod tests {
         )
         .unwrap();
         for _ in 0..300 {
-            let row = feed.pick(Some(Per::Iteration)).unwrap();
+            let row = feed.row(&feed.pick(Some(Per::Iteration)).unwrap());
             assert_eq!(row.len(), 1);
             assert_eq!(row[0].0, "id");
         }
-        let user = feed.pick(Some(Per::User)).unwrap();
+        let user = feed.row(&feed.pick(Some(Per::User)).unwrap());
         assert_eq!(
             user,
             [("pass".into(), "p1".into()), ("user".into(), "u1".into())]
@@ -242,6 +270,22 @@ mod tests {
             usage[0].counts
         );
         assert_eq!(usage[1].picks, 1);
+    }
+
+    #[test]
+    fn a_later_set_wins_whatever_its_scope() {
+        let feed = DataFeed::load(
+            &[
+                set(r#"{"variable": "id", "values": ["user"], "per": "user"}"#),
+                set(r#"{"variable": "id", "values": ["iteration"]}"#),
+            ],
+            None,
+        )
+        .unwrap();
+        let user = feed.pick(Some(Per::User)).unwrap();
+        let both = feed.pick(Some(Per::Iteration)).unwrap().and(&user);
+        let row = feed.row(&both);
+        assert_eq!(row.last().unwrap().1, "iteration");
     }
 
     #[test]

@@ -324,7 +324,7 @@ pub async fn run_load_test(
     let options = LoadOptions {
         monitor: test.monitor.clone(),
         capacity: test.capacity.clone(),
-        data: std::sync::Arc::new(data_feed(&test, source.as_deref())?),
+        data: std::sync::Arc::new(data_feed(&test, source.as_deref()).await?),
         ..LoadOptions::default()
     };
     running.start(options.stop.clone())?;
@@ -384,15 +384,24 @@ fn save(store: &Mutex<Store>, data: RunData, source: Option<&str>) {
 /// The file's test data, read. A CSV file's path is relative to the test
 /// file's folder: `source`'s parent, or `source` itself when it is a
 /// folder (a Bruno collection).
-fn data_feed(test: &TestFile, source: Option<&str>) -> Result<DataFeed, String> {
-    let base = source.map(std::path::Path::new).map(|p| {
-        if p.is_dir() {
-            p.to_path_buf()
-        } else {
-            p.parent().map(Into::into).unwrap_or_default()
-        }
-    });
-    DataFeed::load(&test.data, base.as_deref())
+/// Read on a blocking thread, since a CSV file may be large.
+async fn data_feed(test: &TestFile, source: Option<&str>) -> Result<DataFeed, String> {
+    if test.data.is_empty() {
+        return Ok(DataFeed::default());
+    }
+    let (sets, source) = (test.data.clone(), source.map(std::path::PathBuf::from));
+    tauri::async_runtime::spawn_blocking(move || {
+        let base = source.map(|p| {
+            if p.is_dir() {
+                p
+            } else {
+                p.parent().map(Into::into).unwrap_or_default()
+            }
+        });
+        DataFeed::load(&sets, base.as_deref())
+    })
+    .await
+    .map_err(|e| format!("cannot read the test data: {e}"))?
 }
 
 /// A CSV file's columns (its first line) and rows, to put into a test
@@ -452,7 +461,7 @@ pub async fn run_test_file(
     let test = checked(&text)?;
     let mut vars = Variables::new();
     vars.extend(variables);
-    vars.extend(data_feed(&test, source.as_deref())?.first_row());
+    vars.extend(data_feed(&test, source.as_deref()).await?.first_row());
     let result = runner
         .get()
         .run_with_progress(&test.flow, &vars, |s: StepStart<'_>| {
@@ -487,7 +496,7 @@ pub async fn diagnose_step(
     let test = checked(&text)?;
     let mut vars = Variables::new();
     vars.extend(variables);
-    vars.extend(data_feed(&test, source.as_deref())?.first_row());
+    vars.extend(data_feed(&test, source.as_deref()).await?.first_row());
     runner.get().diagnose(&test.flow, &vars, &step).await
 }
 

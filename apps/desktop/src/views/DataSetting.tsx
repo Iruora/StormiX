@@ -3,7 +3,7 @@ import { FileSpreadsheet, Plus, Table2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { commands, type DataSet, type LoadProfile, type Per, type Pick } from "../bindings";
-import { dataColumns, dataRows, inlineSet, parseCsv, PERS, PICKS, toCsv } from "../lib/data";
+import { dataColumns, dataRows, inlineSet, parseCsv, PERS, PICKS, relativeTo, toCsv } from "../lib/data";
 
 /** One set as edited: CSV text (the variable names, then a value per line), or a linked file. */
 type Draft = {
@@ -35,14 +35,6 @@ function parsed(d: Draft): { set: DataSet; columns: string[]; rows: string[][] }
   const bad = csv.columns.find((c) => /[{}\s]/.test(c) || c.startsWith("$"));
   if (bad) return { error: `${bad} is not a usable variable name` };
   return { set: inlineSet(csv.columns, csv.rows, d.pick, d.per), ...csv };
-}
-
-/** `path` relative to the folder of `base` when it is inside it, else as is. */
-function relativeTo(path: string, base: string | null): string {
-  if (!base) return path;
-  const sep = base.includes("\\") ? "\\" : "/";
-  const dir = base.slice(0, base.lastIndexOf(sep) + 1);
-  return dir && path.startsWith(dir) ? path.slice(dir.length).split("\\").join("/") : path;
 }
 
 /**
