@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Copy as cURL from any step
+
+- **Copy as cURL on every step**, in the Flow tab and in Steps, without running first. The command has the URL, headers and body a run would send, GraphQL bodies included, with variables filled in from the flow, the environment (its session changes and secrets too), test data and what earlier steps extracted in the last run.
+- **bash or Windows cmd.** It is quoted for the shell of your system, and the other is one click away.
+- **Says what it could not fill in.** Variables with no value stay as `{{name}}` and are listed, secrets in the command are named, and a step with a pre-request script is flagged, since the script is not run for the copy.
+
 ### Test data for load tests
 
 - **Lists of values for each iteration or user.** A test file's new `data` section (**Test data** in the load test setup) holds lists of values, such as user IDs, that fill `{{variables}}` differently from one iteration to the next, so a load test spreads over many users instead of one. Type a list in, give several variables as rows, import a CSV file, or link one with `file:` to read when the test starts.

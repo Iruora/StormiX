@@ -8,10 +8,10 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use stormix_engine::{
-    run_load, CachedStep, DataFeed, Diagnosis, FlowResult, LoadOptions, LoadReport, ProxyChoice,
-    Runner, StepStart, StopSignal, Variables,
+    curl_command, run_load, CachedStep, CurlCommand, DataFeed, Diagnosis, FlowResult, LoadOptions,
+    LoadReport, ProxyChoice, Runner, Shell, StepStart, StopSignal, Variables,
 };
-use stormix_flow::{Issue, Severity, TestFile};
+use stormix_flow::{Issue, Severity, Step, TestFile};
 use stormix_store::{RunData, RunDiff, RunSummary, Store, StoredRun};
 use tauri::{AppHandle, State};
 use tauri_specta::Event;
@@ -498,6 +498,32 @@ pub async fn diagnose_step(
     vars.extend(variables);
     vars.extend(data_feed(&test, source.as_deref()).await?.first_row());
     runner.get().diagnose(&test.flow, &vars, &step).await
+}
+
+/// One step's request as a `curl` command, with variables filled in as a run
+/// would: the flow's own, then `variables` (an environment, with its session
+/// changes and secrets), the first row of any data sets, then `extracted`,
+/// what earlier steps set in the last run. Secrets are included: the command
+/// is for sending the request again from this machine.
+#[tauri::command]
+#[specta::specta]
+pub async fn step_as_curl(
+    test: TestFile,
+    step: Step,
+    variables: BTreeMap<String, String>,
+    extracted: BTreeMap<String, String>,
+    source: Option<String>,
+    shell: Shell,
+) -> Result<CurlCommand, String> {
+    let mut vars = Variables::new();
+    vars.extend(test.flow.variables.clone());
+    vars.extend(variables);
+    // A CSV that cannot be read only leaves its variables unfilled.
+    if let Ok(feed) = data_feed(&test, source.as_deref()).await {
+        vars.extend(feed.first_row());
+    }
+    vars.extend(extracted);
+    Ok(curl_command(&step, &vars, shell))
 }
 
 /// The runner every command sends with, swapped when the proxy changes.

@@ -22,6 +22,14 @@ export const commands = {
 	 *  the response. Not saved to the run history.
 	 */
 	diagnoseStep: (text: string, variables: { [key in string]: string }, step: string, source: string | null) => typedError<Diagnosis_Serialize, string>(__TAURI_INVOKE("diagnose_step", { text, variables, step, source })),
+	/**
+	 *  One step's request as a `curl` command, with variables filled in as a run
+	 *  would: the flow's own, then `variables` (an environment, with its session
+	 *  changes and secrets), the first row of any data sets, then `extracted`,
+	 *  what earlier steps set in the last run. Secrets are included: the command
+	 *  is for sending the request again from this machine.
+	 */
+	stepAsCurl: (test: TestFile_Deserialize, step: Step_Deserialize, variables: { [key in string]: string }, extracted: { [key in string]: string }, source: string | null, shell: Shell) => typedError<CurlCommand, string>(__TAURI_INVOKE("step_as_curl", { test, step, variables, extracted, source, shell })),
 	/**  The proxy requests go through. */
 	getProxy: () => __TAURI_INVOKE<ProxyChoice>("get_proxy"),
 	/**
@@ -381,6 +389,15 @@ export type Connection_Serialize = {
 export type CsvData = {
 	columns: string[],
 	rows: string[][],
+};
+
+/**  A request ready to paste into a terminal, with what it could not fill in. */
+export type CurlCommand = {
+	command: string,
+	/**  Variables with no value, left in the command as `{{name}}`. */
+	missing: string[],
+	/**  Ways the command may differ from what a run sends. */
+	notes: string[],
 };
 
 /**
@@ -1740,6 +1757,13 @@ export type Severity =
 "warning" | 
 /**  The file cannot run. */
 "error";
+
+/**  The shell a command is quoted for. */
+export type Shell = 
+/**  bash, zsh and other POSIX shells, Git Bash and WSL on Windows. */
+"posix" | 
+/**  The Windows Command Prompt. */
+"cmd";
 
 export type Sizing = Sizing_Serialize | Sizing_Deserialize;
 
