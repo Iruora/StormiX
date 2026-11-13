@@ -695,7 +695,13 @@ function TestFileView({
       const text = rebased ? await commands.testFileToYaml({ ...current, data: rebased } as TestFile_Deserialize) : source;
       const res = await showing({ label: "Saving", detail: at }, () => commands.writeTextFile(at, text));
       if (res.status === "error") throw new Error(res.error);
-      if (rebased) setText(text);
+      if (rebased) {
+        // The steps editor's draft still has the old links: drop it, and any
+        // of its YAML still being written, so the next edit starts from these.
+        writes.current += 1;
+        setDraft(null);
+        setText(text);
+      }
       setPath(target);
       setSavedText(text);
       setJustSaved(true);
