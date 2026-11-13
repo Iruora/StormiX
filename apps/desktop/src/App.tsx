@@ -395,8 +395,12 @@ function TestFileView({
 
   // The step a single run is on, as it reports them.
   const [runStep, setRunStep] = useState<RunProgress | null>(null);
+  // The file each last run and load test came from, so Diagnose finds its
+  // linked CSV files even after Save As moved the file.
+  const ranFrom = useRef<{ run: string | null; load: string | null }>({ run: null, load: null });
   const run = useMutation({
     mutationFn: async (yaml: string) => {
+      ranFrom.current.run = path;
       setRunStep(null);
       const unlisten = await events.runProgress.listen((e) => setRunStep(e.payload));
       try {
@@ -416,11 +420,11 @@ function TestFileView({
   });
   // Diagnoses a step of the file a run was made from, with today's environment.
   const diagnoseIn =
-    (yaml: string | undefined): Diagnose | undefined =>
+    (yaml: string | undefined, from: string | null): Diagnose | undefined =>
     yaml === undefined
       ? undefined
       : async (step) => {
-          const res = await commands.diagnoseStep(yaml, envVars, step, path);
+          const res = await commands.diagnoseStep(yaml, envVars, step, from);
           if (res.status === "error") throw new Error(res.error);
           return res.data;
         };
@@ -429,6 +433,7 @@ function TestFileView({
   const left = useRef(false);
   const load = useMutation({
     mutationFn: async (yaml: string) => {
+      ranFrom.current.load = path;
       setPoints([]);
       const unlisten = await events.loadProgress.listen((e) => setPoints((p) => [...p, e.payload]));
       try {
@@ -680,14 +685,15 @@ function TestFileView({
         if (!target) return;
       }
       const at = target;
-      // Linked CSV files are relative to the test file: keep them pointing at the same files.
-      const rebased = result?.test && rebaseLinkedFiles(result.test.data ?? [], path, at);
-      const text = rebased
-        ? await commands.testFileToYaml({ ...result!.test!, data: rebased } as TestFile_Deserialize)
-        : source;
-      if (rebased) setText(text);
+      // Linked CSV files are relative to the test file: keep them pointing at
+      // the same files. Read from the text being saved, not the last
+      // validation, which may lag behind the latest edit.
+      const current = source.includes("file:") ? (await commands.validateTestFile(source)).test : null;
+      const rebased = current && rebaseLinkedFiles(current.data ?? [], path, at);
+      const text = rebased ? await commands.testFileToYaml({ ...current, data: rebased } as TestFile_Deserialize) : source;
       const res = await showing({ label: "Saving", detail: at }, () => commands.writeTextFile(at, text));
       if (res.status === "error") throw new Error(res.error);
+      if (rebased) setText(text);
       setPath(target);
       setSavedText(text);
       setJustSaved(true);
@@ -1144,12 +1150,12 @@ function TestFileView({
         </div>
       )}
       {run.isPending && <RunLive name={result?.test?.flow.name ?? "the flow"} progress={runStep} />}
-      {run.data && <RunResult result={run.data} diagnose={diagnoseIn(run.variables)} />}
+      {run.data && <RunResult result={run.data} diagnose={diagnoseIn(run.variables, ranFrom.current.run)} />}
       {load.isPending && <LoadLive points={points} onStop={stopLoad} stopping={stopping} />}
       {load.data && !load.isPending && (
         <LoadResult
           report={load.data}
-          diagnose={diagnoseIn(load.variables)}
+          diagnose={diagnoseIn(load.variables, ranFrom.current.load)}
           onReplay={busy || fileBusy ? undefined : replayLoad}
         />
       )}
