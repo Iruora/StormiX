@@ -24,6 +24,7 @@ import { cachedTitle, storedAgo, useResponseCache } from "../lib/cache";
 import { methodTone } from "../lib/methods";
 import { useVariables, variablesSetBy, variablesUsedBy } from "../lib/variables";
 import { stepPassed } from "./RunResult";
+import { CopyCurlButton } from "./CopyCurl";
 import { ScriptsDialog, withScripts } from "./ScriptsDialog";
 import { VarText } from "./VarField";
 
@@ -480,6 +481,9 @@ function FlowNode({
               <IconButton label="Delete" onClick={onDelete}>
                 <Trash2 size="0.8125rem" />
               </IconButton>
+            </div>
+            <div className="opacity-60 group-hover:opacity-100">
+              <CopyCurlButton step={step} variant="icon" />
             </div>
             <ScriptsButton step={step} onClick={onScripts} />
             <CacheToggle on={!!step.cache} onClick={onCacheToggle} />

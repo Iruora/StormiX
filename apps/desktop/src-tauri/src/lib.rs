@@ -16,6 +16,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::validate_test_file,
             commands::run_test_file,
             commands::diagnose_step,
+            commands::step_as_curl,
             commands::get_proxy,
             commands::set_proxy,
             commands::import_collection,

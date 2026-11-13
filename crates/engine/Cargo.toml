@@ -33,3 +33,4 @@ x509-parser.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
+serde_yaml_ng.workspace = true

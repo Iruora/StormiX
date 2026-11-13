@@ -15,6 +15,13 @@ Every step in **Last run**, and each of a load test's most common failures, has 
 
 **Copy as cURL** copies the request as a `curl` command that sends the same thing, headers included, to try in a terminal or share. With [tracing](/features/tracing) on, the request's trace ID is there with **Copy trace ID**.
 
+You don't need a run to get the command. Each step card in the **Flow** tab and each step in **Steps** has a **Copy as cURL** button that builds it from the step as it stands, with the values a run would send now: the flow's variables, the chosen environment with its session changes and secrets, the first row of any test data, and what earlier steps extracted in the last run of the same saved file with the same environment. A note under the button says:
+
+- which shell it is quoted for: bash on macOS and Linux, Windows cmd on Windows, with the other one a click away;
+- which `{{variables}}` had no value yet and stay as written, usually a token a login step sets: run the flow once and copy again;
+- which secrets the command holds, since their real values are in it;
+- that a pre-request script was not run, when the step has one, since what it changes is not in the command.
+
 ## The Connection tab
 
 Every request records its route: the proxy it went through and where that setting came from, the address it connected to, the HTTP version and, without a proxy, the server's TLS certificate and issuer.

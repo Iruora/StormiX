@@ -45,6 +45,7 @@ import {
 } from "./bindings";
 import { YamlEditor } from "./editor/YamlEditor";
 import { CACHE_KEY } from "./lib/cache";
+import { CurlContext, type CurlMaker, extractedBefore } from "./lib/curl";
 import { describeLoad } from "./lib/describe";
 import { methodText } from "./lib/methods";
 import { VariableEditContext, type VariableEditing } from "./lib/variableEdit";
@@ -355,6 +356,10 @@ function TestFileView({
     ws.tab === "flow" || ws.tab === "yaml" ? ws.tab : "steps",
   );
   const [lastRun, setLastRun] = useState<FlowResult | null>(null);
+  // The saved file and environment the last run used, so Copy as cURL only
+  // reuses what it extracted (tokens, often) for that same file and environment.
+  const [lastRunFrom, setLastRunFrom] = useState<{ path: string | null; env: string } | null>(null);
+  const runEnv = useRef("");
   // What the steps editor shows while its YAML is being written.
   const [draft, setDraft] = useState<TestFile | null>(null);
   const writes = useRef(0);
@@ -401,6 +406,7 @@ function TestFileView({
   const run = useMutation({
     mutationFn: async (yaml: string) => {
       ranFrom.current.run = path;
+      runEnv.current = envName;
       setRunStep(null);
       const unlisten = await events.runProgress.listen((e) => setRunStep(e.payload));
       try {
@@ -412,7 +418,10 @@ function TestFileView({
       }
     },
     // Kept past edits, so hovering a variable a step extracts shows its last value.
-    onSuccess: (data) => setLastRun(data),
+    onSuccess: (data) => {
+      setLastRun(data);
+      setLastRunFrom({ path: ranFrom.current.run, env: runEnv.current });
+    },
     onSettled: () => {
       client.invalidateQueries({ queryKey: RUNS_KEY });
       client.invalidateQueries({ queryKey: CACHE_KEY });
@@ -567,6 +576,21 @@ function TestFileView({
   const variables = useMemo(
     () => variableTable(shown, envVars, envName, lastRun, sessionOnly),
     [shown, envVars, envName, lastRun, sessionOnly],
+  );
+  // Copy as cURL fills in the same values a run would send now.
+  const curlMaker = useMemo<CurlMaker | null>(
+    () =>
+      shown && {
+        secrets: env?.secrets ?? [],
+        make: async (step, shell) => {
+          const sameSource = path !== null && lastRunFrom?.path === path && lastRunFrom.env === envName;
+          const extracted = sameSource ? extractedBefore(lastRun, step.name) : {};
+          const res = await commands.stepAsCurl(shown, step, envVars, extracted, path, shell);
+          if (res.status === "error") throw new Error(res.error);
+          return res.data;
+        },
+      },
+    [shown, env, envName, envVars, lastRun, lastRunFrom, path],
   );
   /**
    * Clears results that no longer match the file. A run still going is kept:
@@ -1066,12 +1090,14 @@ function TestFileView({
         <div className="min-h-0 flex-1 overflow-y-auto">
           <VariablesContext.Provider value={variables}>
             <VariableEditContext.Provider value={variableEditing}>
-              <FlowView
-                test={shown}
-                onChange={editSteps}
-                lastRun={run.data ?? null}
-                onOpenStep={openStep}
-              />
+              <CurlContext.Provider value={curlMaker}>
+                <FlowView
+                  test={shown}
+                  onChange={editSteps}
+                  lastRun={run.data ?? null}
+                  onOpenStep={openStep}
+                />
+              </CurlContext.Provider>
             </VariableEditContext.Provider>
           </VariablesContext.Provider>
         </div>
@@ -1079,7 +1105,9 @@ function TestFileView({
         <div className="min-h-0 flex-1">
           <VariablesContext.Provider value={variables}>
             <VariableEditContext.Provider value={variableEditing}>
-              <StepsEditor test={shown} onChange={editSteps} selected={selectedStep} onSelect={setSelectedStep} />
+              <CurlContext.Provider value={curlMaker}>
+                <StepsEditor test={shown} onChange={editSteps} selected={selectedStep} onSelect={setSelectedStep} />
+              </CurlContext.Provider>
             </VariableEditContext.Provider>
           </VariablesContext.Provider>
         </div>

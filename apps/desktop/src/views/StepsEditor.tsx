@@ -4,6 +4,7 @@ import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { Assertion, Body, CachedStep, GraphqlBody, Header, KeyValue, LoadProfile, Method, Step, TestFile } from "../bindings";
 import { cachedTitle, useResponseCache } from "../lib/cache";
 import { methodText, methodTone } from "../lib/methods";
+import { CopyCurlButton } from "./CopyCurl";
 import { ScriptsDialog, withScripts } from "./ScriptsDialog";
 import { TraceSetting } from "./TraceSetting";
 import { VarField } from "./VarField";
@@ -310,6 +311,7 @@ function StepCard({
           >
             <FileCode2 size="0.75rem" /> {scriptCount ? `scripts (${scriptCount})` : "scripts"}
           </button>
+          <CopyCurlButton step={step} variant="chip" />
           <IconButton label="Move up" disabled={index === 0} onClick={() => onMove(index - 1)}>
             <ArrowUp size="0.875rem" />
           </IconButton>

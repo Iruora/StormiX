@@ -590,14 +590,14 @@ fn header_pairs(headers: &HeaderMap) -> Vec<HeaderPair> {
 const USER_AGENT: &str = concat!("stormix/", env!("CARGO_PKG_VERSION"));
 
 /// The request being built, in the shape scripts can read and change.
-struct Outgoing {
-    method: String,
-    url: String,
-    headers: Vec<(String, String)>,
-    body: OutBody,
+pub(crate) struct Outgoing {
+    pub(crate) method: String,
+    pub(crate) url: String,
+    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) body: OutBody,
 }
 
-enum OutBody {
+pub(crate) enum OutBody {
     None,
     Json(serde_json::Value),
     Raw(String),
