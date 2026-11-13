@@ -108,6 +108,13 @@ pub fn curl_command(step: &Step, vars: &Variables, shell: Shell) -> CurlCommand 
             }
         }
     }
+    // A bodyless POST still gets an empty `--data-raw`, so curl infers POST
+    // and turns it into GET on a 301, 302 or 303, as a run does; `-X POST`
+    // would keep POST.
+    if method == "POST" && data.is_empty() {
+        data.push(("--data-raw", String::new()));
+        drop_content_type = !has_content_type;
+    }
 
     if step
         .scripts
@@ -425,6 +432,26 @@ request:
             Shell::Posix,
         );
         assert!(out.command.starts_with("curl --url '-K./payload.curl'"));
+    }
+
+    #[test]
+    fn post_never_uses_dash_x_so_redirects_turn_to_get() {
+        let bodyless = curl_command(
+            &step("name: p\nrequest: { method: POST, url: \"{{base}}/go\" }\n"),
+            &vars(),
+            Shell::Posix,
+        );
+        assert_eq!(
+            bodyless.command,
+            "curl 'https://api.test/go' \\\n  --globoff \\\n  -H 'Content-Type:' \\\n  --data-raw '' \\\n  --location"
+        );
+        let with_body = curl_command(
+            &step("name: p\nrequest: { method: POST, url: \"{{base}}/go\", body: { raw: x } }\n"),
+            &vars(),
+            Shell::Posix,
+        );
+        assert!(with_body.command.starts_with("curl 'https://api.test/go'"));
+        assert!(!with_body.command.contains("-X"));
     }
 
     #[test]
