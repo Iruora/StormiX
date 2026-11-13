@@ -356,8 +356,10 @@ function TestFileView({
     ws.tab === "flow" || ws.tab === "yaml" ? ws.tab : "steps",
   );
   const [lastRun, setLastRun] = useState<FlowResult | null>(null);
-  // The file the last run came from, so another file's values stay out of Copy as cURL.
-  const [lastRunPath, setLastRunPath] = useState<string | null>(null);
+  // The saved file and environment the last run used, so Copy as cURL only
+  // reuses what it extracted (tokens, often) for that same file and environment.
+  const [lastRunFrom, setLastRunFrom] = useState<{ path: string | null; env: string } | null>(null);
+  const runEnv = useRef("");
   // What the steps editor shows while its YAML is being written.
   const [draft, setDraft] = useState<TestFile | null>(null);
   const writes = useRef(0);
@@ -404,6 +406,7 @@ function TestFileView({
   const run = useMutation({
     mutationFn: async (yaml: string) => {
       ranFrom.current.run = path;
+      runEnv.current = envName;
       setRunStep(null);
       const unlisten = await events.runProgress.listen((e) => setRunStep(e.payload));
       try {
@@ -417,7 +420,7 @@ function TestFileView({
     // Kept past edits, so hovering a variable a step extracts shows its last value.
     onSuccess: (data) => {
       setLastRun(data);
-      setLastRunPath(ranFrom.current.run);
+      setLastRunFrom({ path: ranFrom.current.run, env: runEnv.current });
     },
     onSettled: () => {
       client.invalidateQueries({ queryKey: RUNS_KEY });
@@ -580,13 +583,14 @@ function TestFileView({
       shown && {
         secrets: env?.secrets ?? [],
         make: async (step, shell) => {
-          const extracted = lastRunPath === path ? extractedBefore(lastRun, step.name) : {};
+          const sameSource = path !== null && lastRunFrom?.path === path && lastRunFrom.env === envName;
+          const extracted = sameSource ? extractedBefore(lastRun, step.name) : {};
           const res = await commands.stepAsCurl(shown, step, envVars, extracted, path, shell);
           if (res.status === "error") throw new Error(res.error);
           return res.data;
         },
       },
-    [shown, env, envVars, lastRun, lastRunPath, path],
+    [shown, env, envName, envVars, lastRun, lastRunFrom, path],
   );
   /**
    * Clears results that no longer match the file. A run still going is kept:

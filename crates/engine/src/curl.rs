@@ -122,14 +122,20 @@ pub fn curl_command(step: &Step, vars: &Variables, shell: Shell) -> CurlCommand 
     }
 
     let q = |text: &str| quote(text, shell);
+    // A URL that starts with `-` would be read as a curl option.
+    let target = if url.starts_with('-') {
+        format!("--url {}", q(&url))
+    } else {
+        q(&url)
+    };
     let mut parts = vec![match method.as_str() {
-        "GET" if data.is_empty() => format!("curl {}", q(&url)),
+        "GET" if data.is_empty() => format!("curl {target}"),
         // With a body curl sends POST by itself and, like a run, switches to
         // GET on a 301, 302 or 303; `-X POST` would keep POST.
-        "POST" if !data.is_empty() => format!("curl {}", q(&url)),
+        "POST" if !data.is_empty() => format!("curl {target}"),
         // `-X HEAD` waits for a body that never comes.
-        "HEAD" => format!("curl --head {}", q(&url)),
-        _ => format!("curl -X {method} {}", q(&url)),
+        "HEAD" => format!("curl --head {target}"),
+        _ => format!("curl -X {method} {target}"),
     }];
     // Brackets and braces in a URL, as in `?filter[status]=on`, are sent as
     // written rather than read as curl ranges.
@@ -407,6 +413,18 @@ request:
             r#"^"^{\^"a\^":\^"x\\\^"y\\\\\^"^}^""#
         );
         assert_eq!(quote_cmd(r"ends\"), r#"^"ends\\^""#);
+    }
+
+    #[test]
+    fn url_starting_with_a_dash_is_not_an_option() {
+        let mut v = vars();
+        v.set("target", "-K./payload.curl");
+        let out = curl_command(
+            &step("name: d\nrequest: { method: GET, url: \"{{target}}\" }\n"),
+            &v,
+            Shell::Posix,
+        );
+        assert!(out.command.starts_with("curl --url '-K./payload.curl'"));
     }
 
     #[test]
