@@ -84,7 +84,9 @@ impl Redactor {
             };
             // `"{{password}}"` is a template, not a value; keep it readable.
             let template = value.starts_with("{{") && value.ends_with("}}");
-            if value.starts_with(HIDDEN) || template {
+            // Only a value that is all hidden is kept as is; one with a
+            // known secret hidden in part still has the rest to hide.
+            if value == HIDDEN || template {
                 c[0].to_owned()
             } else {
                 format!("{}{quote}{HIDDEN}{quote}", &c[1])
@@ -198,6 +200,11 @@ mod tests {
 
     #[test]
     fn hides_quoted_values_whole() {
+        let known = Redactor::new(["prefix1234".to_owned()]);
+        assert_eq!(
+            known.text(r#"{"password":"prefix1234 suffix9876"}"#),
+            format!(r#"{{"password":"{HIDDEN}"}}"#)
+        );
         let r = Redactor::default();
         assert_eq!(
             r.text(r#"{"password":"first second","user":"demo"}"#),

@@ -49,9 +49,14 @@ export function ExplainPanel({
   }, []);
 
   const ask = async () => {
+    // One call at a time: a second start (Explain on the Failure tab while
+    // the Explain tab is asking) would replace the id Stop needs.
+    if (callId.current) return;
+    const id = crypto.randomUUID();
+    callId.current = id;
     setState({ kind: "asking" });
-    callId.current = crypto.randomUUID();
-    const res = await commands.aiExplain(question(), secrets, choiceOf(settings), true, callId.current);
+    const res = await commands.aiExplain(question(), secrets, choiceOf(settings), true, id);
+    if (callId.current === id) callId.current = "";
     if (!live.current) return;
     if (res.status === "error") setState({ kind: "failed", error: res.error });
     else {

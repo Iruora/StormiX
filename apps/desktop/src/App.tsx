@@ -1552,6 +1552,9 @@ function TestFileView({
           onSecret={(name, value) => {
             setSecretValues((v) => ({ ...v, [name]: value }));
             if (!run.isPending) run.reset();
+            // As for the run: a kept load result would go to the AI with
+            // the new value hidden, not the old one it holds.
+            if (!load.isPending) load.reset();
           }}
           onClose={() => setEnvEditorOpen(false)}
         />
