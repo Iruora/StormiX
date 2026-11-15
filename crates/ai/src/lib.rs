@@ -194,6 +194,13 @@ pub async fn ask(
 ) -> Result<Answer, AiError> {
     let provider = found.provider;
     let started = Instant::now();
+    // A Stop that came before the start wins: nothing is started.
+    tokio::pin!(cancel);
+    tokio::select! {
+        biased;
+        () = &mut cancel => return Err(AiError::Cancelled),
+        () = std::future::ready(()) => {}
+    }
     // An empty folder to run in, so the command line sees none of the
     // user's files or project settings.
     let dir = tempfile::Builder::new()
@@ -238,11 +245,12 @@ pub async fn ask(
         child.wait_with_output().await
     };
     let output = tokio::select! {
+        biased;
+        () = &mut cancel => return Err(AiError::Cancelled),
         out = tokio::time::timeout(Duration::from_secs(timeout_s.into()), run) => match out {
             Err(_) => return Err(AiError::Timeout(provider, timeout_s)),
             Ok(out) => out.map_err(|e| AiError::Spawn(provider, e))?,
         },
-        () = cancel => return Err(AiError::Cancelled),
     };
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -543,5 +551,18 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, AiError::Cancelled));
+
+        // A Stop already given starts nothing at all.
+        let marker = dir.path().join("started");
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+        )
+        .unwrap();
+        let err = ask(&found, "x", &AskOptions::default(), async {})
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AiError::Cancelled));
+        assert!(!marker.exists(), "the provider was started");
     }
 }

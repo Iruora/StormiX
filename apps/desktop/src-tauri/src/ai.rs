@@ -119,8 +119,10 @@ pub async fn ai_explain(
         .insert(id.clone(), stop);
     let result = async {
         let found = tokio::select! {
-            found = find(&choice) => found?,
+            // A Stop wins when both are ready.
+            biased;
             _ = &mut stopped => return Err(stormix_ai::AiError::Cancelled.to_string()),
+            found = find(&choice) => found?,
         };
         let options = AskOptions {
             model: choice.model.clone(),

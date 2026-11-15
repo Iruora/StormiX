@@ -904,6 +904,7 @@ function TestFileView({
   const chooseEnv = (name: string) => {
     setEnvName(name);
     if (!run.isPending) run.reset();
+    if (!load.isPending) load.reset();
   };
   /** Shows step `i` in the Steps tab. */
   const openStep = (i: number) => {
