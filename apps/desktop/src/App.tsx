@@ -420,9 +420,14 @@ function TestFileView({
   // The file each last run and load test came from, so Diagnose finds its
   // linked CSV files even after Save As moved the file.
   const ranFrom = useRef<{ run: string | null; load: string | null }>({ run: null, load: null });
+  // The values to hide as they were when each run or load test started, so a
+  // result explained after a secret changed still hides the value it used.
+  const ranSecrets = useRef<{ run: string[]; load: string[] }>({ run: [], load: [] });
+  const hiddenFor = (kind: "run" | "load") => [...new Set([...ranSecrets.current[kind], ...aiSecrets])];
   const run = useMutation({
     mutationFn: async (yaml: string) => {
       ranFrom.current.run = path;
+      ranSecrets.current.run = aiSecrets;
       runEnv.current = envName;
       setRunStep(null);
       const unlisten = await events.runProgress.listen((e) => setRunStep(e.payload));
@@ -462,6 +467,7 @@ function TestFileView({
     // passes the first run's, which Save As may since have moved.
     mutationFn: async ({ yaml, from }: { yaml: string; from: string | null }) => {
       ranFrom.current.load = from;
+      ranSecrets.current.load = aiSecrets;
       setPoints([]);
       const unlisten = await events.loadProgress.listen((e) => setPoints((p) => [...p, e.payload]));
       try {
@@ -1207,13 +1213,13 @@ function TestFileView({
       )}
       {run.isPending && <RunLive name={result?.test?.flow.name ?? "the flow"} progress={runStep} />}
       {run.data && (
-        <AiContext.Provider value={{ file: run.variables ?? null, secrets: aiSecrets }}>
+        <AiContext.Provider value={{ file: run.variables ?? null, secrets: hiddenFor("run") }}>
           <RunResult result={run.data} diagnose={diagnoseIn(run.variables, ranFrom.current.run)} />
         </AiContext.Provider>
       )}
       {load.isPending && <LoadLive points={points} onStop={stopLoad} stopping={stopping} />}
       {load.data && !load.isPending && (
-        <AiContext.Provider value={{ file: load.variables?.yaml ?? null, secrets: aiSecrets }}>
+        <AiContext.Provider value={{ file: load.variables?.yaml ?? null, secrets: hiddenFor("load") }}>
           <LoadResult
             report={load.data}
             diagnose={diagnoseIn(load.variables?.yaml, ranFrom.current.load)}
