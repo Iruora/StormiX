@@ -40,11 +40,13 @@ export function ExplainPanel({
   const live = useRef(true);
   /** Names this panel's call in flight, so Stop or closing it ends only that one. */
   const callId = useRef("");
+  /** Set only once the call is sent, so a Stop never marks an id that won't run. */
+  const sentId = useRef("");
   useEffect(() => {
     live.current = true;
     return () => {
       live.current = false;
-      void commands.aiCancel(callId.current);
+      if (sentId.current) void commands.aiCancel(sentId.current);
     };
   }, []);
 
@@ -68,7 +70,9 @@ export function ExplainPanel({
       }
     }
     setState({ kind: "asking" });
+    sentId.current = id;
     const res = await commands.aiExplain(question(), secrets, choiceOf(settings), true, id);
+    if (sentId.current === id) sentId.current = "";
     if (callId.current === id) callId.current = "";
     if (!live.current) return;
     if (res.status === "error") setState({ kind: "failed", error: res.error });
@@ -146,7 +150,7 @@ export function ExplainPanel({
             </span>
             <button
               type="button"
-              onClick={() => void commands.aiCancel(callId.current)}
+              onClick={() => void commands.aiCancel(sentId.current)}
               className="flex items-center gap-1 rounded border border-line bg-surface px-2 py-0.5 text-xs text-muted hover:text-ink"
             >
               <Square size="0.6875rem" /> Stop
