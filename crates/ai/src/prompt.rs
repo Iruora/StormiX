@@ -655,8 +655,13 @@ flow:
         assert!(p.contains("status: 401"));
         assert!(p.contains("check FAILED: status == 200 (got 401)"));
         assert!(p.contains("bad credentials"));
-        for secret in ["s3cr3t-token", "Pa55word!", "abc123"] {
-            assert!(!p.contains(secret), "{secret} leaked:\n{p}");
+        // The message names which one by position, so a failing test does
+        // not print the secret or the prompt holding it.
+        for (i, secret) in ["s3cr3t-token", "Pa55word!", "abc123"].iter().enumerate() {
+            assert!(
+                !p.contains(secret),
+                "test secret #{i} leaked into the prompt"
+            );
         }
     }
 
