@@ -65,7 +65,9 @@ export function ExplainPanel({
     }
   };
   const togglePrompt = async () => {
-    if (!showPrompt && prompt == null) {
+    // Built fresh each time it opens, so it holds what was found since
+    // (a Diagnose run, say); a send then shows exactly what went.
+    if (!showPrompt) {
       const res = await commands.aiExplain(question(), secrets, choiceOf(settings), false, "");
       if (res.status === "ok") setPrompt(res.data.prompt);
     }
