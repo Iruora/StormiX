@@ -21,8 +21,8 @@ pub struct ExplainArgs {
     /// claude or copilot. Defaults to the first one found.
     #[arg(long)]
     provider: Option<Provider>,
-    /// The program to run, when it is not on PATH.
-    #[arg(long)]
+    /// The program to run, when it is not on PATH. Needs `--provider`.
+    #[arg(long, requires = "provider")]
     provider_path: Option<PathBuf>,
     /// The model, as the provider names it. Defaults to the provider's own.
     #[arg(long)]

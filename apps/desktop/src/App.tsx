@@ -578,6 +578,9 @@ function TestFileView({
     if (select !== null) setEnvName(select);
     setEnvError(null);
     if (!run.isPending) run.reset();
+    // A kept load result would be explained with the new environment's
+    // secrets, so the old one's could reach the AI unhidden.
+    if (!load.isPending) load.reset();
   };
   // What the hidden panel would show: errors or failures first.
   const panelAlert =

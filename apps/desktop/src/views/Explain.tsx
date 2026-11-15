@@ -38,17 +38,20 @@ export function ExplainPanel({
   const [prompt, setPrompt] = useState<string | null>(null);
   const [showPrompt, setShowPrompt] = useState(false);
   const live = useRef(true);
+  /** Names this panel's call in flight, so Stop or closing it ends only that one. */
+  const callId = useRef("");
   useEffect(() => {
     live.current = true;
     return () => {
       live.current = false;
-      void commands.aiCancel();
+      void commands.aiCancel(callId.current);
     };
   }, []);
 
   const ask = async () => {
     setState({ kind: "asking" });
-    const res = await commands.aiExplain(question(), secrets, choiceOf(settings), true);
+    callId.current = crypto.randomUUID();
+    const res = await commands.aiExplain(question(), secrets, choiceOf(settings), true, callId.current);
     if (!live.current) return;
     if (res.status === "error") setState({ kind: "failed", error: res.error });
     else {
@@ -58,7 +61,7 @@ export function ExplainPanel({
   };
   const togglePrompt = async () => {
     if (!showPrompt && prompt == null) {
-      const res = await commands.aiExplain(question(), secrets, choiceOf(settings), false);
+      const res = await commands.aiExplain(question(), secrets, choiceOf(settings), false, "");
       if (res.status === "ok") setPrompt(res.data.prompt);
     }
     setShowPrompt((s) => !s);
@@ -123,7 +126,7 @@ export function ExplainPanel({
             </span>
             <button
               type="button"
-              onClick={() => void commands.aiCancel()}
+              onClick={() => void commands.aiCancel(callId.current)}
               className="flex items-center gap-1 rounded border border-line bg-surface px-2 py-0.5 text-xs text-muted hover:text-ink"
             >
               <Square size="0.6875rem" /> Stop

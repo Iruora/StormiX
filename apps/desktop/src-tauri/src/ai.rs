@@ -1,6 +1,7 @@
 //! AI commands: explain a step or a load test with the user's own Claude
 //! Code or GitHub Copilot CLI. See the `stormix-ai` crate.
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -56,9 +57,16 @@ pub struct AiReply {
     pub answer: Option<Answer>,
 }
 
-/// Calls in flight, so Stop can end them.
+/// Calls in flight by the id the panel gave them, so Stop and closing a
+/// panel end only that panel's call.
 #[derive(Default)]
-pub struct AiCalls(Mutex<Vec<oneshot::Sender<()>>>);
+pub struct AiCalls(Mutex<HashMap<String, oneshot::Sender<()>>>);
+
+impl AiCalls {
+    fn take(&self, id: &str) -> Option<oneshot::Sender<()>> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).remove(id)
+    }
+}
 
 /// The providers installed on this machine.
 #[tauri::command]
@@ -70,7 +78,8 @@ pub async fn ai_providers(paths: Vec<AiPath>) -> Vec<Found> {
 
 /// Builds the prompt for `question` with `secrets` and anything that looks
 /// like a credential hidden, then asks the chosen provider unless `send` is
-/// false (to show the user what would be sent).
+/// false (to show the user what would be sent). `id` names the call for
+/// [`ai_cancel`].
 #[tauri::command]
 #[specta::specta]
 pub async fn ai_explain(
@@ -78,6 +87,7 @@ pub async fn ai_explain(
     secrets: Vec<String>,
     choice: AiChoice,
     send: bool,
+    id: String,
     calls: State<'_, AiCalls>,
 ) -> Result<AiReply, String> {
     let redactor = Redactor::new(secrets);
@@ -99,30 +109,44 @@ pub async fn ai_explain(
             answer: None,
         });
     }
-    let found = find(&choice).await?;
-    let (stop, stopped) = oneshot::channel();
-    calls.0.lock().unwrap_or_else(|e| e.into_inner()).push(stop);
-    let options = AskOptions {
-        model: choice.model.clone(),
-        timeout_s: None,
-    };
-    let answer = stormix_ai::ask(&found, &prompt, &options, async {
-        // A dropped sender (the call list was cleared) also stops it.
-        let _ = stopped.await;
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+    // Registered before looking for the program, so a Stop during that
+    // search counts too.
+    let (stop, mut stopped) = oneshot::channel();
+    calls
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id.clone(), stop);
+    let result = async {
+        let found = tokio::select! {
+            found = find(&choice) => found?,
+            _ = &mut stopped => return Err(stormix_ai::AiError::Cancelled.to_string()),
+        };
+        let options = AskOptions {
+            model: choice.model.clone(),
+            timeout_s: None,
+        };
+        stormix_ai::ask(&found, &prompt, &options, async {
+            // A dropped sender also stops it.
+            let _ = stopped.await;
+        })
+        .await
+        .map_err(|e| e.to_string())
+    }
+    .await;
+    calls.take(&id);
+    let answer = result?;
     Ok(AiReply {
         prompt,
         answer: Some(answer),
     })
 }
 
-/// Stops every AI call in flight.
+/// Stops the AI call `id`, if it is still in flight.
 #[tauri::command]
 #[specta::specta]
-pub fn ai_cancel(calls: State<'_, AiCalls>) {
-    for stop in calls.0.lock().unwrap_or_else(|e| e.into_inner()).drain(..) {
+pub fn ai_cancel(id: String, calls: State<'_, AiCalls>) {
+    if let Some(stop) = calls.take(&id) {
         let _ = stop.send(());
     }
 }

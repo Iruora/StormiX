@@ -131,11 +131,12 @@ export const commands = {
 	/**
 	 *  Builds the prompt for `question` with `secrets` and anything that looks
 	 *  like a credential hidden, then asks the chosen provider unless `send` is
-	 *  false (to show the user what would be sent).
+	 *  false (to show the user what would be sent). `id` names the call for
+	 *  [`ai_cancel`].
 	 */
-	aiExplain: (question: AiQuestion_Deserialize, secrets: string[], choice: AiChoice_Deserialize, send: boolean) => typedError<AiReply_Serialize, string>(__TAURI_INVOKE("ai_explain", { question, secrets, choice, send })),
-	/**  Stops every AI call in flight. */
-	aiCancel: () => __TAURI_INVOKE<void>("ai_cancel"),
+	aiExplain: (question: AiQuestion_Deserialize, secrets: string[], choice: AiChoice_Deserialize, send: boolean, id: string) => typedError<AiReply_Serialize, string>(__TAURI_INVOKE("ai_explain", { question, secrets, choice, send, id })),
+	/**  Stops the AI call `id`, if it is still in flight. */
+	aiCancel: (id: string) => __TAURI_INVOKE<void>("ai_cancel", { id }),
 };
 
 /** Events */

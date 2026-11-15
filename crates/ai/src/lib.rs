@@ -159,6 +159,9 @@ pub async fn detect(provider: Provider, custom: Option<&Path>) -> Option<Found> 
         Some(path) => path.is_file().then(|| path.to_path_buf())?,
         None => find_program(provider.command())?,
     };
+    // `ask` runs from a temporary folder, where a relative path would no
+    // longer point at the program.
+    let path = std::path::absolute(&path).unwrap_or(path);
     let version = version(&path).await;
     Some(Found {
         provider,
@@ -169,7 +172,7 @@ pub async fn detect(provider: Provider, custom: Option<&Path>) -> Option<Found> 
 
 async fn version(path: &Path) -> Option<String> {
     let mut cmd = command(path);
-    cmd.arg("--version").stdin(Stdio::null());
+    cmd.arg("--version").stdin(Stdio::null()).kill_on_drop(true);
     let out = tokio::time::timeout(VERSION_TIMEOUT, cmd.output())
         .await
         .ok()?

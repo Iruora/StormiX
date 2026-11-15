@@ -31,6 +31,14 @@ static KEY_VALUE: LazyLock<Regex> = LazyLock::new(|| {
     )
     .unwrap()
 });
+/// The same keys with a quoted value, which may hold spaces:
+/// `"password": "two words"`, `secret: 'a \'b\''`.
+static QUOTED_KEY_VALUE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?i)(["']?[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|apikey|client[_-]?secret|session[_-]?id|private[_-]?key|credentials?)["']?\s*[:=]\s*)(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)')"#,
+    )
+    .unwrap()
+});
 /// `https://user:password@host`.
 static URL_USERINFO: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@").unwrap());
@@ -49,17 +57,39 @@ impl Redactor {
         Self { secrets }
     }
 
-    /// Hides every secret value and anything that looks like a credential.
-    pub fn text(&self, text: &str) -> String {
+    /// Hides only the known secret values, for text built from parts that
+    /// were already checked for anything credential-like.
+    pub fn secrets_in(&self, text: &str) -> String {
         let mut out = text.to_owned();
         for secret in &self.secrets {
             if out.contains(secret.as_str()) {
                 out = out.replace(secret.as_str(), HIDDEN);
             }
         }
+        out
+    }
+
+    /// Hides every secret value and anything that looks like a credential.
+    pub fn text(&self, text: &str) -> String {
+        let out = self.secrets_in(text);
         let out = URL_USERINFO.replace_all(&out, format!("${{1}}{HIDDEN}@"));
         let out = BEARER.replace_all(&out, format!("${{1}} {HIDDEN}"));
         let out = JWT.replace_all(&out, HIDDEN);
+        // A quoted value is hidden up to its closing quote, spaces and
+        // escaped quotes included.
+        let out = QUOTED_KEY_VALUE.replace_all(&out, |c: &regex::Captures| {
+            let (value, quote) = match c.get(2) {
+                Some(v) => (v.as_str(), '"'),
+                None => (c.get(3).map_or("", |m| m.as_str()), '\''),
+            };
+            // `"{{password}}"` is a template, not a value; keep it readable.
+            let template = value.starts_with("{{") && value.ends_with("}}");
+            if value.starts_with(HIDDEN) || template {
+                c[0].to_owned()
+            } else {
+                format!("{}{quote}{HIDDEN}{quote}", &c[1])
+            }
+        });
         let out = KEY_VALUE.replace_all(&out, |c: &regex::Captures| {
             // `{{password}}` is a template, not a value; keep it readable.
             if c[2].starts_with(HIDDEN) {
@@ -164,6 +194,20 @@ mod tests {
             r.text("got eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig_part here"),
             "got ‹hidden› here"
         );
+    }
+
+    #[test]
+    fn hides_quoted_values_whole() {
+        let r = Redactor::default();
+        assert_eq!(
+            r.text(r#"{"password":"first second","user":"demo"}"#),
+            format!(r#"{{"password":"{HIDDEN}","user":"demo"}}"#)
+        );
+        assert_eq!(
+            r.text(r#"api_key: 'it\'s long'"#),
+            format!("api_key: '{HIDDEN}'")
+        );
+        assert_eq!(r.text(r#""token": "{{token}}""#), r#""token": "{{token}}""#);
     }
 
     #[test]

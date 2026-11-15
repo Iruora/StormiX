@@ -57,12 +57,8 @@ pub fn explain_step(
     }
     let _ = writeln!(p, "{STYLE}\n\nDATA");
 
-    if let Some(def) = file.and_then(|f| step_definition(f, &step.name)) {
-        let _ = writeln!(
-            p,
-            "\n## Step as written in the test file\n{}",
-            redactor.text(&def)
-        );
+    if let Some(def) = file.and_then(|f| step_definition(f, &step.name, redactor)) {
+        let _ = writeln!(p, "\n## Step as written in the test file\n{def}");
     }
     let _ = writeln!(p, "\n## Result");
     write_step(&mut p, step, redactor);
@@ -85,7 +81,9 @@ pub fn explain_step(
         }
         let _ = writeln!(p, "Verdict: {}", redactor.text(&d.verdict));
     }
-    p
+    // Names and other figures are written as they are; hide known secrets
+    // in them too.
+    redactor.secrets_in(&p)
 }
 
 /// Asks what a load test's figures say about the API.
@@ -267,7 +265,9 @@ pub fn explain_load(report: &LoadReport, file: Option<&str>, redactor: &Redactor
             );
         }
     }
-    p
+    // Names and other figures are written as they are; hide known secrets
+    // in them too.
+    redactor.secrets_in(&p)
 }
 
 /// The API's CPU, memory and health read during the test, each series
@@ -429,13 +429,14 @@ fn mb(bytes: f64) -> String {
 }
 
 /// The step named `name` from a test file, as YAML.
-fn step_definition(file: &str, name: &str) -> Option<String> {
+/// Hidden before it is cut, so a secret across the cut is still found whole.
+fn step_definition(file: &str, name: &str, redactor: &Redactor) -> Option<String> {
     let test = TestFile::from_yaml(file).ok()?;
     let step = test.flow.steps.iter().find(|s| s.name == name)?;
     let value = serde_json::to_value(step).ok()?;
     serde_yaml_ng::to_string(&value)
         .ok()
-        .map(|s| cut(&s, FILE_LIMIT, 0))
+        .map(|s| cut(&redactor.text(&s), FILE_LIMIT, 0))
 }
 
 fn outcome(step: &StepResult, r: &Redactor) -> String {
@@ -706,6 +707,44 @@ flow:
         assert!(p.contains("- 20/s: 18.0, 5.00%, 9.0, 95, BROKE"), "{p}");
         assert!(p.contains("broke cpu < 85%: actual 95.00"), "{p}");
         assert!(p.contains("sustained: 10/s by one instance"), "{p}");
+    }
+
+    #[test]
+    fn known_secrets_in_names_are_hidden() {
+        let r = Redactor::new(["n4me-s3cret".to_owned()]);
+        let mut step = failed_step();
+        step.name = "Log in as n4me-s3cret".into();
+        let p = explain_step(&step, None, None, &r);
+        assert!(
+            !p.contains("n4me-s3cret"),
+            "a secret in the step name was sent"
+        );
+    }
+
+    #[test]
+    fn step_definition_is_hidden_before_it_is_cut() {
+        let secret = "cut-acr0ss-secret";
+        let r = Redactor::new([secret.to_owned()]);
+        // Put the secret across the FILE_LIMIT cut, in a long URL.
+        let file_with = |pad: usize| {
+            format!(
+                "version: 1\nflow:\n  name: Demo\n  steps:\n    - name: Log in\n      request:\n        method: GET\n        url: https://api.example.com/login?q={}{secret}\n",
+                "x".repeat(pad)
+            )
+        };
+        let base = step_definition(&file_with(0), "Log in", &Redactor::default())
+            .unwrap()
+            .find(secret)
+            .unwrap();
+        let file = file_with(FILE_LIMIT - base - 8);
+        assert!(
+            step_definition(&file, "Log in", &Redactor::default())
+                .unwrap()
+                .contains("cut-acr0"),
+            "the test should cut inside the secret"
+        );
+        let def = step_definition(&file, "Log in", &r).unwrap();
+        assert!(!def.contains("cut-acr0"), "a part of the secret was kept");
     }
 
     #[test]
