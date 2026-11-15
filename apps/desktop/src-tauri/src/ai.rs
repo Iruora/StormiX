@@ -60,11 +60,43 @@ pub struct AiReply {
 /// Calls in flight by the id the panel gave them, so Stop and closing a
 /// panel end only that panel's call.
 #[derive(Default)]
-pub struct AiCalls(Mutex<HashMap<String, oneshot::Sender<()>>>);
+pub struct AiCalls(Mutex<HashMap<String, Call>>);
+
+enum Call {
+    Running(oneshot::Sender<()>),
+    /// Stopped before it was registered: it must not start.
+    Stopped,
+}
 
 impl AiCalls {
-    fn take(&self, id: &str) -> Option<oneshot::Sender<()>> {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).remove(id)
+    /// Registers call `id`, unless it was already stopped.
+    fn start(&self, id: &str, stop: oneshot::Sender<()>) -> bool {
+        let mut calls = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if matches!(calls.remove(id), Some(Call::Stopped)) {
+            return false;
+        }
+        calls.insert(id.to_owned(), Call::Running(stop));
+        true
+    }
+
+    fn finish(&self, id: &str) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+    }
+
+    /// Stops call `id`, or marks it so it never starts if it isn't
+    /// registered yet.
+    fn stop(&self, id: &str) {
+        if id.is_empty() {
+            return;
+        }
+        let mut calls = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        match calls.insert(id.to_owned(), Call::Stopped) {
+            Some(Call::Running(stop)) => {
+                calls.remove(id);
+                let _ = stop.send(());
+            }
+            Some(Call::Stopped) | None => {}
+        }
     }
 }
 
@@ -112,11 +144,9 @@ pub async fn ai_explain(
     // Registered before looking for the program, so a Stop during that
     // search counts too.
     let (stop, mut stopped) = oneshot::channel();
-    calls
-        .0
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(id.clone(), stop);
+    if !calls.start(&id, stop) {
+        return Err(stormix_ai::AiError::Cancelled.to_string());
+    }
     let result = async {
         let found = tokio::select! {
             // A Stop wins when both are ready.
@@ -136,7 +166,7 @@ pub async fn ai_explain(
         .map_err(|e| e.to_string())
     }
     .await;
-    calls.take(&id);
+    calls.finish(&id);
     let answer = result?;
     Ok(AiReply {
         prompt,
@@ -144,13 +174,11 @@ pub async fn ai_explain(
     })
 }
 
-/// Stops the AI call `id`, if it is still in flight.
+/// Stops the AI call `id`, also one asked for but not started yet.
 #[tauri::command]
 #[specta::specta]
 pub fn ai_cancel(id: String, calls: State<'_, AiCalls>) {
-    if let Some(stop) = calls.take(&id) {
-        let _ = stop.send(());
-    }
+    calls.stop(&id);
 }
 
 async fn find(choice: &AiChoice) -> Result<Found, String> {
@@ -177,5 +205,24 @@ async fn find(choice: &AiChoice) -> Result<Found, String> {
                     .to_owned()
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stop_before_the_start_wins() {
+        let calls = AiCalls::default();
+        calls.stop("a");
+        let (tx, _rx) = oneshot::channel();
+        assert!(!calls.start("a", tx));
+        // The mark is used up: the same id may run again later.
+        let (tx, mut rx) = oneshot::channel();
+        assert!(calls.start("a", tx));
+        calls.stop("a");
+        assert!(rx.try_recv().is_ok());
+        assert!(calls.0.lock().unwrap().is_empty());
     }
 }
