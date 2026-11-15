@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { MOD } from "./Menu";
+import { AiSetting } from "./AiSetting";
 import { ProxySetting } from "./ProxySetting";
 
 /** Settings that apply to the whole app rather than to one test file. */
@@ -17,6 +18,9 @@ export function SettingsView({ version }: { version: string | null }) {
         <div className="mx-auto max-w-3xl space-y-4">
           <Section title="Proxy for requests">
             <ProxySetting />
+          </Section>
+          <Section title="AI assistant">
+            <AiSetting />
           </Section>
           <Section title="Keyboard">
             <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-xs">

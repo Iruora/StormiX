@@ -1,0 +1,23 @@
+[package]
+name = "stormix-ai"
+description = "Explains Stormix results with the AI command line the user already has: Claude Code or GitHub Copilot CLI"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[features]
+# Derives `specta::Type` so the desktop app can export the types to TypeScript.
+specta = ["dep:specta", "stormix-engine/specta"]
+
+[dependencies]
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
+specta = { workspace = true, optional = true }
+stormix-engine.workspace = true
+stormix-flow.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "process"] }

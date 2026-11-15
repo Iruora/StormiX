@@ -120,6 +120,7 @@ export default defineConfig({
           { text: 'API CPU, memory and health', link: '/features/api-resources' },
           { text: 'Capacity and pods', link: '/features/capacity' },
           { text: 'Proxies', link: '/features/proxies' },
+          { text: 'Explain results with AI', link: '/features/ai' },
           { text: 'Import and export collections', link: '/features/import-export' },
         ],
       },

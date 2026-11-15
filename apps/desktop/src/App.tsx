@@ -58,6 +58,7 @@ import { LoadSetup, type LoadSetupChoice } from "./views/LoadSetup";
 import { RunLive, RunResult, stepPassed } from "./views/RunResult";
 import type { Diagnose } from "./views/StepDetails";
 import { useProxy, useRestoreProxy } from "./lib/proxy";
+import { AiContext, isSecretName } from "./lib/ai";
 import { RUNS_KEY, RunsView } from "./views/Runs";
 import { SplitView, usePanel } from "./views/SidePanel";
 import { applyOverrides, EnvEditor, type EnvOverrides } from "./views/EnvEditor";
@@ -139,6 +140,12 @@ export function App() {
       persist({ ...latest.current, view: next });
     }
   };
+  // The Explain panels link to the AI settings.
+  useEffect(() => {
+    const open = () => setView("settings");
+    window.addEventListener("stormix-open-settings", open);
+    return () => window.removeEventListener("stormix-open-settings", open);
+  }, []);
   const onSnapshot = (snap: Snapshot) => {
     const base = latest.current;
     if (!base) return;
@@ -382,6 +389,16 @@ function TestFileView({
     }
     return vars;
   }, [env, envName, overrides, secretValues]);
+  // Values the AI must not see: the environment's secrets, and any
+  // variable named like a credential.
+  const aiSecrets = useMemo(() => {
+    const values = new Set<string>();
+    for (const name of env?.secrets ?? []) if (secretValues[name]) values.add(secretValues[name]);
+    for (const [name, value] of Object.entries(envVars)) if (isSecretName(name) && value) values.add(value);
+    for (const [name, value] of Object.entries(validation.data?.test?.flow.variables ?? {}))
+      if (isSecretName(name) && typeof value === "string" && value) values.add(value);
+    return [...values];
+  }, [env, secretValues, envVars, validation.data]);
   const sessionOnly = useMemo(() => new Set(Object.keys(overrides[envName] ?? {})), [overrides, envName]);
   // The validator does not know the chosen environment; drop its warnings
   // about variables that environment provides.
@@ -403,9 +420,14 @@ function TestFileView({
   // The file each last run and load test came from, so Diagnose finds its
   // linked CSV files even after Save As moved the file.
   const ranFrom = useRef<{ run: string | null; load: string | null }>({ run: null, load: null });
+  // The values to hide as they were when each run or load test started, so a
+  // result explained after a secret changed still hides the value it used.
+  const ranSecrets = useRef<{ run: string[]; load: string[] }>({ run: [], load: [] });
+  const hiddenFor = (kind: "run" | "load") => [...new Set([...ranSecrets.current[kind], ...aiSecrets])];
   const run = useMutation({
     mutationFn: async (yaml: string) => {
       ranFrom.current.run = path;
+      ranSecrets.current.run = aiSecrets;
       runEnv.current = envName;
       setRunStep(null);
       const unlisten = await events.runProgress.listen((e) => setRunStep(e.payload));
@@ -445,6 +467,7 @@ function TestFileView({
     // passes the first run's, which Save As may since have moved.
     mutationFn: async ({ yaml, from }: { yaml: string; from: string | null }) => {
       ranFrom.current.load = from;
+      ranSecrets.current.load = aiSecrets;
       setPoints([]);
       const unlisten = await events.loadProgress.listen((e) => setPoints((p) => [...p, e.payload]));
       try {
@@ -561,6 +584,9 @@ function TestFileView({
     if (select !== null) setEnvName(select);
     setEnvError(null);
     if (!run.isPending) run.reset();
+    // A kept load result would be explained with the new environment's
+    // secrets, so the old one's could reach the AI unhidden.
+    if (!load.isPending) load.reset();
   };
   // What the hidden panel would show: errors or failures first.
   const panelAlert =
@@ -878,6 +904,7 @@ function TestFileView({
   const chooseEnv = (name: string) => {
     setEnvName(name);
     if (!run.isPending) run.reset();
+    if (!load.isPending) load.reset();
   };
   /** Shows step `i` in the Steps tab. */
   const openStep = (i: number) => {
@@ -1186,14 +1213,20 @@ function TestFileView({
         </div>
       )}
       {run.isPending && <RunLive name={result?.test?.flow.name ?? "the flow"} progress={runStep} />}
-      {run.data && <RunResult result={run.data} diagnose={diagnoseIn(run.variables, ranFrom.current.run)} />}
+      {run.data && (
+        <AiContext.Provider value={{ file: run.variables ?? null, secrets: hiddenFor("run") }}>
+          <RunResult result={run.data} diagnose={diagnoseIn(run.variables, ranFrom.current.run)} />
+        </AiContext.Provider>
+      )}
       {load.isPending && <LoadLive points={points} onStop={stopLoad} stopping={stopping} />}
       {load.data && !load.isPending && (
-        <LoadResult
-          report={load.data}
-          diagnose={diagnoseIn(load.variables?.yaml, ranFrom.current.load)}
-          onReplay={busy || fileBusy ? undefined : replayLoad}
-        />
+        <AiContext.Provider value={{ file: load.variables?.yaml ?? null, secrets: hiddenFor("load") }}>
+          <LoadResult
+            report={load.data}
+            diagnose={diagnoseIn(load.variables?.yaml, ranFrom.current.load)}
+            onReplay={busy || fileBusy ? undefined : replayLoad}
+          />
+        </AiContext.Provider>
       )}
       {!hasRun && (
         <p className="rounded-lg border border-dashed border-line px-4 py-6 text-center text-xs text-muted">
@@ -1526,6 +1559,9 @@ function TestFileView({
           onSecret={(name, value) => {
             setSecretValues((v) => ({ ...v, [name]: value }));
             if (!run.isPending) run.reset();
+            // As for the run: a kept load result would go to the AI with
+            // the new value hidden, not the old one it holds.
+            if (!load.isPending) load.reset();
           }}
           onClose={() => setEnvEditorOpen(false)}
         />

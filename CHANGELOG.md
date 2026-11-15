@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Explain results with your own AI
+
+- **Explain** a failed step (in its Details) or a load test (at the top of its results) with **Claude Code** or **GitHub Copilot CLI**, whichever is installed and signed in on your computer. Stormix needs no API key and opens no connection of its own; the AI command line uses your account and its own proxy settings.
+- Secrets, auth headers, tokens and passwords are hidden before anything is sent, and **Show what is sent** shows the exact text. The AI gets no tools and reads none of your files.
+- **Settings → AI assistant** lists what was found, lets you pick one, a model, or the program's path, and turns the buttons off.
+- New `stormix explain RESULT.json` command does the same with a result saved by `run` or `load` with `--format json`.
+
 ### Copy as cURL from any step
 
 - **Copy as cURL on every step**, in the Flow tab and in Steps, without running first. The command has the URL, headers and body a run would send, GraphQL bodies included, with variables filled in from the flow, the environment (its session changes and secrets too), test data and what earlier steps extracted in the last run.
