@@ -18,7 +18,7 @@ In a step's **Details**, **Explain** (on the Failure tab, or the Explain tab) as
 
 ## What is sent, and what is not
 
-- Secrets are hidden before anything leaves Stormix: the values of the environment's `$secrets`, any variable named like a credential (`password`, `token`, `api_key`, `secret`…), `Authorization`, `Cookie` and similar headers (their scheme, like `Bearer`, is kept), bearer tokens, JWTs, `password=…`-style values and passwords in URLs. Each becomes `‹hidden›`. A known secret shorter than four characters is not searched for, because it can't be told apart from ordinary text, and YAML block values (`password: |`) are only hidden when they are a known secret. Click **Show what is sent** to check before you send.
+- Secrets are hidden before anything leaves Stormix: the values of the environment's `$secrets`, any variable named like a credential (`password`, `token`, `api_key`, `secret`…), `Authorization`, `Cookie` and similar headers (their scheme, like `Bearer`, is kept), bearer tokens, JWTs, `password=…`-style values and passwords in URLs. Each becomes `‹hidden›`. A known secret shorter than four characters is not searched for, because it can't be told apart from ordinary text, and YAML block values (`password: |`) are only hidden when they are a known secret. To check before anything is sent, open a step's **Explain** tab, or **Explain** on a load test (it opens without asking), and click **Show what is sent** first.
 - Bodies are cut to their first 3,000 and last 800 characters; a load test sends only the first 600 of each failing sample.
 - Extracted values are not sent, only their names.
 - **Show what is sent** displays the exact text the AI receives.

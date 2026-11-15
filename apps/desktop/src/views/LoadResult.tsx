@@ -168,7 +168,6 @@ export function LoadResult({
         <div className="border-b border-line px-4 py-3">
           <ExplainPanel
             what="what this load test shows"
-            autoStart
             question={() => ({ kind: "load", report, file })}
           />
         </div>
