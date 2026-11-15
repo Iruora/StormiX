@@ -59,7 +59,7 @@ impl Redactor {
 
     /// Hides only the known secret values, for text built from parts that
     /// were already checked for anything credential-like.
-    pub fn secrets_in(&self, text: &str) -> String {
+    pub fn hide_known(&self, text: &str) -> String {
         let mut out = text.to_owned();
         for secret in &self.secrets {
             if out.contains(secret.as_str()) {
@@ -71,7 +71,7 @@ impl Redactor {
 
     /// Hides every secret value and anything that looks like a credential.
     pub fn text(&self, text: &str) -> String {
-        let out = self.secrets_in(text);
+        let out = self.hide_known(text);
         let out = URL_USERINFO.replace_all(&out, format!("${{1}}{HIDDEN}@"));
         let out = BEARER.replace_all(&out, format!("${{1}} {HIDDEN}"));
         let out = JWT.replace_all(&out, HIDDEN);

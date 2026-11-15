@@ -83,7 +83,7 @@ pub fn explain_step(
     }
     // Names and other figures are written as they are; hide known secrets
     // in them too.
-    redactor.secrets_in(&p)
+    redactor.hide_known(&p)
 }
 
 /// Asks what a load test's figures say about the API.
@@ -267,7 +267,7 @@ pub fn explain_load(report: &LoadReport, file: Option<&str>, redactor: &Redactor
     }
     // Names and other figures are written as they are; hide known secrets
     // in them too.
-    redactor.secrets_in(&p)
+    redactor.hide_known(&p)
 }
 
 /// The API's CPU, memory and health read during the test, each series
@@ -700,13 +700,13 @@ flow:
         );
         let report: LoadReport = serde_json::from_str(&json).unwrap();
         let p = explain_load(&report, None, &Redactor::new(Vec::<String>::new()));
-        assert!(p.contains("STOPPED BY HAND"), "{p}");
-        assert!(p.contains("CPU avg 150%, peak 150%"), "{p}");
-        assert!(p.contains("start 100 MB, peak 200 MB, end 200 MB"), "{p}");
-        assert!(p.contains("health: DOWN from 12s to 15s (db: DOWN)"), "{p}");
-        assert!(p.contains("- 20/s: 18.0, 5.00%, 9.0, 95, BROKE"), "{p}");
-        assert!(p.contains("broke cpu < 85%: actual 95.00"), "{p}");
-        assert!(p.contains("sustained: 10/s by one instance"), "{p}");
+        assert!(p.contains("STOPPED BY HAND"));
+        assert!(p.contains("CPU avg 150%, peak 150%"));
+        assert!(p.contains("start 100 MB, peak 200 MB, end 200 MB"));
+        assert!(p.contains("health: DOWN from 12s to 15s (db: DOWN)"));
+        assert!(p.contains("- 20/s: 18.0, 5.00%, 9.0, 95, BROKE"));
+        assert!(p.contains("broke cpu < 85%: actual 95.00"));
+        assert!(p.contains("sustained: 10/s by one instance"));
     }
 
     #[test]
