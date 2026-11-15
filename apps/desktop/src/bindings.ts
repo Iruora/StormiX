@@ -135,7 +135,7 @@ export const commands = {
 	 *  [`ai_cancel`].
 	 */
 	aiExplain: (question: AiQuestion_Deserialize, secrets: string[], choice: AiChoice_Deserialize, send: boolean, id: string) => typedError<AiReply_Serialize, string>(__TAURI_INVOKE("ai_explain", { question, secrets, choice, send, id })),
-	/**  Stops the AI call `id`, if it is still in flight. */
+	/**  Stops the AI call `id`, also one asked for but not started yet. */
 	aiCancel: (id: string) => __TAURI_INVOKE<void>("ai_cancel", { id }),
 };
 
