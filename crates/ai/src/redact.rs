@@ -35,7 +35,7 @@ static KEY_VALUE: LazyLock<Regex> = LazyLock::new(|| {
 /// `"password": "two words"`, `secret: 'a \'b\''`.
 static QUOTED_KEY_VALUE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#"(?i)(["']?[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|apikey|client[_-]?secret|session[_-]?id|private[_-]?key|credentials?)["']?\s*[:=]\s*)(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)')"#,
+        r#"(?i)(["']?[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|apikey|client[_-]?secret|session[_-]?id|private[_-]?key|credentials?)["']?\s*[:=]\s*)(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.|'')*)')"#,
     )
     .unwrap()
 });
@@ -213,6 +213,11 @@ mod tests {
         assert_eq!(
             r.text(r#"api_key: 'it\'s long'"#),
             format!("api_key: '{HIDDEN}'")
+        );
+        // YAML writes a quote inside single quotes as two.
+        assert_eq!(
+            r.text("password: 'first''second'"),
+            format!("password: '{HIDDEN}'")
         );
         assert_eq!(r.text(r#""token": "{{token}}""#), r#""token": "{{token}}""#);
     }
