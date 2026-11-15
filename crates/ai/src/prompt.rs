@@ -719,6 +719,20 @@ flow:
             !p.contains("n4me-s3cret"),
             "a secret in the step name was sent"
         );
+        let lat = r#"{"min":1,"avg":1,"p50":1,"p90":1,"p95":1,"p99":1,"max":1}"#;
+        let json = format!(
+            r#"{{"name": "Load as n4me-s3cret", "summary": {{"durationMs": 1, "iterations": 1,
+                "failedIterations": 0, "droppedIterations": 0, "interruptedIterations": 0,
+                "requests": 1, "failedRequests": 0, "rps": 1, "latency": {lat},
+                "checksPassed": 1, "checksFailed": 0, "bytesReceived": 1, "steps": [],
+                "failures": [], "timeline": []}}, "thresholds": []}}"#
+        );
+        let report: LoadReport = serde_json::from_str(&json).unwrap();
+        let p = explain_load(&report, None, &r);
+        assert!(
+            !p.contains("n4me-s3cret"),
+            "a secret in the load test name was sent"
+        );
     }
 
     #[test]
