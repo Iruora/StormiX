@@ -443,10 +443,8 @@ fn install_dirs() -> Vec<PathBuf> {
             dirs.extend(versions.into_iter().rev());
         }
     }
-    for var in ["APPDATA"] {
-        if let Some(base) = std::env::var_os(var) {
-            dirs.push(PathBuf::from(base).join("npm"));
-        }
+    if let Some(base) = std::env::var_os("APPDATA") {
+        dirs.push(PathBuf::from(base).join("npm"));
     }
     if let Some(local) = std::env::var_os("LOCALAPPDATA") {
         let local = PathBuf::from(local);
