@@ -52,19 +52,21 @@ export function ExplainPanel({
     // One call at a time: a second start (Explain on the Failure tab while
     // the Explain tab is asking) would replace the id Stop needs.
     if (callId.current) return;
+    // Taken before the preview check too, so a second click waits for both.
+    const id = crypto.randomUUID();
+    callId.current = id;
     // With the preview open, send only what it shows: if the result changed
     // since (a Diagnose run, say), show the new one and wait for another click.
     if (showPrompt) {
       const pre = await commands.aiExplain(question(), secrets, choiceOf(settings), false, "");
       if (!live.current) return;
       if (pre.status === "ok" && pre.data.prompt !== prompt) {
+        if (callId.current === id) callId.current = "";
         setPrompt(pre.data.prompt);
         setState({ kind: "failed", error: "What is sent changed. Check it below, then ask again." });
         return;
       }
     }
-    const id = crypto.randomUUID();
-    callId.current = id;
     setState({ kind: "asking" });
     const res = await commands.aiExplain(question(), secrets, choiceOf(settings), true, id);
     if (callId.current === id) callId.current = "";
