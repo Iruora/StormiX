@@ -3,7 +3,9 @@
 
 use std::fmt::Write as _;
 
-use stormix_engine::{Diagnosis, Exchange, HeaderPair, LoadReport, Payload, StepResult};
+use stormix_engine::{
+    Diagnosis, Exchange, HeaderPair, LimitSearch, LoadReport, Payload, StepResult,
+};
 use stormix_flow::TestFile;
 
 use crate::redact::Redactor;
@@ -95,8 +97,10 @@ pub fn explain_load(report: &LoadReport, file: Option<&str>, redactor: &Redactor
     let _ = writeln!(
         p,
         "Task: explain the results of the load test \"{}\": how the API held up, which steps are \
-         slow or failing and why that is likely, whether latency or errors grew as load rose, and \
-         what to look at next on the API side or in the test.",
+         slow or failing and why that is likely, whether latency or errors grew as load rose, how \
+         the API's own CPU, memory and health moved with it when they were measured, what a \
+         find-the-limit run says about the capacity of one instance, and what to look at next on \
+         the API side or in the test.",
         report.name
     );
     let _ = writeln!(p, "{STYLE}\n\nDATA");
@@ -133,6 +137,21 @@ pub fn explain_load(report: &LoadReport, file: Option<&str>, redactor: &Redactor
         "checks: {} passed, {} failed; {:.0} bytes received",
         s.checks_passed, s.checks_failed, s.bytes_received
     );
+
+    if report.aborted {
+        let _ = writeln!(
+            p,
+            "STOPPED BY HAND before the load profile ended: the figures cover only the time it ran \
+             and the test does not count as passed."
+        );
+    }
+    if report.data_ran_out {
+        let _ = writeln!(
+            p,
+            "Ended early because a test data set picked each row once and ran out of rows; the \
+             thresholds still decide whether it passed."
+        );
+    }
 
     if !report.thresholds.is_empty() {
         let _ = writeln!(p, "\n## Thresholds");
@@ -191,6 +210,26 @@ pub fn explain_load(report: &LoadReport, file: Option<&str>, redactor: &Redactor
             );
         }
     }
+    write_resources(&mut p, report, redactor);
+    if let Some(limit) = &report.limit {
+        write_limit(&mut p, limit);
+    }
+    if !report.data.is_empty() {
+        let _ = writeln!(p, "\n## Test data");
+        for d in &report.data {
+            let _ = writeln!(
+                p,
+                "- {} ({}): {} rows, pick {:?} per {:?}, {} picks{}",
+                redactor.text(&d.label),
+                d.columns.join(", "),
+                d.rows,
+                d.pick,
+                d.per,
+                d.picks,
+                if d.ran_out { ", ran out of rows" } else { "" }
+            );
+        }
+    }
     if !report.setup.is_empty() {
         let _ = writeln!(
             p,
@@ -229,6 +268,164 @@ pub fn explain_load(report: &LoadReport, file: Option<&str>, redactor: &Redactor
         }
     }
     p
+}
+
+/// The API's CPU, memory and health read during the test, each series
+/// summed up and then thinned to about [`TIMELINE_LINES`] readings.
+fn write_resources(p: &mut String, report: &LoadReport, r: &Redactor) {
+    if report.resources.is_empty() {
+        return;
+    }
+    let _ = writeln!(
+        p,
+        "\n## API resources, read from the API during the test (CPU 100% = one core)"
+    );
+    for series in &report.resources {
+        let _ = writeln!(
+            p,
+            "\n### {} ({}, {})",
+            r.text(&series.name),
+            series.format,
+            r.text(&series.url)
+        );
+        let st = series.stats();
+        let mut facts = Vec::new();
+        if let Some(c) = series.cpu_cores {
+            facts.push(format!("{c} cores"));
+        }
+        if let (Some(avg), Some(peak)) = (st.cpu_avg, st.cpu_peak) {
+            facts.push(format!("CPU avg {avg:.0}%, peak {peak:.0}%"));
+        }
+        if let (Some(a), Some(b), Some(c)) = (st.memory_start, st.memory_peak, st.memory_end) {
+            facts.push(format!(
+                "{} start {}, peak {}, end {}",
+                series.memory_kind.as_deref().unwrap_or("memory"),
+                mb(a),
+                mb(b),
+                mb(c)
+            ));
+        }
+        if let Some(h) = st.heap_peak {
+            let max = series.heap_max_bytes.map(|m| format!(" of {}", mb(m)));
+            facts.push(format!("heap peak {}{}", mb(h), max.unwrap_or_default()));
+        }
+        if let Some(gc) = st.gc_avg {
+            facts.push(format!("GC {gc:.1} ms/s avg"));
+        }
+        if series.failed_reads > 0 {
+            facts.push(format!(
+                "{} failed reads ({})",
+                series.failed_reads,
+                r.text(series.error.as_deref().unwrap_or("no reason"))
+            ));
+        }
+        if !facts.is_empty() {
+            let _ = writeln!(p, "{}", facts.join("; "));
+        }
+        if let Some(err) = &series.health_error {
+            let _ = writeln!(p, "health check could not be read: {}", r.text(err));
+        } else if series.health_url.is_some() {
+            let periods = series.unhealthy_periods();
+            if periods.is_empty() {
+                let _ = writeln!(p, "health: healthy throughout");
+            }
+            for u in periods {
+                let _ = writeln!(
+                    p,
+                    "health: {} from {:.0}s to {}{}",
+                    u.status,
+                    u.from,
+                    u.to.map_or("the end".into(), |t| format!("{t:.0}s")),
+                    u.detail
+                        .map(|d| format!(" ({})", r.text(&d)))
+                        .unwrap_or_default()
+                );
+            }
+        }
+        if series.samples.len() > 1 {
+            let every = series.samples.len().div_ceil(TIMELINE_LINES).max(1);
+            let _ = writeln!(p, "readings (second: CPU %, memory MB, heap MB, GC ms/s):");
+            let n = |v: Option<f64>, f: fn(f64) -> String| v.map_or("-".into(), f);
+            for s in series.samples.iter().step_by(every) {
+                let _ = writeln!(
+                    p,
+                    "{:.0}: {}, {}, {}, {}",
+                    s.t,
+                    n(s.cpu_percent, |v| format!("{v:.0}")),
+                    n(s.memory_bytes, |v| format!("{:.0}", v / MB)),
+                    n(s.heap_bytes, |v| format!("{:.0}", v / MB)),
+                    n(s.gc_ms_per_s, |v| format!("{v:.1}")),
+                );
+            }
+        }
+    }
+}
+
+/// A `find_limit` run: each rate step, the one that held and the pods it
+/// means.
+fn write_limit(p: &mut String, limit: &LimitSearch) {
+    let _ = writeln!(
+        p,
+        "\n## Find the limit (rate steps: target rate, req/s, failed %, p95 ms, API CPU %, held)"
+    );
+    for st in &limit.steps {
+        let _ = writeln!(
+            p,
+            "- {}/s: {:.1}, {:.2}%, {:.1}, {}, {}{}",
+            st.rate,
+            st.rps,
+            st.error_rate,
+            st.latency.p95,
+            st.api_cpu.map_or("-".into(), |c| format!("{c:.0}")),
+            if st.passed { "held" } else { "BROKE" },
+            if st.partial { " (cut short)" } else { "" }
+        );
+        for t in st.thresholds.iter().filter(|t| !t.passed) {
+            let _ = writeln!(p, "  broke {}: actual {:.2}", t.threshold, t.actual);
+        }
+    }
+    let _ = writeln!(
+        p,
+        "sustained: {}; {}",
+        limit
+            .sustained
+            .map_or("no step held".into(), |r| format!("{r}/s by one instance")),
+        if limit.reached {
+            "a threshold broke, so the limit was found"
+        } else {
+            "every step held up to max_rate, so the real limit is higher"
+        }
+    );
+    if let Some(z) = &limit.sizing {
+        let _ =
+            writeln!(
+            p,
+            "pods: {} ({} for the traffic by CPU, {} by memory, plus spares) for a design rate of \
+             {:.1} req/s; tested {:.1} req/s per pod at {} CPU, usable {:.1} req/s per pod \
+             (basis: {}); {:.1} ms latency, {:.1} requests in flight per pod. Sized for: {}{}",
+            z.pods,
+            z.pods_by_cpu,
+            z.pods_by_memory.map_or("not sized".into(), |m| m.to_string()),
+            z.design_rps,
+            z.tested_rps_per_pod,
+            z.tested_cpu.map_or("unknown".into(), |c| format!("{c:.0}%")),
+            z.usable_rps_per_pod,
+            z.basis,
+            z.latency_ms,
+            z.in_flight_per_pod,
+            serde_json::to_string(&z.capacity).unwrap_or_default(),
+            z.memory_note
+                .as_deref()
+                .map(|n| format!("; memory note: {n}"))
+                .unwrap_or_default()
+        );
+    }
+}
+
+const MB: f64 = 1024.0 * 1024.0;
+
+fn mb(bytes: f64) -> String {
+    format!("{:.0} MB", bytes / MB)
 }
 
 /// The step named `name` from a test file, as YAML.
@@ -461,6 +658,49 @@ flow:
         for secret in ["s3cr3t-token", "Pa55word!", "abc123"] {
             assert!(!p.contains(secret), "{secret} leaked:\n{p}");
         }
+    }
+
+    #[test]
+    fn load_prompt_has_resources_limit_and_stop() {
+        let lat = r#"{"min":1,"avg":5,"p50":4,"p90":8,"p95":9,"p99":12,"max":20}"#;
+        let json = format!(
+            r#"{{
+            "name": "Limit",
+            "summary": {{"durationMs": 30000, "iterations": 100, "failedIterations": 2,
+                "droppedIterations": 0, "interruptedIterations": 0, "requests": 100,
+                "failedRequests": 2, "rps": 3.3, "latency": {lat}, "checksPassed": 98,
+                "checksFailed": 2, "bytesReceived": 1000, "steps": [], "failures": [],
+                "timeline": []}},
+            "thresholds": [],
+            "aborted": true,
+            "resources": [{{"name": "api", "url": "http://api/actuator/prometheus",
+                "format": "prometheus", "cpuCores": 2, "failedReads": 0,
+                "samples": [{{"t": 0, "memoryBytes": 104857600}},
+                            {{"t": 1, "cpuPercent": 150, "memoryBytes": 209715200}}],
+                "healthUrl": "http://api/actuator/health",
+                "health": [{{"t": 0, "status": "UP"}},
+                           {{"t": 12, "status": "DOWN", "detail": "db: DOWN"}},
+                           {{"t": 15, "status": "UP"}}]}}],
+            "limit": {{"steps": [
+                {{"rate": 10, "startS": 0, "endS": 10, "rps": 10, "requests": 100,
+                  "failedRequests": 0, "errorRate": 0, "latency": {lat}, "apiCpu": 40,
+                  "thresholds": [], "passed": true}},
+                {{"rate": 20, "startS": 10, "endS": 20, "rps": 18, "requests": 180,
+                  "failedRequests": 9, "errorRate": 5, "latency": {lat}, "apiCpu": 95,
+                  "thresholds": [{{"threshold": "cpu < 85%", "actual": 95, "passed": false}}],
+                  "passed": false}}],
+              "sustained": 10, "reached": true}}
+        }}"#
+        );
+        let report: LoadReport = serde_json::from_str(&json).unwrap();
+        let p = explain_load(&report, None, &Redactor::new(Vec::<String>::new()));
+        assert!(p.contains("STOPPED BY HAND"), "{p}");
+        assert!(p.contains("CPU avg 150%, peak 150%"), "{p}");
+        assert!(p.contains("start 100 MB, peak 200 MB, end 200 MB"), "{p}");
+        assert!(p.contains("health: DOWN from 12s to 15s (db: DOWN)"), "{p}");
+        assert!(p.contains("- 20/s: 18.0, 5.00%, 9.0, 95, BROKE"), "{p}");
+        assert!(p.contains("broke cpu < 85%: actual 95.00"), "{p}");
+        assert!(p.contains("sustained: 10/s by one instance"), "{p}");
     }
 
     #[test]

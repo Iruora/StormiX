@@ -14,7 +14,7 @@ In a step's **Details**, **Explain** (on the Failure tab, or the Explain tab) as
 
 ## Explain a load test
 
-**Explain** at the top of a load test's results asks what the figures say: the summary, thresholds, each step's latency and errors, the timeline (thinned to about 40 seconds), the most common failures with the first failing response of each step, and the slowest traced requests.
+**Explain** at the top of a load test's results asks what the figures say: the summary, thresholds, each step's latency and errors, the timeline (thinned to about 40 seconds), the most common failures with the first failing response of each step, and the slowest traced requests. When they are in the result, it also gets the API's CPU, memory and health read by a [monitor](/features/api-resources), each rate step of a **Find the limit** run with the pods it works out, how the test data was used, and whether the test was stopped by hand.
 
 ## What is sent, and what is not
 
