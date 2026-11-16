@@ -129,3 +129,30 @@ export function branchFrom(steps: Step[], i: number): Step[] {
     },
   ];
 }
+
+/**
+ * Why the steps in the order `next` would break a step's `after:`, or null
+ * when they do not: a step can only run after steps above it, so a move
+ * that puts it above a step it names is turned down.
+ */
+export function moveBreaksOrder(before: Step[], next: Step[]): string | null {
+  const below = (steps: Step[]) =>
+    steps.flatMap((s, i) =>
+      (s.after ?? [])
+        .filter((n) => !steps.slice(0, i).some((t) => t.name === n) && steps.slice(i + 1).some((t) => t.name === n))
+        .map((n) => [s.name, n] as const),
+    );
+  const was = below(before).length;
+  const now = below(next);
+  if (now.length <= was) return null;
+  const [step, name] = now[0];
+  return `“${step}” runs after “${name}”, so it has to stay below it`;
+}
+
+/** `steps` with the step at `from` moved to `to`. */
+export function moved(steps: Step[], from: number, to: number): Step[] {
+  const next = [...steps];
+  const [step] = next.splice(from, 1);
+  next.splice(to, 0, step);
+  return next;
+}

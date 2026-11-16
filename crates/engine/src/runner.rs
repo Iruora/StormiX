@@ -339,7 +339,9 @@ impl Runner {
                         // its own, it does not hold up the other branches.
                         let (runner, step, name) = (self.clone(), step.clone(), flow.name.clone());
                         Box::pin(async move {
-                            let task = tokio::spawn(async move {
+                            // Aborted if the run is dropped, as when a load
+                            // test stops mid iteration.
+                            let mut task = AbortOnDrop(tokio::spawn(async move {
                                 let mut vars = vars;
                                 let result = runner
                                     .run_step(
@@ -351,8 +353,8 @@ impl Runner {
                                     )
                                     .await;
                                 (result, vars)
-                            });
-                            match task.await {
+                            }));
+                            match (&mut task.0).await {
                                 Ok(out) => out,
                                 Err(err) => std::panic::resume_unwind(err.into_panic()),
                             }
@@ -394,7 +396,8 @@ impl Runner {
                 ));
             }
             let passed = result.passed();
-            if !passed && self.options.bail {
+            // Diagnose runs what it picked whatever fails, `bail` or not.
+            if !passed && self.options.bail && !nodes.keeps_going() {
                 halted = true;
             }
             results[node] = Some(result);
@@ -976,6 +979,15 @@ pub(crate) fn with_writes(vars: &Variables, writes: &Writes) -> Variables {
         }
     }
     vars
+}
+
+/// A spawned task that is stopped when its handle is dropped.
+struct AbortOnDrop<T>(tokio::task::JoinHandle<T>);
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 /// Which nodes [`Runner::run_nodes`] runs.

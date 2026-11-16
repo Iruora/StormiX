@@ -27,7 +27,7 @@ import type { CachedStep, FlowResult, Step, TestFile } from "../bindings";
 import { cachedTitle, storedAgo, useResponseCache } from "../lib/cache";
 import { methodTone } from "../lib/methods";
 import { useVariables, variablesSetBy, variablesUsedBy } from "../lib/variables";
-import { ancestors, branchFrom, branches, hasBranches, withoutStep } from "../lib/branches";
+import { ancestors, branchFrom, branches, hasBranches, moveBreaksOrder, moved, withoutStep } from "../lib/branches";
 import { stepPassed } from "./RunResult";
 import { FlowDiagram } from "./FlowDiagram";
 import { RunsAfter } from "./RunsAfter";
@@ -65,6 +65,8 @@ export function FlowView({
   const [drag, setDrag] = useState<Drag | null>(null);
   const [target, setTarget] = useState<Place | null>(null);
   const [removed, setRemoved] = useState<Removed | null>(null);
+  // Why the last move was turned down.
+  const [blocked, setBlocked] = useState<string | null>(null);
   // The step whose scripts are open in the editor.
   const [scripting, setScripting] = useState<Place | null>(null);
   const flowRef = useRef<HTMLOListElement>(null);
@@ -76,6 +78,7 @@ export function FlowView({
   // Any other change makes a pending Undo stale, so it goes.
   const write = (nextSteps: Step[], nextAside: Step[]) => {
     setRemoved(null);
+    setBlocked(null);
     onChange({ ...test, flow: { ...test.flow, steps: nextSteps, set_aside: nextAside } });
   };
   const lists = () => ({ steps: [...steps], aside: [...aside] });
@@ -94,6 +97,11 @@ export function FlowView({
     let at = to.index;
     if (from.list === to.list && from.index < at) at -= 1;
     next[to.list].splice(at, 0, step);
+    const why = to.list === "steps" ? moveBreaksOrder(steps, next.steps) : null;
+    if (why) {
+      setBlocked(why);
+      return;
+    }
     write(next.steps, next.aside);
   };
   const update = (place: Place, step: Step) => {
@@ -252,6 +260,7 @@ export function FlowView({
         onClearCache={() => cache.clear(step.name)}
         onScripts={() => setScripting({ list: "steps", index: i })}
         onMove={(to) => move({ list: "steps", index: i }, { list: "steps", index: to > i ? to + 1 : to })}
+        moveBlocked={(to) => moveBreaksOrder(steps, moved(steps, i, to))}
         onDuplicate={() => duplicate({ list: "steps", index: i })}
         onSetAside={() => move({ list: "steps", index: i }, { list: "aside", index: aside.length })}
         onDelete={() => remove({ list: "steps", index: i })}
@@ -308,6 +317,14 @@ export function FlowView({
             </span>
           </div>
 
+          {blocked && (
+            <div className="mb-3 flex items-center gap-2 rounded-md border border-line bg-surface-2 px-3 py-1.5 text-xs">
+              Not moved: {blocked}.
+              <button type="button" onClick={() => setBlocked(null)} className="ml-auto text-subtle hover:text-ink">
+                Dismiss
+              </button>
+            </div>
+          )}
           {removed && (
             <div className="mb-3 flex items-center gap-2 rounded-md border border-line bg-surface-2 px-3 py-1.5 text-xs">
               Deleted “{removed.step.name}”.
@@ -468,6 +485,7 @@ function FlowNode({
   onClearCache,
   onScripts,
   onMove,
+  moveBlocked,
   onDuplicate,
   onSetAside,
   onDelete,
@@ -497,6 +515,8 @@ function FlowNode({
   onClearCache: () => void;
   onScripts: () => void;
   onMove: (to: number) => void;
+  /** Why moving to `to` is not allowed, if it is not. */
+  moveBlocked: (to: number) => string | null;
   onDuplicate: () => void;
   onSetAside: () => void;
   onDelete: () => void;
@@ -580,10 +600,18 @@ function FlowNode({
           {/* The controls move under the name, together, when the card is narrow. */}
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <div className="flex items-center opacity-60 group-hover:opacity-100">
-              <IconButton label="Move up" disabled={index === 0} onClick={() => onMove(index - 1)}>
+              <IconButton
+                label={(index > 0 && moveBlocked(index - 1)) || "Move up"}
+                disabled={index === 0 || !!moveBlocked(index - 1)}
+                onClick={() => onMove(index - 1)}
+              >
                 <ArrowUp size="0.8125rem" />
               </IconButton>
-              <IconButton label="Move down" disabled={last} onClick={() => onMove(index + 1)}>
+              <IconButton
+                label={(!last && moveBlocked(index + 1)) || "Move down"}
+                disabled={last || !!moveBlocked(index + 1)}
+                onClick={() => onMove(index + 1)}
+              >
                 <ArrowDown size="0.8125rem" />
               </IconButton>
               <IconButton label="Branch: add a step that runs after this one, beside what already does" onClick={onBranch}>

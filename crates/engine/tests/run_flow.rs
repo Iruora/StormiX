@@ -938,6 +938,30 @@ async fn diagnose_keeps_branches_apart_as_a_run_does() {
     assert_eq!(diagnosis.step.extracted["j"], "0");
 }
 
+#[tokio::test]
+async fn diagnose_runs_every_step_before_the_one_it_looks_at_even_with_bail() {
+    let url = serve().await;
+    let f = flow(&format!(
+        "  name: diagnose bail\n  steps:\n{}{}{}",
+        echo_step(
+            "bad",
+            "",
+            "x",
+            "x",
+            "      assert: [{ body_contains: nope }]\n"
+        ),
+        echo_step("token", "", "t-1", "t", ""),
+        echo_step("target", "", "{{t}}", "got", ""),
+    ));
+    let runner = Runner::new(RunOptions {
+        bail: true,
+        ..RunOptions::default()
+    })
+    .unwrap();
+    let diagnosis = runner.diagnose(&f, &base(&url), "target").await.unwrap();
+    assert_eq!(diagnosis.step.extracted["got"], "t-1");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_slow_script_does_not_hold_up_another_branch() {
     let url = serve().await;
