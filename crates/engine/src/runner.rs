@@ -1145,3 +1145,23 @@ async fn script_exchange(
 fn millis(d: Duration) -> f64 {
     d.as_secs_f64() * 1000.0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_stopped_run_does_not_send_its_request() {
+        let mut runner = Runner::new(RunOptions::default()).unwrap();
+        runner.dropped = Some(Arc::new(std::sync::atomic::AtomicBool::new(true)));
+        let step: Step = serde_yaml_ng::from_str(
+            "name: s\nrequest: { method: GET, url: \"http://127.0.0.1:1/\" }\n",
+        )
+        .unwrap();
+        let result = runner
+            .run_step("f", &step, &mut Variables::default(), None, None)
+            .await;
+        assert_eq!(result.error.as_deref(), Some("the run was stopped"));
+        assert!(result.started_ms.is_none());
+    }
+}
