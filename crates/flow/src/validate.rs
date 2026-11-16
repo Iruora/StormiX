@@ -53,13 +53,44 @@ impl TestFile {
         // any variable may come from it.
         let data_file = self.data.iter().find_map(|d| d.file.as_deref());
         let mut names = BTreeSet::new();
-        // Scripts that have run by the time a step is sent; a variable they
-        // name may well be one they set.
-        let mut scripts: Vec<&str> = Vec::new();
+        self.check_after(&mut issues);
+        let graph = flow.graph();
+        let base = known;
         // Disabled steps are not sent, so they are not checked either, and
         // what they would extract is not available to the steps after them.
-        for (i, step) in flow.steps.iter().enumerate().filter(|(_, s)| s.enabled) {
+        // A step only gets what the steps it runs after extract: a step on
+        // another branch may not have run yet.
+        for (node, i) in graph.nodes.iter().map(|n| n.step).enumerate() {
+            let step = &flow.steps[i];
             let at = format!("flow.steps[{i}]");
+            let mut known = base.clone();
+            // Scripts that have run by the time a step is sent; a variable
+            // they name may well be one they set.
+            let mut scripts: Vec<&str> = Vec::new();
+            for &a in &graph.nodes[node].ancestors {
+                let earlier = &flow.steps[graph.nodes[a].step];
+                known.extend(earlier.extract.keys().map(String::as_str));
+                scripts.extend(earlier.scripts.pre_request.as_deref());
+                scripts.extend(earlier.scripts.test.as_deref());
+            }
+            for &other in graph.nodes[..node]
+                .iter()
+                .enumerate()
+                .filter(|(o, _)| graph.parallel(*o, node))
+                .map(|(_, n)| &n.step)
+            {
+                let other = &flow.steps[other];
+                for name in step
+                    .extract
+                    .keys()
+                    .filter(|k| other.extract.contains_key(*k))
+                {
+                    issues.warning(
+                        &format!("{at}.extract.{name}"),
+                        &format!("`{name}` is also extracted by `{}`, which runs in parallel with this step; where the branches join, the value from this step wins", other.name),
+                    );
+                }
+            }
             if step.name.trim().is_empty() {
                 issues.error(&format!("{at}.name"), "the step has no name");
             } else if !names.insert(step.name.as_str()) {
@@ -162,11 +193,6 @@ impl TestFile {
                     }
                     _ => {}
                 }
-            }
-            // Extracted values only exist for the steps after this one.
-            known.extend(step.extract.keys().map(String::as_str));
-            if let Some(source) = &step.scripts.test {
-                scripts.push(source);
             }
         }
 
@@ -415,6 +441,42 @@ impl TestFile {
 }
 
 impl TestFile {
+    /// Every `after:` names one step above it, unambiguously.
+    fn check_after(&self, issues: &mut Issues) {
+        let flow = &self.flow;
+        for (i, step) in flow.steps.iter().enumerate() {
+            let Some(after) = &step.after else { continue };
+            let at = format!("flow.steps[{i}].after");
+            for (n, name) in after.iter().enumerate() {
+                let above = flow.steps[..i].iter().filter(|s| &s.name == name).count();
+                if after[..n].contains(name) {
+                    issues.warning(&at, &format!("`{name}` is named twice"));
+                } else if above > 1 {
+                    issues.error(
+                        &at,
+                        &format!("{above} steps above are named `{name}`, so it is not clear which one this step runs after; rename one"),
+                    );
+                } else if above == 1 {
+                    // Fine.
+                } else if *name == step.name {
+                    issues.error(&at, "a step cannot run after itself");
+                } else if flow.steps[i + 1..].iter().any(|s| &s.name == name) {
+                    issues.error(
+                        &at,
+                        &format!("`{name}` is below this step; a step can only run after steps above it, so move one of them"),
+                    );
+                } else if flow.set_aside.iter().any(|s| &s.name == name) {
+                    issues.error(
+                        &at,
+                        &format!("`{name}` is set aside; put it back or take it out of `after`"),
+                    );
+                } else {
+                    issues.error(&at, &format!("there is no step named `{name}`"));
+                }
+            }
+        }
+    }
+
     /// Checks the `data` section and returns the variables its inline sets
     /// fill.
     fn check_data(&self, issues: &mut Issues) -> Vec<String> {
@@ -849,6 +911,56 @@ load:
                 (Severity::Warning, "flow.steps[1].request.url".into()),
                 (Severity::Error, "load.constant_rate.rate".into()),
                 (Severity::Error, "load.constant_rate.duration".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn checks_after_names_and_parallel_variables() {
+        let yaml = r#"
+version: 1
+flow:
+  name: branches
+  steps:
+    - name: login
+      request: { method: GET, url: "http://x/login" }
+      extract: { token: { json: $.token } }
+    - name: left
+      after: [login]
+      request: { method: GET, url: "http://x/{{token}}" }
+      extract: { id: { json: $.id } }
+    - name: right
+      after: [login, login]
+      request: { method: GET, url: "http://x/{{id}}" }
+      extract: { id: { json: $.id } }
+    - name: join
+      after: [left, right]
+      request: { method: GET, url: "http://x/{{id}}" }
+    - name: broken
+      after: [nowhere, later, parked, broken]
+      request: { method: GET, url: "http://x" }
+    - name: later
+      request: { method: GET, url: "http://x" }
+  set_aside:
+    - name: parked
+      request: { method: GET, url: "http://x" }
+"#;
+        let found = TestFile::from_yaml(yaml).unwrap().validate();
+        let messages: Vec<(&str, &str)> = found
+            .iter()
+            .map(|i| (i.path.as_str(), i.message.as_str()))
+            .collect();
+        assert_eq!(
+            messages,
+            [
+                ("flow.steps[2].after", "`login` is named twice"),
+                ("flow.steps[4].after", "there is no step named `nowhere`"),
+                ("flow.steps[4].after", "`later` is below this step; a step can only run after steps above it, so move one of them"),
+                ("flow.steps[4].after", "`parked` is set aside; put it back or take it out of `after`"),
+                ("flow.steps[4].after", "a step cannot run after itself"),
+                ("flow.steps[2].extract.id", "`id` is also extracted by `left`, which runs in parallel with this step; where the branches join, the value from this step wins"),
+                // `right` runs beside `left`, so its `id` is not there yet.
+                ("flow.steps[2].request.url", "`{{id}}` is not defined in the flow, the test data or extracted by an earlier step; it must come from an environment"),
             ]
         );
     }

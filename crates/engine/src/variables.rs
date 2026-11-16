@@ -1,6 +1,6 @@
 //! The values `{{name}}` resolves to while a flow runs.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use stormix_flow::{render, Rendered};
@@ -10,6 +10,9 @@ use stormix_flow::{render, Rendered};
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Variables {
     values: BTreeMap<String, String>,
+    /// Names set or removed since [`Variables::track`], even to the value
+    /// they had: a branch that sets a variable is its latest writer.
+    touched: Option<BTreeSet<String>>,
 }
 
 impl Variables {
@@ -23,16 +26,38 @@ impl Variables {
         entries: impl IntoIterator<Item = (K, V)>,
     ) {
         for (k, v) in entries {
-            self.values.insert(k.into(), v.into());
+            self.set(k, v);
         }
     }
 
     pub fn set(&mut self, name: impl Into<String>, value: impl Into<String>) {
-        self.values.insert(name.into(), value.into());
+        let name = name.into();
+        if let Some(touched) = &mut self.touched {
+            touched.insert(name.clone());
+        }
+        self.values.insert(name, value.into());
     }
 
     pub fn remove(&mut self, name: &str) {
+        if let Some(touched) = &mut self.touched {
+            touched.insert(name.to_owned());
+        }
         self.values.remove(name);
+    }
+
+    /// Starts recording which names are set or removed from now on.
+    pub(crate) fn track(&mut self) {
+        self.touched = Some(BTreeSet::new());
+    }
+
+    /// The names set or removed since [`Variables::track`], with their
+    /// value now (`None` once removed).
+    pub(crate) fn touched(&self) -> Vec<(String, Option<String>)> {
+        self.touched
+            .iter()
+            .flatten()
+            .map(|name| (name.clone(), self.values.get(name).cloned()))
+            .collect()
     }
 
     pub fn to_map(&self) -> BTreeMap<String, String> {

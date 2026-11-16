@@ -16,6 +16,7 @@ import {
   OctagonX,
   Play,
   Plus,
+  Split,
   Trash2,
   TriangleAlert,
   Undo2,
@@ -26,7 +27,10 @@ import type { CachedStep, FlowResult, Step, TestFile } from "../bindings";
 import { cachedTitle, storedAgo, useResponseCache } from "../lib/cache";
 import { methodTone } from "../lib/methods";
 import { useVariables, variablesSetBy, variablesUsedBy } from "../lib/variables";
-import { stepPassed, stoppedAt } from "./RunResult";
+import { ancestors, branchFrom, branches, hasBranches, moveBreaksOrder, moved, withoutStep } from "../lib/branches";
+import { stepPassed } from "./RunResult";
+import { FlowDiagram } from "./FlowDiagram";
+import { RunsAfter } from "./RunsAfter";
 import { CopyCurlButton } from "./CopyCurl";
 import { ScriptsDialog, withScripts } from "./ScriptsDialog";
 import { VarText } from "./VarField";
@@ -34,7 +38,7 @@ import { VarText } from "./VarField";
 type List = "steps" | "aside";
 type Place = { list: List; index: number };
 type Drag = Place & { x: number; y: number; dx: number; dy: number; width: number; moved: boolean };
-type Removed = Place & { step: Step };
+type Removed = Place & { step: Step; before: { steps: Step[]; aside: Step[] } };
 
 const isOn = (step: Step) => step.enabled !== false;
 
@@ -61,6 +65,8 @@ export function FlowView({
   const [drag, setDrag] = useState<Drag | null>(null);
   const [target, setTarget] = useState<Place | null>(null);
   const [removed, setRemoved] = useState<Removed | null>(null);
+  // Why the last move was turned down.
+  const [blocked, setBlocked] = useState<string | null>(null);
   // The step whose scripts are open in the editor.
   const [scripting, setScripting] = useState<Place | null>(null);
   const flowRef = useRef<HTMLOListElement>(null);
@@ -69,16 +75,33 @@ export function FlowView({
   const stops = test.flow.on_failure !== "continue";
   const setStops = (stop: boolean) =>
     onChange({ ...test, flow: { ...test.flow, on_failure: stop ? undefined : "continue" } });
-  const write = (nextSteps: Step[], nextAside: Step[]) =>
+  // Any other change makes a pending Undo stale, so it goes.
+  const write = (nextSteps: Step[], nextAside: Step[]) => {
+    setRemoved(null);
+    setBlocked(null);
     onChange({ ...test, flow: { ...test.flow, steps: nextSteps, set_aside: nextAside } });
+  };
   const lists = () => ({ steps: [...steps], aside: [...aside] });
 
   const move = (from: Place, to: Place) => {
     const next = lists();
+    if (from.list === "steps" && to.list === "aside") {
+      // The steps after it now run after what it ran after.
+      const step = next.steps[from.index];
+      next.steps = withoutStep(next.steps, from.index);
+      next.aside.splice(to.index, 0, { ...step, after: undefined });
+      write(next.steps, next.aside);
+      return;
+    }
     const [step] = next[from.list].splice(from.index, 1);
     let at = to.index;
     if (from.list === to.list && from.index < at) at -= 1;
     next[to.list].splice(at, 0, step);
+    const why = to.list === "steps" ? moveBreaksOrder(steps, next.steps) : null;
+    if (why) {
+      setBlocked(why);
+      return;
+    }
     write(next.steps, next.aside);
   };
   const update = (place: Place, step: Step) => {
@@ -88,16 +111,16 @@ export function FlowView({
   };
   const remove = (place: Place) => {
     const next = lists();
-    const [step] = next[place.list].splice(place.index, 1);
-    setRemoved({ ...place, step });
+    const step = next[place.list][place.index];
+    if (place.list === "steps") next.steps = withoutStep(next.steps, place.index);
+    else next.aside.splice(place.index, 1);
+    const before = lists();
     write(next.steps, next.aside);
+    setRemoved({ ...place, step, before });
   };
   const undoRemove = () => {
     if (!removed) return;
-    const next = lists();
-    next[removed.list].splice(Math.min(removed.index, next[removed.list].length), 0, removed.step);
-    setRemoved(null);
-    write(next.steps, next.aside);
+    write(removed.before.steps, removed.before.aside);
   };
   const duplicate = (place: Place) => {
     const next = lists();
@@ -189,17 +212,74 @@ export function FlowView({
   const enabled = steps.filter(isOn).length;
   const disabled = steps.length - enabled;
   const results = useMemo(() => new Map(lastRun?.steps.map((s) => [s.name, s]) ?? []), [lastRun]);
-  const stop = useMemo(() => stoppedAt(lastRun), [lastRun]);
+  // For each step that failed in the last run, how many steps after it were skipped.
+  const stoppedHere = useMemo(() => {
+    const counts = new Map<number, number>();
+    if (!lastRun) return counts;
+    steps.forEach((step, i) => {
+      const r = isOn(step) ? results.get(step.name) : undefined;
+      if (!r || r.skipped || stepPassed(r)) return;
+      const skipped = steps.filter(
+        (s, j) => j > i && isOn(s) && results.get(s.name)?.skipped && ancestors(steps, j).has(i),
+      ).length;
+      if (skipped > 0) counts.set(i, skipped);
+    });
+    return counts;
+  }, [lastRun, results, steps]);
+  const branching = useMemo(() => branches(steps), [steps]);
+  const showAfter = branching || hasBranches(steps);
+  const [view, setView] = useState<"diagram" | "list">("diagram");
+  const diagram = branching && view === "diagram";
   const dragged = drag?.moved ? (drag.list === "steps" ? steps : aside)[drag.index] : null;
   const isDragged = (place: Place) => !!dragged && drag!.list === place.list && drag!.index === place.index;
   const gapActive = (list: List, index: number) =>
     !!target && target.list === list && target.index === index && !!drag &&
     !(drag.list === list && (index === drag.index || index === drag.index + 1));
 
+  const card = (step: Step, i: number) => (
+      <FlowNode
+        step={step}
+        index={i}
+        number={steps.slice(0, i + 1).filter(isOn).length}
+        faded={isDragged({ list: "steps", index: i })}
+        result={isOn(step) ? results.get(step.name) : undefined}
+        notes={notes.get(step) ?? []}
+        cached={cache.steps.get(step.name)}
+        flowStops={stops}
+        stoppedRun={stoppedHere.get(i) ?? 0}
+        last={i === steps.length - 1}
+        onGrip={startDrag({ list: "steps", index: i })}
+        onToggle={() => update({ list: "steps", index: i }, { ...step, enabled: !isOn(step) })}
+        onCacheToggle={() => update({ list: "steps", index: i }, { ...step, cache: !step.cache })}
+        onContinueToggle={() =>
+          update(
+            { list: "steps", index: i },
+            { ...step, continue_on_failure: step.continue_on_failure ? undefined : true },
+          )
+        }
+        onClearCache={() => cache.clear(step.name)}
+        onScripts={() => setScripting({ list: "steps", index: i })}
+        onMove={(to) => move({ list: "steps", index: i }, { list: "steps", index: to > i ? to + 1 : to })}
+        moveBlocked={(to) => moveBreaksOrder(steps, moved(steps, i, to))}
+        onDuplicate={() => duplicate({ list: "steps", index: i })}
+        onSetAside={() => move({ list: "steps", index: i }, { list: "aside", index: aside.length })}
+        onDelete={() => remove({ list: "steps", index: i })}
+        onOpen={() => onOpenStep(i)}
+        steps={steps}
+        showAfter={showAfter}
+        diagram={diagram}
+        onAfter={(after) => update({ list: "steps", index: i }, { ...step, after })}
+        onBranch={() => write(branchFrom(steps, i), aside)}
+      />
+  );
+
   return (
     // The Set aside tray sits beside the flow when there is room, below it otherwise.
     <div className="@container min-h-full">
-      <div className={`flex min-h-full flex-col gap-4 p-4 @2xl:flex-row ${drag?.moved ? "cursor-grabbing select-none" : ""}`}>
+      {/* Branches need the width, so the tray goes under them. */}
+      <div
+        className={`flex min-h-full flex-col gap-4 p-4 ${diagram ? "" : "@2xl:flex-row"} ${drag?.moved ? "cursor-grabbing select-none" : ""}`}
+      >
         <section className="min-w-0 flex-1">
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted">
             <span>
@@ -229,9 +309,22 @@ export function FlowView({
               </button>
             )}
             <OnFailureSwitch stops={stops} onChange={setStops} />
-            <span className="ml-auto text-subtle">Drag the grip to reorder or set aside. Click a step to edit it.</span>
+            {branching && <ViewSwitch view={view} onChange={setView} />}
+            <span className="ml-auto text-subtle">
+              {diagram
+                ? "Steps side by side run at the same time. Click a step to edit it."
+                : "Drag the grip to reorder or set aside. Click a step to edit it."}
+            </span>
           </div>
 
+          {blocked && (
+            <div className="mb-3 flex items-center gap-2 rounded-md border border-line bg-surface-2 px-3 py-1.5 text-xs">
+              Not moved: {blocked}.
+              <button type="button" onClick={() => setBlocked(null)} className="ml-auto text-subtle hover:text-ink">
+                Dismiss
+              </button>
+            </div>
+          )}
           {removed && (
             <div className="mb-3 flex items-center gap-2 rounded-md border border-line bg-surface-2 px-3 py-1.5 text-xs">
               Deleted “{removed.step.name}”.
@@ -244,51 +337,30 @@ export function FlowView({
             </div>
           )}
 
-          <Terminal label="Start" icon={<Play size="0.6875rem" />} />
-          <ol ref={flowRef} className="relative">
-            {steps.map((step, i) => (
-              <li key={i}>
-                <Gap active={gapActive("steps", i)} onAdd={drag ? undefined : () => insert(i)} />
-                <FlowNode
-                  step={step}
-                  index={i}
-                  number={steps.slice(0, i + 1).filter(isOn).length}
-                  faded={isDragged({ list: "steps", index: i })}
-                  result={isOn(step) ? results.get(step.name) : undefined}
-                  notes={notes.get(step) ?? []}
-                  cached={cache.steps.get(step.name)}
-                  flowStops={stops}
-                  stoppedRun={stop?.name === step.name && isOn(step) ? stop.skipped : 0}
-                  last={i === steps.length - 1}
-                  onGrip={startDrag({ list: "steps", index: i })}
-                  onToggle={() => update({ list: "steps", index: i }, { ...step, enabled: !isOn(step) })}
-                  onCacheToggle={() => update({ list: "steps", index: i }, { ...step, cache: !step.cache })}
-                  onContinueToggle={() =>
-                    update(
-                      { list: "steps", index: i },
-                      { ...step, continue_on_failure: step.continue_on_failure ? undefined : true },
-                    )
-                  }
-                  onClearCache={() => cache.clear(step.name)}
-                  onScripts={() => setScripting({ list: "steps", index: i })}
-                  onMove={(to) => move({ list: "steps", index: i }, { list: "steps", index: to > i ? to + 1 : to })}
-                  onDuplicate={() => duplicate({ list: "steps", index: i })}
-                  onSetAside={() => move({ list: "steps", index: i }, { list: "aside", index: aside.length })}
-                  onDelete={() => remove({ list: "steps", index: i })}
-                  onOpen={() => onOpenStep(i)}
-                />
+          {diagram ? (
+            <FlowDiagram steps={steps} renderCard={(i) => card(steps[i], i)} />
+          ) : (
+            <>
+            <Terminal label="Start" icon={<Play size="0.6875rem" />} />
+            <ol ref={flowRef} className="relative">
+              {steps.map((step, i) => (
+                <li key={i}>
+                  <Gap active={gapActive("steps", i)} onAdd={drag ? undefined : () => insert(i)} />
+                  {card(step, i)}
+                </li>
+              ))}
+              <li>
+                <Gap active={gapActive("steps", steps.length)} onAdd={drag ? undefined : () => insert(steps.length)} />
               </li>
-            ))}
-            <li>
-              <Gap active={gapActive("steps", steps.length)} onAdd={drag ? undefined : () => insert(steps.length)} />
-            </li>
-          </ol>
-          <Terminal label="End" icon={<Flag size="0.6875rem" />} />
+            </ol>
+              <Terminal label="End" icon={<Flag size="0.6875rem" />} />
+            </>
+          )}
         </section>
 
         <aside
           ref={trayRef}
-          className={`w-full shrink-0 self-start rounded-lg @2xl:w-64 border border-dashed p-3 transition-colors ${
+          className={`w-full shrink-0 self-start rounded-lg ${diagram ? "" : "@2xl:w-64"} border border-dashed p-3 transition-colors ${
             target?.list === "aside" ? "border-accent bg-accent-soft/40" : "border-line bg-surface-2/40"
           }`}
         >
@@ -371,22 +443,25 @@ function useDependencyNotes(steps: Step[], aside: Step[]): Map<Step, string[]> {
     };
     const fromOff = setters(steps.filter((s) => !isOn(s)));
     const fromAside = setters(aside);
-    const set = new Set<string>();
     steps.forEach((step, i) => {
       if (!isOn(step)) return;
+      // Only what the steps it runs after set is there when it is sent.
+      const before = ancestors(steps, i);
+      const set = new Set([...before].filter((j) => isOn(steps[j])).flatMap((j) => variablesSetBy(steps[j])));
       const mine: string[] = [];
       for (const name of variablesUsedBy(step)) {
         const info = known.get(name);
         if (set.has(name) || info?.kind === "defined" || info?.kind === "generated") continue;
-        const later = steps.slice(i + 1).find((s) => isOn(s) && variablesSetBy(s).includes(name));
+        const later = steps.slice(i + 1).find((s, k) => isOn(s) && variablesSetBy(s).includes(name) && ancestors(steps, i + 1 + k).has(i));
+        const beside = steps.find((s, j) => j !== i && isOn(s) && !before.has(j) && variablesSetBy(s).includes(name));
         const off = fromOff.get(name);
         const parked = fromAside.get(name);
         if (later) mine.push(`{{${name}}} is set by “${later.name}”, which now runs after this step`);
+        else if (beside) mine.push(`{{${name}}} is set by “${beside.name}”, which runs in parallel with this step, so it may not be there yet`);
         else if (off) mine.push(`{{${name}}} comes from “${off.name}”, which is turned off`);
         else if (parked) mine.push(`{{${name}}} comes from “${parked.name}”, which is set aside`);
       }
       if (mine.length) notes.set(step, mine);
-      for (const name of variablesSetBy(step)) set.add(name);
     });
     return notes;
   }, [steps, aside, known]);
@@ -410,10 +485,16 @@ function FlowNode({
   onClearCache,
   onScripts,
   onMove,
+  moveBlocked,
   onDuplicate,
   onSetAside,
   onDelete,
   onOpen,
+  steps,
+  showAfter,
+  diagram,
+  onAfter,
+  onBranch,
 }: {
   step: Step;
   index: number;
@@ -434,18 +515,28 @@ function FlowNode({
   onClearCache: () => void;
   onScripts: () => void;
   onMove: (to: number) => void;
+  /** Why moving to `to` is not allowed, if it is not. */
+  moveBlocked: (to: number) => string | null;
   onDuplicate: () => void;
   onSetAside: () => void;
   onDelete: () => void;
   onOpen: () => void;
+  /** The flow's steps, to pick which ones this one runs after. */
+  steps: Step[];
+  /** Whether to show which steps this one runs after. */
+  showAfter: boolean;
+  /** Placed in the branch diagram rather than on the rail. */
+  diagram: boolean;
+  onAfter: (after: string[] | undefined) => void;
+  onBranch: () => void;
 }) {
   const on = isOn(step);
   const sets = variablesSetBy(step);
   const keepsGoing = on && flowStops && !!step.continue_on_failure;
   return (
-    <div data-flow-card className={`flex items-stretch ${faded ? "opacity-30" : ""}`}>
+    <div data-flow-card={diagram ? undefined : true} className={`flex items-stretch ${faded ? "opacity-30" : ""}`}>
       {/* The rail a run follows; turned off steps branch off it. */}
-      <div className="relative w-10 shrink-0">
+      <div className={`relative w-10 shrink-0 ${diagram ? "hidden" : ""}`}>
         <div className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-line" />
         {on ? (
           <div className="absolute left-1/2 top-1/2 flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-accent bg-surface text-[0.6875rem] font-semibold text-accent">
@@ -460,11 +551,21 @@ function FlowNode({
       </div>
       <div
         className={`group min-w-0 flex-1 rounded-lg border bg-surface transition-colors ${
-          on ? "border-line" : "ml-6 border-dashed border-line bg-surface-2/50"
+          on ? "border-line" : `${diagram ? "" : "ml-6"} border-dashed border-line bg-surface-2/50`
         } ${result?.skipped ? "opacity-60" : ""}`}
       >
         <div className="flex flex-wrap items-center gap-2 px-2 py-2">
-          <Grip onPointerDown={onGrip} />
+          {diagram ? (
+            <span
+              className={`flex size-5 shrink-0 items-center justify-center rounded-full border-2 text-[0.625rem] font-semibold ${
+                on ? "border-accent text-accent" : "border-line text-subtle"
+              }`}
+            >
+              {on ? number : "–"}
+            </span>
+          ) : (
+            <Grip onPointerDown={onGrip} />
+          )}
           <MethodBadge method={step.request.method} muted={!on} />
           <button
             type="button"
@@ -499,11 +600,22 @@ function FlowNode({
           {/* The controls move under the name, together, when the card is narrow. */}
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <div className="flex items-center opacity-60 group-hover:opacity-100">
-              <IconButton label="Move up" disabled={index === 0} onClick={() => onMove(index - 1)}>
+              <IconButton
+                label={(index > 0 && moveBlocked(index - 1)) || "Move up"}
+                disabled={index === 0 || !!moveBlocked(index - 1)}
+                onClick={() => onMove(index - 1)}
+              >
                 <ArrowUp size="0.8125rem" />
               </IconButton>
-              <IconButton label="Move down" disabled={last} onClick={() => onMove(index + 1)}>
+              <IconButton
+                label={(!last && moveBlocked(index + 1)) || "Move down"}
+                disabled={last || !!moveBlocked(index + 1)}
+                onClick={() => onMove(index + 1)}
+              >
                 <ArrowDown size="0.8125rem" />
+              </IconButton>
+              <IconButton label="Branch: add a step that runs after this one, beside what already does" onClick={onBranch}>
+                <Split size="0.8125rem" />
               </IconButton>
               <IconButton label="Duplicate" onClick={onDuplicate}>
                 <Copy size="0.8125rem" />
@@ -524,13 +636,18 @@ function FlowNode({
             <Toggle on={on} label={on ? "Turn this step off" : "Turn this step on"} onClick={onToggle} />
           </div>
         </div>
-        {(sets.length > 0 || notes.length > 0 || cached || stoppedRun > 0 || keepsGoing) && (
+        {(showAfter || sets.length > 0 || notes.length > 0 || cached || stoppedRun > 0 || keepsGoing) && (
           <div className="space-y-1 border-t border-line px-3 py-1.5 text-[0.6875rem]">
+            {showAfter && (
+              <div className="-ml-1 flex">
+                <RunsAfter steps={steps} index={index} onChange={onAfter} compact />
+              </div>
+            )}
             {stoppedRun > 0 && (
               <div className="flex items-center gap-1.5 text-bad">
                 <OctagonX size="0.6875rem" className="shrink-0" />
                 The last run stopped here: this step failed, so the {stoppedRun === 1 ? "step" : `${stoppedRun} steps`}{" "}
-                after it {stoppedRun === 1 ? "was" : "were"} skipped
+                after it {stoppedRun === 1 ? "was" : "were"} skipped{showAfter ? "; other branches kept going" : ""}
               </div>
             )}
             {keepsGoing && (
@@ -727,6 +844,28 @@ function ScriptsButton({ step, onClick }: { step: Step; onClick: () => void }) {
       <FileCode2 size="0.8125rem" />
       {which.length > 0 && <span className="font-semibold">{which.length === 2 ? "2" : which[0] === "pre-request" ? "pre" : "post"}</span>}
     </button>
+  );
+}
+
+/** The branch diagram, or the list a drag reorders. */
+function ViewSwitch({ view, onChange }: { view: "diagram" | "list"; onChange: (view: "diagram" | "list") => void }) {
+  const option = (value: "diagram" | "list", label: string, title: string) => (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={view === value}
+      title={title}
+      onClick={() => onChange(value)}
+      className={`rounded px-1.5 py-px ${view === value ? "bg-accent-soft font-medium text-accent" : "hover:text-ink"}`}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div role="radiogroup" aria-label="Show the flow as" className="flex items-center gap-1 rounded border border-line px-1 py-0.5">
+      {option("diagram", "Branches", "Parallel branches side by side, with where they split and join")}
+      {option("list", "List", "Every step in file order, to drag into a new order or set aside")}
+    </div>
   );
 }
 

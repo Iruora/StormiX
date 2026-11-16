@@ -100,6 +100,12 @@ pub struct Step {
     /// rest do not depend on, like a best-effort cleanup or a probe.
     #[serde(default, skip_serializing_if = "is_no")]
     pub continue_on_failure: bool,
+    /// The steps this one waits for, by name. Left out, it runs after the
+    /// step just above it. Steps naming the same step run at the same time,
+    /// each starting a branch; naming several steps waits for all of them.
+    /// `after: []` starts it with the flow. Only steps above it can be named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<Vec<String>>,
     pub request: Request,
     /// Variables to set from the response, by variable name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]

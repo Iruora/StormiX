@@ -227,10 +227,16 @@ pub fn run(args: RunArgs) -> Result<ExitCode, String> {
     let vars = prepared.once_vars();
     let Prepared { source, runner, .. } = prepared;
     let test = &source.test;
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| format!("cannot start the runtime: {e}"))?;
+    // Parallel branches need threads, so one branch's script does not hold
+    // up a request on another; a straight line runs fine on one.
+    let runtime = if test.flow.has_branches() {
+        tokio::runtime::Builder::new_multi_thread()
+    } else {
+        tokio::runtime::Builder::new_current_thread()
+    }
+    .enable_all()
+    .build()
+    .map_err(|e| format!("cannot start the runtime: {e}"))?;
     let result = runtime.block_on(runner.run(&test.flow, &vars));
 
     if let Some(path) = &args.junit {
@@ -258,6 +264,17 @@ pub fn run(args: RunArgs) -> Result<ExitCode, String> {
     })
 }
 
+/// Whether a step started before another one had finished.
+fn overlaps(result: &FlowResult) -> bool {
+    let mut spans: Vec<(f64, f64)> = result
+        .steps
+        .iter()
+        .filter_map(|s| s.started_ms.map(|at| (at, at + s.duration_ms)))
+        .collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    spans.windows(2).any(|w| w[1].0 < w[0].1 - 0.5)
+}
+
 fn render_text(result: &FlowResult, verbose: bool) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "{}\n", result.name);
@@ -268,6 +285,8 @@ fn render_text(result: &FlowResult, verbose: bool) -> String {
         .max()
         .unwrap_or(0)
         .min(40);
+    // With parallel branches, when each step started shows what overlapped.
+    let overlapping = overlaps(result);
 
     for step in &result.steps {
         let mark = if step.skipped {
@@ -282,8 +301,12 @@ fn render_text(result: &FlowResult, verbose: bool) -> String {
         } else {
             let status = step.status.map_or("---".to_owned(), |s| s.to_string());
             let cached = if step.cached { " (cached)" } else { "" };
+            let at = match step.started_ms.filter(|_| overlapping) {
+                Some(at) => format!("  at +{at:.0} ms"),
+                None => String::new(),
+            };
             format!(
-                "{:<7} {status} {:>6.0} ms{cached}",
+                "{:<7} {status} {:>6.0} ms{cached}{at}",
                 step.method, step.duration_ms
             )
         };
@@ -384,6 +407,7 @@ mod tests {
             error: None,
             skipped: false,
             cached: false,
+            started_ms: None,
             trace_id: None,
             span_id: None,
             exchange: None,

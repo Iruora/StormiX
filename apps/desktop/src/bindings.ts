@@ -2136,6 +2136,12 @@ export type StepResult_Deserialize = {
 	 */
 	cached?: boolean,
 	/**
+	 *  When the step was sent, from the start of the run, in milliseconds.
+	 *  Steps on parallel branches overlap. Missing for skipped steps and
+	 *  on runs saved before 1.12.
+	 */
+	startedMs?: number | null,
+	/**
 	 *  The W3C trace this request was sent in, from the `traceparent`
 	 *  header: Stormix's own when the flow has `trace` on, or one the step
 	 *  set itself. Look it up in Dynatrace or another APM tool to see what
@@ -2184,6 +2190,12 @@ export type StepResult_Serialize = {
 	 *  lookup's. Missing from runs saved before 1.4.
 	 */
 	cached?: boolean,
+	/**
+	 *  When the step was sent, from the start of the run, in milliseconds.
+	 *  Steps on parallel branches overlap. Missing for skipped steps and
+	 *  on runs saved before 1.12.
+	 */
+	startedMs?: number | null,
 	/**
 	 *  The W3C trace this request was sent in, from the `traceparent`
 	 *  header: Stormix's own when the flow has `trace` on, or one the step
@@ -2262,6 +2274,13 @@ export type Step_Deserialize = {
 	 *  rest do not depend on, like a best-effort cleanup or a probe.
 	 */
 	continue_on_failure?: boolean,
+	/**
+	 *  The steps this one waits for, by name. Left out, it runs after the
+	 *  step just above it. Steps naming the same step run at the same time,
+	 *  each starting a branch; naming several steps waits for all of them.
+	 *  `after: []` starts it with the flow. Only steps above it can be named.
+	 */
+	after?: string[] | null,
 	request: Request_Deserialize,
 	/**  Variables to set from the response, by variable name. */
 	extract?: { [key in string]: ExtractSource },
@@ -2291,6 +2310,13 @@ export type Step_Serialize = {
 	 *  rest do not depend on, like a best-effort cleanup or a probe.
 	 */
 	continue_on_failure?: boolean,
+	/**
+	 *  The steps this one waits for, by name. Left out, it runs after the
+	 *  step just above it. Steps naming the same step run at the same time,
+	 *  each starting a branch; naming several steps waits for all of them.
+	 *  `after: []` starts it with the flow. Only steps above it can be named.
+	 */
+	after?: string[],
 	request: Request_Serialize,
 	/**  Variables to set from the response, by variable name. */
 	extract?: { [key in string]: ExtractSource },

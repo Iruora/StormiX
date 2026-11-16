@@ -1,5 +1,5 @@
-import { ArrowDown, ArrowUp, CircleMinus, Copy, Eraser, FileCode2, OctagonX, Plus, Settings2, Trash2, X } from "lucide-react";
-import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, CircleMinus, Copy, Eraser, FileCode2, GitMerge, OctagonX, Plus, Settings2, Split, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type {
   Assertion,
@@ -15,6 +15,7 @@ import type {
   StepResult,
   TestFile,
 } from "../bindings";
+import { branches, moveBreaksOrder, moved, renameRefs, withoutStep } from "../lib/branches";
 import { cachedTitle, useResponseCache } from "../lib/cache";
 import { methodText, methodTone } from "../lib/methods";
 import { CopyCurlButton } from "./CopyCurl";
@@ -22,6 +23,7 @@ import { stoppedAt } from "./RunResult";
 import { ScriptsDialog, withScripts } from "./ScriptsDialog";
 import { TraceSetting } from "./TraceSetting";
 import { VarField } from "./VarField";
+import { RunsAfter } from "./RunsAfter";
 
 const METHODS: Method[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
@@ -43,6 +45,7 @@ export function StepsEditor({
   selected,
   onSelect,
   lastRun = null,
+  lastRunLinear = true,
 }: {
   test: TestFile;
   onChange: (next: TestFile) => void;
@@ -50,11 +53,18 @@ export function StepsEditor({
   onSelect: (next: StepsSelection) => void;
   /** To mark the steps the last run skipped after a failure. */
   lastRun?: FlowResult | null;
+  /** Whether the flow had no branches when `lastRun` ran. */
+  lastRunLinear?: boolean;
 }) {
   const steps = test.flow.steps;
   const stops = test.flow.on_failure !== "continue";
   const results = useMemo(() => new Map(lastRun?.steps.map((s) => [s.name, s]) ?? []), [lastRun]);
-  const stop = useMemo(() => stoppedAt(lastRun), [lastRun]);
+  // Read the run as the flow was when it ran, and as it is now: an edit can
+  // add branches after the run, or take them away.
+  const stop = useMemo(
+    () => stoppedAt(lastRun, lastRunLinear && !branches(steps)),
+    [lastRun, lastRunLinear, steps],
+  );
   const cache = useResponseCache(test.flow.name);
   const listRef = useRef<HTMLDivElement>(null);
   // A step that no longer exists falls back to the last one.
@@ -62,9 +72,8 @@ export function StepsEditor({
     selected === "flow" ? "flow" : steps.length === 0 ? "flow" : Math.min(selected, steps.length - 1);
   const setSteps = (next: Step[]) => onChange({ ...test, flow: { ...test.flow, steps: next } });
   const move = (from: number, to: number) => {
-    const next = [...steps];
-    const [step] = next.splice(from, 1);
-    next.splice(to, 0, step);
+    const next = moved(steps, from, to);
+    if (moveBreaksOrder(steps, next)) return;
     setSteps(next);
     onSelect(to);
   };
@@ -117,6 +126,11 @@ export function StepsEditor({
                 <span className={`min-w-0 flex-1 truncate ${off ? "line-through decoration-subtle" : ""}`} title={s.name}>
                   {s.name}
                 </span>
+                {s.after != null && (
+                  <span title={s.after.length ? `Runs after ${s.after.join(", ")}` : "Starts with the flow"} className="shrink-0 text-subtle">
+                    {s.after.length > 1 ? <GitMerge size="0.75rem" /> : <Split size="0.75rem" className="rotate-180" />}
+                  </span>
+                )}
                 {!off && results.get(s.name)?.skipped && (
                   <span title="Skipped in the last run: an earlier step failed" className="shrink-0 text-subtle">
                     <CircleMinus size="0.75rem" />
@@ -161,8 +175,11 @@ export function StepsEditor({
                   result={step.enabled !== false ? results.get(step.name) : undefined}
                   stoppedRun={stop?.name === step.name && step.enabled !== false ? stop.skipped : 0}
                   onClearCache={() => cache.clear(step.name)}
+                  steps={steps}
                   onChange={(next) => setSteps(steps.map((x, j) => (j === current ? next : x)))}
+                  onRename={(name) => setSteps(renameRefs(steps, current as number, name))}
                   onMove={(to) => move(current as number, to)}
+                  moveBlocked={(to) => moveBreaksOrder(steps, moved(steps, current as number, to))}
                   onDuplicate={() => {
                     const i = current as number;
                     setSteps([...steps.slice(0, i + 1), { ...step, name: `${step.name} (copy)` }, ...steps.slice(i + 1)]);
@@ -170,7 +187,7 @@ export function StepsEditor({
                   }}
                   onDelete={() => {
                     const i = current as number;
-                    setSteps(steps.filter((_, j) => j !== i));
+                    setSteps(withoutStep(steps, i));
                     onSelect(steps.length > 1 ? Math.max(0, i - 1) : "flow");
                   }}
                 />
@@ -265,9 +282,12 @@ function StepCard({
   stoppedRun,
   onClearCache,
   onChange,
+  onRename,
   onMove,
+  moveBlocked,
   onDuplicate,
   onDelete,
+  steps,
 }: {
   index: number;
   step: Step;
@@ -278,13 +298,32 @@ function StepCard({
   result: StepResult | undefined;
   /** In the last run, how many steps were skipped after this one failed. */
   stoppedRun: number;
+  /** The flow's steps, to pick which ones this one runs after. */
+  steps: Step[];
   onClearCache: () => void;
   onChange: (next: Step) => void;
+  /** A new name, given once typing it is done, so `after:` lists follow it. */
+  onRename: (name: string) => void;
   onMove: (to: number) => void;
+  /** Why moving to `to` is not allowed, if it is not. */
+  moveBlocked: (to: number) => string | null;
   onDuplicate: () => void;
   onDelete: () => void;
 }) {
   const request = step.request;
+  // The name being typed. It is applied when typing is done, so a name
+  // part way through (which may match another step's) never rewrites what
+  // other steps run after.
+  const [name, setName] = useState(step.name);
+  useEffect(() => setName(step.name), [step.name]);
+  const nameTaken = name !== step.name && steps.some((s) => s.name === name);
+  const commitName = () => {
+    const next = name.trim();
+    if (!next || next === step.name || steps.some((s) => s.name === next)) setName(step.name);
+    else onRename(next);
+  };
+  const upBlocked = index > 0 ? moveBlocked(index - 1) : null;
+  const downBlocked = !last ? moveBlocked(index + 1) : null;
   const on = step.enabled !== false;
   const setRequest = (patch: Partial<Step["request"]>) =>
     onChange({ ...step, request: { ...request, ...patch } as Step["request"] });
@@ -308,9 +347,15 @@ function StepCard({
         <span className="w-5 text-right text-xs text-subtle">{index + 1}</span>
         <input
           aria-label={`Step ${index + 1} name`}
-          value={step.name}
-          onChange={(e) => onChange({ ...step, name: e.target.value })}
-          className="min-w-0 flex-1 basis-32 bg-transparent font-medium outline-none"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={commitName}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") setName(step.name);
+          }}
+          title={nameTaken ? "Another step has this name; names must be unique" : undefined}
+          className={`min-w-0 flex-1 basis-32 bg-transparent font-medium outline-none ${nameTaken ? "text-bad" : ""}`}
         />
         {!on && <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[0.6875rem] text-subtle">turned off, skipped in runs</span>}
         {result?.skipped && (
@@ -390,10 +435,10 @@ function StepCard({
             <FileCode2 size="0.75rem" /> {scriptCount ? `scripts (${scriptCount})` : "scripts"}
           </button>
           <CopyCurlButton step={step} variant="chip" />
-          <IconButton label="Move up" disabled={index === 0} onClick={() => onMove(index - 1)}>
+          <IconButton label={upBlocked ?? "Move up"} disabled={index === 0 || !!upBlocked} onClick={() => onMove(index - 1)}>
             <ArrowUp size="0.875rem" />
           </IconButton>
-          <IconButton label="Move down" disabled={last} onClick={() => onMove(index + 1)}>
+          <IconButton label={downBlocked ?? "Move down"} disabled={last || !!downBlocked} onClick={() => onMove(index + 1)}>
             <ArrowDown size="0.875rem" />
           </IconButton>
           <IconButton label="Duplicate" onClick={onDuplicate}>
@@ -405,6 +450,10 @@ function StepCard({
         </div>
       </div>
       <div className="space-y-2 px-3 py-2.5">
+        <div className="flex items-center gap-1 text-xs text-muted" title="Steps that run after the same step run at the same time, each a branch">
+          Runs
+          <RunsAfter steps={steps} index={index} onChange={(after) => onChange({ ...step, after })} />
+        </div>
         <div className="flex flex-wrap gap-2">
           <select
             aria-label="Method"

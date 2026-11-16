@@ -10,6 +10,7 @@
 mod capacity;
 mod data;
 mod duration;
+mod graph;
 pub mod graphql;
 mod load;
 mod model;
@@ -22,6 +23,7 @@ mod validate;
 pub use capacity::{Capacity, Percent};
 pub use data::{parse_csv, DataSet, Per, Pick};
 pub use duration::{Duration, DurationError};
+pub use graph::{Node, StepGraph};
 pub use load::{LoadProfile, Stage};
 pub use model::{
     Assertion, Body, ExtractSource, Flow, GraphqlBody, Header, HeaderAssertion, JsonAssertion,

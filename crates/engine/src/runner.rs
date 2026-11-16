@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use reqwest::header::{HeaderMap, CONTENT_TYPE};
 use reqwest::redirect::Policy;
-use stormix_flow::{Body, Flow, GraphqlBody, KeyValue, Request, Step, TraceMode};
+use stormix_flow::{Body, Flow, GraphqlBody, KeyValue, Request, Step, StepGraph, TraceMode};
 use stormix_script::{
     self as script, Phase, ScriptInput, ScriptRequest, ScriptResponse, TestOutcome,
 };
@@ -77,6 +77,9 @@ pub struct Runner {
     /// To report the proxy each request went through; the client makes the
     /// same choice from the same settings.
     pub(crate) proxies: Arc<Proxies>,
+    /// Set when the run this step belongs to was dropped: a script still
+    /// running then sends no more requests.
+    dropped: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 /// A step about to run, as [`Runner::run_with_progress`] reports it.
@@ -94,6 +97,7 @@ impl Runner {
         Ok(Self {
             client,
             proxies: Arc::new(Proxies::new(&options.proxy)),
+            dropped: None,
             options,
             cache: Arc::default(),
         })
@@ -109,6 +113,7 @@ impl Runner {
         Ok(Self {
             client: build_client(&options)?,
             proxies: Arc::new(Proxies::new(&options.proxy)),
+            dropped: None,
             options,
             cache: self.cache.clone(),
         })
@@ -128,11 +133,21 @@ impl Runner {
     /// Sends a request for `bru.sendRequest` / `pm.sendRequest`, with the
     /// same client settings, taking no longer than the script has left.
     /// Scripts run on a blocking thread, so this blocks too.
+    /// Whether the run this step belongs to was dropped.
+    fn was_dropped(&self) -> bool {
+        self.dropped
+            .as_ref()
+            .is_some_and(|d| d.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
     fn send_for_script(
         &self,
         call: &ScriptRequest,
         left: Duration,
     ) -> Result<ScriptResponse, String> {
+        if self.was_dropped() {
+            return Err("the run was stopped".into());
+        }
         let timeout = left.min(self.options.timeout);
         match tokio::runtime::Handle::try_current() {
             // Inside `block_in_place`, so the runtime can drive this.
@@ -172,23 +187,56 @@ impl Runner {
         self.run_with_progress(flow, overrides, |_| {}).await
     }
 
-    /// Like [`Runner::run`], calling `on_step` as each step starts.
+    /// Like [`Runner::run`], calling `on_step` as each step starts. Steps
+    /// on parallel branches (see [`Flow::graph`]) run at the same time.
     pub async fn run_with_progress(
         &self,
         flow: &Flow,
         overrides: &Variables,
-        mut on_step: impl FnMut(StepStart<'_>),
+        on_step: impl FnMut(StepStart<'_>),
     ) -> FlowResult {
         let mut vars = Variables::new();
         vars.extend(flow.variables.iter().map(|(k, v)| (k.as_str(), v.as_str())));
         vars.extend(overrides.entries());
 
         let started = Instant::now();
+        // One trace for the whole run, when the flow asks for that.
+        let run_trace = (flow.trace == Some(TraceMode::Flow)).then(trace::new_trace_id);
+        let tracing = || match (flow.trace, &run_trace) {
+            (Some(_), Some(trace_id)) => Some(TraceParent::child_of(trace_id)),
+            (Some(_), None) => Some(TraceParent::new()),
+            (None, _) => None,
+        };
+        let steps = if flow.has_branches() {
+            let graph = flow.graph();
+            if graph.is_linear() {
+                self.run_line(flow, vars, started, tracing, on_step).await
+            } else {
+                self.run_graph(flow, &graph, vars, started, tracing, on_step)
+                    .await
+            }
+        } else {
+            self.run_line(flow, vars, started, tracing, on_step).await
+        };
+        FlowResult {
+            name: flow.name.clone(),
+            steps,
+            duration_ms: millis(started.elapsed()),
+        }
+    }
+
+    /// One step after the other, every step seeing what all earlier ones set.
+    async fn run_line(
+        &self,
+        flow: &Flow,
+        mut vars: Variables,
+        started: Instant,
+        tracing: impl Fn() -> Option<TraceParent>,
+        mut on_step: impl FnMut(StepStart<'_>),
+    ) -> Vec<StepResult> {
         let mut steps = Vec::with_capacity(flow.steps.len());
         let mut stopped = false;
         let total = flow.enabled_steps().count();
-        // One trace for the whole run, when the flow asks for that.
-        let run_trace = (flow.trace == Some(TraceMode::Flow)).then(trace::new_trace_id);
         for (index, step) in flow.enabled_steps().enumerate() {
             if stopped {
                 steps.push(skipped(step));
@@ -199,22 +247,186 @@ impl Runner {
                 total,
                 name: &step.name,
             });
-            let tracing = match (flow.trace, &run_trace) {
-                (Some(_), Some(trace_id)) => Some(TraceParent::child_of(trace_id)),
-                (Some(_), None) => Some(TraceParent::new()),
-                (None, _) => None,
-            };
             let result = self
-                .run_step(&flow.name, step, &mut vars, tracing.as_ref())
+                .run_step(
+                    &flow.name,
+                    step,
+                    &mut vars,
+                    tracing().as_ref(),
+                    Some(started),
+                )
                 .await;
             stopped = !result.passed() && (self.options.bail || flow.stops_after_failure_of(step));
             steps.push(result);
         }
-        FlowResult {
-            name: flow.name.clone(),
-            steps,
-            duration_ms: millis(started.elapsed()),
+        steps
+    }
+
+    /// Steps start as soon as every step they run after has finished, so
+    /// branches overlap. Each branch works on its own copy of the variables;
+    /// where branches join, what each changed is combined, and when two set
+    /// the same variable, the step lower in the file wins. After a failed
+    /// step, only the steps that run after it are skipped (unless the flow
+    /// or the step carries on); with `bail`, no new step starts on any
+    /// branch after a failure, while steps already running finish.
+    async fn run_graph(
+        &self,
+        flow: &Flow,
+        graph: &StepGraph,
+        vars: Variables,
+        started: Instant,
+        tracing: impl Fn() -> Option<TraceParent>,
+        on_step: impl FnMut(StepStart<'_>),
+    ) -> Vec<StepResult> {
+        let (results, _) = self
+            .run_nodes(flow, graph, &vars, started, tracing, on_step, Nodes::All)
+            .await;
+        results.into_iter().flatten().collect()
+    }
+
+    /// Runs the graph's nodes, or only `only` of them, and returns each
+    /// node's result and what it and the steps before it set.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn run_nodes(
+        &self,
+        flow: &Flow,
+        graph: &StepGraph,
+        vars: &Variables,
+        started: Instant,
+        tracing: impl Fn() -> Option<TraceParent>,
+        mut on_step: impl FnMut(StepStart<'_>),
+        nodes: Nodes<'_>,
+    ) -> (Vec<Option<StepResult>>, Vec<Option<Finished>>) {
+        use futures_util::future::BoxFuture;
+        use futures_util::stream::{FuturesUnordered, StreamExt};
+
+        let n = graph.nodes.len();
+        let step_of = |node: usize| &flow.steps[graph.nodes[node].step];
+        let mut results: Vec<Option<StepResult>> = (0..n).map(|_| None).collect();
+        let mut done: Vec<Option<Finished>> = (0..n).map(|_| None).collect();
+        let mut begun = vec![false; n];
+        let mut halted = false;
+        let mut index = 0;
+        let mut running = FuturesUnordered::new();
+        loop {
+            // Start, or skip, every step whose steps before it are all done.
+            let mut more = true;
+            while more {
+                more = false;
+                for node in 0..n {
+                    if begun[node]
+                        || !nodes.includes(node)
+                        || graph.nodes[node].after.iter().any(|&d| done[d].is_none())
+                    {
+                        continue;
+                    }
+                    begun[node] = true;
+                    more = true;
+                    let step = step_of(node);
+                    let blocked = halted
+                        || (!nodes.keeps_going()
+                            && graph.nodes[node]
+                                .after
+                                .iter()
+                                .any(|&d| done[d].as_ref().is_some_and(|f| !f.carry_on)));
+                    if blocked {
+                        results[node] = Some(skipped(step));
+                        done[node] = Some(Finished::default());
+                        continue;
+                    }
+                    let (writes, conflicts) = join(graph, &graph.nodes[node].after, &done);
+                    let mut vars = with_writes(vars, &writes);
+                    vars.track();
+                    on_step(StepStart {
+                        index,
+                        total: n,
+                        name: &step.name,
+                    });
+                    index += 1;
+                    let tracing = tracing();
+                    let scripted =
+                        step.scripts.pre_request.is_some() || step.scripts.test.is_some();
+                    let threads = tokio::runtime::Handle::try_current().is_ok_and(|h| {
+                        h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread
+                    });
+                    let run: BoxFuture<'_, (StepResult, Variables)> = if scripted && threads {
+                        // A script holds its thread until done; in a task of
+                        // its own, it does not hold up the other branches.
+                        let (mut runner, step, name) =
+                            (self.clone(), step.clone(), flow.name.clone());
+                        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                        runner.dropped = Some(dropped.clone());
+                        Box::pin(async move {
+                            // Aborted if the run is dropped, as when a load
+                            // test stops mid iteration; a script that is
+                            // running then sends nothing more.
+                            let task = tokio::spawn(async move {
+                                let mut vars = vars;
+                                let result = runner
+                                    .run_step(
+                                        &name,
+                                        &step,
+                                        &mut vars,
+                                        tracing.as_ref(),
+                                        Some(started),
+                                    )
+                                    .await;
+                                (result, vars)
+                            });
+                            let mut task = AbortOnDrop(task, dropped);
+                            match (&mut task.0).await {
+                                Ok(out) => out,
+                                Err(err) => std::panic::resume_unwind(err.into_panic()),
+                            }
+                        })
+                    } else {
+                        Box::pin(async move {
+                            let result = self
+                                .run_step(
+                                    &flow.name,
+                                    step,
+                                    &mut vars,
+                                    tracing.as_ref(),
+                                    Some(started),
+                                )
+                                .await;
+                            (result, vars)
+                        })
+                    };
+                    running.push(async move {
+                        let (result, vars) = run.await;
+                        (node, result, vars, writes, conflicts)
+                    });
+                }
+            }
+            let Some((node, mut result, after, mut writes, conflicts)) = running.next().await
+            else {
+                break;
+            };
+            let step = step_of(node);
+            for (name, value) in after.touched() {
+                writes.insert(name, (value, node));
+            }
+            for (name, (kept, lost)) in conflicts {
+                result.warnings.push(format!(
+                    "`{name}` was set to different values on parallel branches, by `{}` and `{}`; this step got the value from `{}`, the step lower in the file",
+                    step_of(lost).name,
+                    step_of(kept).name,
+                    step_of(kept).name,
+                ));
+            }
+            let passed = result.passed();
+            // Diagnose runs what it picked whatever fails, `bail` or not.
+            if !passed && self.options.bail && !nodes.keeps_going() {
+                halted = true;
+            }
+            results[node] = Some(result);
+            done[node] = Some(Finished {
+                carry_on: passed || (!self.options.bail && !flow.stops_after_failure_of(step)),
+                writes: Arc::new(writes),
+            });
         }
+        (results, done)
     }
 
     /// Sends one step's request and checks the response. Variables the step
@@ -229,6 +441,7 @@ impl Runner {
         step: &Step,
         vars: &mut Variables,
         tracing: Option<&TraceParent>,
+        run_start: Option<Instant>,
     ) -> StepResult {
         let mut checks = Vec::new();
         let mut logs = Vec::new();
@@ -278,6 +491,7 @@ impl Runner {
             error: None,
             skipped: false,
             cached: false,
+            started_ms: None,
             trace_id: None,
             span_id: None,
             exchange: None,
@@ -380,7 +594,15 @@ impl Runner {
         };
         let sent = Sent::of(&request, multipart_text);
 
+        // The run may have been dropped while a pre-request script held the
+        // thread; then the request is not sent.
+        if self.was_dropped() {
+            result.error = Some("the run was stopped".into());
+            return result;
+        }
         let started = Instant::now();
+        // When the request went out, after any pre-request script.
+        result.started_ms = run_start.map(|t0| millis(started.duration_since(t0)));
         let kept = cache_key.as_ref().and_then(|key| self.cache.get(key));
         // A reused response was never sent, so it belongs to no trace.
         if kept.is_none() {
@@ -679,7 +901,10 @@ impl Outgoing {
 
 /// Scripts are CPU work that holds the thread until done. Under load, on
 /// the multi-threaded runtime, the scheduler moves other tasks off this
-/// thread meanwhile; a current-thread runtime only runs one flow anyway.
+/// thread meanwhile, and a scripted step of a flow with branches runs in a
+/// task of its own. A current-thread runtime has one thread, so there a
+/// script holds up the other branches too: run flows with branches on a
+/// multi-threaded runtime, as the CLI and the app do.
 fn blocking<T>(f: impl FnOnce() -> T) -> T {
     match tokio::runtime::Handle::try_current() {
         Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
@@ -719,6 +944,109 @@ fn script_checks(label: &str, tests: Vec<TestOutcome>, error: Option<String>) ->
     checks
 }
 
+/// Variables set along a branch: the value (`None` once removed) and the
+/// node that set it.
+pub(crate) type Writes = BTreeMap<String, (Option<String>, usize)>;
+
+/// A finished (or skipped) step in a branching run.
+#[derive(Debug, Default)]
+pub(crate) struct Finished {
+    /// The steps after it may run.
+    pub(crate) carry_on: bool,
+    /// Every variable set by it and the steps before it.
+    pub(crate) writes: Arc<Writes>,
+}
+
+/// What the steps before a join set, combined: when two set the same
+/// variable, the one lower in the file wins. Also returns the variables two
+/// parallel branches set to different values, with the node kept and the
+/// node lost.
+pub(crate) fn join(
+    graph: &StepGraph,
+    after: &[usize],
+    done: &[Option<Finished>],
+) -> (Writes, BTreeMap<String, (usize, usize)>) {
+    let mut writes: Writes = BTreeMap::new();
+    let mut conflicts = BTreeMap::new();
+    let mut branches = after.iter().filter_map(|&d| done[d].as_ref());
+    if let Some(first) = branches.next() {
+        writes.clone_from(&first.writes);
+    }
+    for branch in branches {
+        for (name, (value, by)) in branch.writes.iter() {
+            match writes.get(name) {
+                Some((_, other)) if other == by => {}
+                Some((kept, other)) => {
+                    let (winner, loser) = if by > other {
+                        (*by, *other)
+                    } else {
+                        (*other, *by)
+                    };
+                    if kept != value && graph.parallel(*by, *other) {
+                        conflicts.insert(name.clone(), (winner, loser));
+                    }
+                    if by > other {
+                        writes.insert(name.clone(), (value.clone(), *by));
+                    }
+                }
+                None => {
+                    writes.insert(name.clone(), (value.clone(), *by));
+                }
+            }
+        }
+    }
+    (writes, conflicts)
+}
+
+/// `vars` with what the steps before a step set.
+pub(crate) fn with_writes(vars: &Variables, writes: &Writes) -> Variables {
+    let mut vars = vars.clone();
+    for (name, (value, _)) in writes {
+        match value {
+            Some(value) => vars.set(name.clone(), value.clone()),
+            None => vars.remove(name),
+        }
+    }
+    vars
+}
+
+/// A spawned task that is stopped when its handle is dropped.
+/// It also raises the flag the task's runner checks before a script sends
+/// a request, since a script holds its thread and cannot be aborted midway.
+struct AbortOnDrop<T>(
+    tokio::task::JoinHandle<T>,
+    Arc<std::sync::atomic::AtomicBool>,
+);
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.1.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.0.abort();
+    }
+}
+
+/// Which nodes [`Runner::run_nodes`] runs.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Nodes<'a> {
+    /// All, as a run does.
+    All,
+    /// These, whatever fails: what Diagnose runs before the step it looks at.
+    Only(&'a std::collections::BTreeSet<usize>),
+}
+
+impl Nodes<'_> {
+    fn includes(self, node: usize) -> bool {
+        match self {
+            Self::All => true,
+            Self::Only(nodes) => nodes.contains(&node),
+        }
+    }
+
+    fn keeps_going(self) -> bool {
+        matches!(self, Self::Only(_))
+    }
+}
+
 fn skipped(step: &Step) -> StepResult {
     StepResult {
         name: step.name.clone(),
@@ -735,6 +1063,7 @@ fn skipped(step: &Step) -> StepResult {
         error: None,
         skipped: true,
         cached: false,
+        started_ms: None,
         trace_id: None,
         span_id: None,
         exchange: None,
@@ -815,4 +1144,30 @@ async fn script_exchange(
 
 fn millis(d: Duration) -> f64 {
     d.as_secs_f64() * 1000.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_stopped_run_does_not_send_its_request() {
+        let mut runner = Runner::new(RunOptions::default()).unwrap();
+        runner.dropped = Some(Arc::new(std::sync::atomic::AtomicBool::new(true)));
+        let step: Step = serde_yaml_ng::from_str(
+            "name: s\nrequest: { method: GET, url: \"http://127.0.0.1:1/\" }\n",
+        )
+        .unwrap();
+        let result = runner
+            .run_step(
+                "f",
+                &step,
+                &mut Variables::default(),
+                None,
+                Some(Instant::now()),
+            )
+            .await;
+        assert_eq!(result.error.as_deref(), Some("the run was stopped"));
+        assert!(result.started_ms.is_none());
+    }
 }

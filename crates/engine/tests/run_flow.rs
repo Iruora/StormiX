@@ -814,3 +814,224 @@ async fn tracing_does_not_stop_a_cached_step_from_matching() {
     assert!(second.steps[1].trace_id.is_some());
     assert_eq!(calls.load(Ordering::SeqCst), 3);
 }
+
+/// A step that echoes `text` and extracts all of it into `var`.
+fn echo_step(name: &str, after: &str, text: &str, var: &str, extra: &str) -> String {
+    format!(
+        "    - name: {name}\n{after}      request: {{ method: POST, url: \"{{{{base}}}}/echo\", body: {{ raw: \"{text}\" }} }}\n      extract: {{ {var}: {{ regex: \"(.*)\" }} }}\n{extra}"
+    )
+}
+
+#[tokio::test]
+async fn parallel_branches_overlap_and_join_their_variables() {
+    let url = serve().await;
+    let f = flow(&format!(
+        "  name: branches\n  steps:\n{}{}{}{}{}",
+        echo_step("start", "", "s", "s", ""),
+        "    - name: slow a\n      after: [start]\n      request: { method: GET, url: \"{{base}}/slow\" }\n      extract: { a: { regex: \"(.*)\" } }\n",
+        "    - name: slow b\n      after: [start]\n      request: { method: GET, url: \"{{base}}/slow\" }\n",
+        echo_step("b2", "", "b-{{s}}", "b", ""),
+        echo_step("join", "      after: [slow a, b2]\n", "{{a}}+{{b}}", "j", ""),
+    ));
+    let result = Runner::new(RunOptions::default())
+        .unwrap()
+        .run(&f, &base(&url))
+        .await;
+    assert!(result.passed(), "{result:#?}");
+    let names: Vec<&str> = result.steps.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["start", "slow a", "slow b", "b2", "join"]);
+    assert_eq!(result.steps[4].extracted["j"], "late+b-s");
+    // The two slow steps ran at the same time.
+    assert!(result.duration_ms < 750.0, "{}", result.duration_ms);
+    let (a, b) = (
+        result.steps[1].started_ms.unwrap(),
+        result.steps[2].started_ms.unwrap(),
+    );
+    assert!((a - b).abs() < 200.0);
+    assert!(result.steps[4].warnings.is_empty());
+}
+
+#[tokio::test]
+async fn at_a_join_the_step_lower_in_the_file_wins_with_a_warning() {
+    let url = serve().await;
+    let f = flow(&format!(
+        "  name: conflict\n  steps:\n{}{}{}{}",
+        echo_step("start", "", "0", "v", ""),
+        echo_step("left", "      after: [start]\n", "1", "v", ""),
+        echo_step("right", "      after: [start]\n", "2", "v", ""),
+        echo_step("join", "      after: [right, left]\n", "{{v}}", "j", ""),
+    ));
+    let result = Runner::new(RunOptions::default())
+        .unwrap()
+        .run(&f, &base(&url))
+        .await;
+    assert_eq!(result.steps[3].extracted["j"], "2");
+    assert_eq!(result.steps[3].warnings.len(), 1, "{result:#?}");
+    assert!(result.steps[3].warnings[0].contains("`right`"));
+}
+
+#[tokio::test]
+async fn a_failed_branch_skips_only_what_runs_after_it() {
+    let url = serve().await;
+    let fails = "      assert: [{ status: 500 }]\n";
+    let f = flow(&format!(
+        "  name: failing branch\n  steps:\n{}{}{}{}{}{}",
+        echo_step("start", "", "0", "v", ""),
+        echo_step("bad", "      after: [start]\n", "1", "a", fails),
+        echo_step("after bad", "", "2", "b", ""),
+        echo_step("good", "      after: [start]\n", "3", "c", ""),
+        echo_step("after good", "", "4", "d", ""),
+        echo_step(
+            "join",
+            "      after: [after bad, after good]\n",
+            "5",
+            "e",
+            ""
+        ),
+    ));
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let result = runner.run(&f, &base(&url)).await;
+    let skipped: Vec<bool> = result.steps.iter().map(|s| s.skipped).collect();
+    assert_eq!(
+        skipped,
+        [false, false, true, false, false, true],
+        "{result:#?}"
+    );
+
+    let mut carry_on = f.clone();
+    carry_on.on_failure = OnFailure::Continue;
+    let result = runner.run(&carry_on, &base(&url)).await;
+    assert!(result.steps.iter().all(|s| !s.skipped));
+}
+
+#[tokio::test]
+async fn a_branch_that_sets_a_variable_to_the_value_it_had_still_wins() {
+    let url = serve().await;
+    let f = flow(&format!(
+        "  name: same value\n  steps:\n{}{}{}{}",
+        echo_step("start", "", "0", "v", ""),
+        echo_step("left", "      after: [start]\n", "1", "v", ""),
+        echo_step("right", "      after: [start]\n", "0", "v", ""),
+        echo_step("join", "      after: [left, right]\n", "{{v}}", "j", ""),
+    ));
+    let result = Runner::new(RunOptions::default())
+        .unwrap()
+        .run(&f, &base(&url))
+        .await;
+    assert_eq!(result.steps[3].extracted["j"], "0", "{result:#?}");
+}
+
+#[tokio::test]
+async fn diagnose_keeps_branches_apart_as_a_run_does() {
+    let url = serve().await;
+    let f = flow(&format!(
+        "  name: diagnose branches\n  steps:\n{}{}{}{}",
+        echo_step("start", "", "0", "v", ""),
+        echo_step("left", "      after: [start]\n", "1", "v", ""),
+        echo_step("right", "      after: [start]\n", "{{v}}", "w", ""),
+        echo_step("join", "      after: [left, right]\n", "{{w}}", "j", ""),
+    ));
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let run = runner.run(&f, &base(&url)).await;
+    assert_eq!(run.steps[3].extracted["j"], "0");
+    let diagnosis = runner.diagnose(&f, &base(&url), "join").await.unwrap();
+    assert_eq!(diagnosis.step.extracted["j"], "0");
+}
+
+#[tokio::test]
+async fn diagnose_runs_every_step_before_the_one_it_looks_at_even_with_bail() {
+    let url = serve().await;
+    let f = flow(&format!(
+        "  name: diagnose bail\n  steps:\n{}{}{}",
+        echo_step(
+            "bad",
+            "",
+            "x",
+            "x",
+            "      assert: [{ body_contains: nope }]\n"
+        ),
+        echo_step("token", "", "t-1", "t", ""),
+        echo_step("target", "", "{{t}}", "got", ""),
+    ));
+    let runner = Runner::new(RunOptions {
+        bail: true,
+        ..RunOptions::default()
+    })
+    .unwrap();
+    let diagnosis = runner.diagnose(&f, &base(&url), "target").await.unwrap();
+    assert_eq!(diagnosis.step.extracted["got"], "t-1");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_slow_script_does_not_hold_up_another_branch() {
+    let url = serve().await;
+    let busy = "      scripts:\n        pre_request: |\n          const t = Date.now(); while (Date.now() - t < 400) {}\n";
+    let f = flow(&format!(
+        "  name: slow script\n  steps:\n{}{}{}",
+        echo_step("start", "", "0", "v", ""),
+        echo_step("scripted", "      after: [start]\n", "1", "a", busy),
+        echo_step("plain", "      after: [start]\n", "2", "b", ""),
+    ));
+    let result = Runner::new(RunOptions::default())
+        .unwrap()
+        .run(&f, &base(&url))
+        .await;
+    assert!(result.passed(), "{result:#?}");
+    let scripted = result.steps[1].started_ms.unwrap();
+    let plain = &result.steps[2];
+    // The request goes out after its script, and the other branch did not wait.
+    assert!(scripted >= 350.0, "{scripted}");
+    assert!(
+        plain.started_ms.unwrap() + plain.duration_ms < 300.0,
+        "{plain:#?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_run_sends_no_request_after_a_running_script() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+    // A server of its own, so no other test's requests are counted:
+    // `/entered` is called by the script as it starts, `/count` is the
+    // request that must not go out.
+    let (entered, counted) = (Arc::new(AtomicU32::new(0)), Arc::new(AtomicU32::new(0)));
+    let (e, c) = (entered.clone(), counted.clone());
+    let app = Router::new()
+        .route("/echo", post(echo))
+        .route(
+            "/entered",
+            get(move || async move { e.fetch_add(1, Ordering::SeqCst).to_string() }),
+        )
+        .route(
+            "/count",
+            get(move || async move { c.fetch_add(1, Ordering::SeqCst).to_string() }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let busy = "      scripts:\n        pre_request: |\n          await bru.sendRequest({ url: bru.getVar(\"base\") + \"/entered\" })\n          const t = Date.now(); while (Date.now() - t < 400) {}\n";
+    let f = flow(&format!(
+        "  name: dropped\n  steps:\n{}    - name: scripted\n      after: [start]\n      request: {{ method: GET, url: \"{{{{base}}}}/count\" }}\n{busy}{}",
+        echo_step("start", "", "0", "v", ""),
+        echo_step("plain", "      after: [start]\n", "1", "p", ""),
+    ));
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    // Stopped once the script has started, as a load test's Stop does.
+    let ordinary = base(&url);
+    // Boxed so that dropping it drops the run itself.
+    let mut run = Box::pin(runner.run(&f, &ordinary));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while entered.load(Ordering::SeqCst) == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the script never started"
+        );
+        tokio::select! {
+            _ = &mut run => panic!("the run should still be in its script"),
+            _ = tokio::time::sleep(Duration::from_millis(5)) => {}
+        }
+    }
+    drop(run);
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(counted.load(Ordering::SeqCst), 0);
+}

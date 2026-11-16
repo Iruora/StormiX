@@ -40,6 +40,8 @@ export function RunResult({ result, diagnose }: { result: FlowResult; diagnose?:
   const skipped = result.steps.length - ran.length;
   const ok = failed === 0 && skipped === 0;
   const [open, setOpen] = useState<StepResult | null>(null);
+  // With parallel branches, a bar per step shows when it ran.
+  const timeline = overlaps(result) ? Math.max(result.durationMs ?? 0, 1) : null;
 
   return (
     <section className="mt-4 rounded-lg border border-line bg-surface">
@@ -52,7 +54,7 @@ export function RunResult({ result, diagnose }: { result: FlowResult; diagnose?:
         <span className="font-semibold">{ok ? "Run passed" : "Run failed"}</span>
         {skipped > 0 && (
           <span className="text-xs text-muted">
-            · stopped after a failed step, {skipped} skipped
+            · {skipped} skipped after a failed step
           </span>
         )}
         <span className="ml-auto text-xs text-muted">
@@ -61,7 +63,7 @@ export function RunResult({ result, diagnose }: { result: FlowResult; diagnose?:
       </div>
       <ol className="divide-y divide-line">
         {result.steps.map((step, i) => (
-          <Step key={i} step={step} onDetails={() => setOpen(step)} />
+          <Step key={i} step={step} timeline={timeline} onDetails={() => setOpen(step)} />
         ))}
       </ol>
       {open && <StepDetails step={open} onClose={() => setOpen(null)} diagnose={diagnose} />}
@@ -69,7 +71,34 @@ export function RunResult({ result, diagnose }: { result: FlowResult; diagnose?:
   );
 }
 
-function Step({ step, onDetails }: { step: StepResult; onDetails: () => void }) {
+/** Whether a step started before another had finished: the flow ran branches in parallel. */
+export function overlaps(result: FlowResult): boolean {
+  const spans = result.steps
+    .filter((s) => s.startedMs != null)
+    .map((s) => [s.startedMs!, s.startedMs! + (s.durationMs ?? 0)] as const)
+    .sort((a, b) => a[0] - b[0]);
+  return spans.some((s, i) => i > 0 && s[0] < spans[i - 1][1] - 0.5);
+}
+
+/** When a step ran within the run, as a bar on the run's time line. */
+function TimeBar({ step, total }: { step: StepResult; total: number }) {
+  const start = step.startedMs ?? 0;
+  const left = (start / total) * 100;
+  const width = Math.max(1.5, ((step.durationMs ?? 0) / total) * 100);
+  return (
+    <span
+      className="relative hidden h-1.5 w-24 shrink-0 rounded-full bg-surface-2 sm:block"
+      title={`Started at +${Math.round(start)} ms, took ${Math.round(step.durationMs ?? 0)} ms`}
+    >
+      <span
+        className={`absolute inset-y-0 rounded-full ${stepPassed(step) ? "bg-accent" : "bg-bad"}`}
+        style={{ left: `${Math.min(left, 98)}%`, width: `${Math.min(width, 100 - Math.min(left, 98))}%` }}
+      />
+    </span>
+  );
+}
+
+function Step({ step, timeline, onDetails }: { step: StepResult; timeline: number | null; onDetails: () => void }) {
   const passed = stepPassed(step);
   const failedChecks = step.checks.filter((c) => !c.passed);
   const passedChecks = step.checks.filter((c) => c.passed);
@@ -88,11 +117,12 @@ function Step({ step, onDetails }: { step: StepResult; onDetails: () => void }) 
         <span className={`min-w-0 flex-1 basis-32 truncate ${step.skipped ? "text-muted" : ""}`}>{step.name}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted">
           {step.skipped ? (
-            <span title="Not sent: an earlier step failed, and the flow stops at a failure">
+            <span title="Not sent: a step it runs after failed, and the flow stops at a failure">
               skipped, an earlier step failed
             </span>
           ) : (
             <>
+              {timeline != null && <TimeBar step={step} total={timeline} />}
               {step.status != null && <StatusPill status={step.status} />}
               {step.cached ? (
                 <span
@@ -172,10 +202,18 @@ function StatusPill({ status }: { status: number }) {
 }
 
 /** In a run that stopped at a failure: the step it stopped at and how many were skipped after it. */
-export function stoppedAt(run: FlowResult | null): { name: string; skipped: number } | null {
-  if (!run) return null;
+/**
+ * Only for a flow without branches: there, the failed step is the one just
+ * before the first skipped one. With branches, the Flow tab works it out
+ * from the graph.
+ */
+export function stoppedAt(run: FlowResult | null, linear = true): { name: string; skipped: number } | null {
+  if (!run || !linear) return null;
   const first = run.steps.findIndex((s) => s.skipped);
   if (first <= 0) return null;
+  // With branches, skipped steps need not follow one failure; the Flow tab
+  // says which failure skipped which steps.
+  if (!run.steps.slice(first).every((s) => s.skipped) || stepPassed(run.steps[first - 1])) return null;
   return { name: run.steps[first - 1].name, skipped: run.steps.length - first };
 }
 

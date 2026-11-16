@@ -529,6 +529,7 @@ fn request(
         enabled: true,
         cache: false,
         continue_on_failure: false,
+        after: None,
         request,
         extract: BTreeMap::new(),
         assertions: Vec::new(),

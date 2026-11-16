@@ -24,6 +24,18 @@ Each card has buttons to move the step up or down, **duplicate** it, **set it as
 
 <Shot name="flow-warning" alt="A warning after moving a step before the one that sets its variable" />
 
+## Parallel branches
+
+When steps run in [parallel branches](/reference/test-file#parallel-branches), the Flow tab draws them side by side, GRAFCET style: a **double bar** where branches split, a column per branch, and another double bar where they join. **Branches | List** in the header switches back to the list in file order, to drag steps around.
+
+<Shot name="flow-branches" alt="A flow with two branches that split after Login and join at Build dashboard" />
+
+- **Branch** on a card adds a step that runs after it, beside what already does.
+- The **after** line on each card says which steps it runs after. Click it to tick the steps above it: tick several to wait for all of them. **Start with the flow** runs it from the start, and **Reset** puts it back after the step just above. The same picker is under the step's name in the Steps tab.
+- Deleting or setting aside a step makes the steps after it run after what it ran after, so a branch is never cut loose.
+- After a run, a failed card says how many steps after it were skipped, and the other branches show their own results. The run result shows a bar per step for when it ran.
+- A warning shows when a step uses a variable that a step on another branch sets, since it may not be there yet.
+
 ## Set aside
 
 The **Set aside** tray holds steps that are out of the flow but kept in the file: never run, never checked. Drag a card into the tray to set it aside, and back onto the rail to put it back. In YAML they live under `flow.set_aside`. It is handy for an old endpoint you may need again, or a step you are still working on.

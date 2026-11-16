@@ -4111,6 +4111,7 @@ dependencies = [
  "axum",
  "bytes",
  "fastrand",
+ "futures-util",
  "http",
  "hyper-util",
  "regex",

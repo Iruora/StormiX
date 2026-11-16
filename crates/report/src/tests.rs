@@ -26,6 +26,7 @@ fn step(name: &str, status: u16, passed: bool) -> StepResult {
         error: None,
         skipped: false,
         cached: false,
+        started_ms: None,
         trace_id: None,
         span_id: None,
         exchange: None,

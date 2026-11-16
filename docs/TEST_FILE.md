@@ -88,6 +88,37 @@ flow:
 - `stormix run --bail` stops at the first failure even in a flow with `on_failure: continue` or a step with `continue_on_failure`.
 - Files from before 1.12 have no `on_failure`, so they now stop at a failure. Add `on_failure: continue` to keep the old behaviour.
 
+### Parallel branches
+
+A step runs after the step written just above it, so steps run one after the other. `after:` names the steps a step waits for instead:
+
+```yaml
+flow:
+  name: dashboard
+  steps:
+    - name: Login                 # starts the flow
+    - name: Get profile
+      after: [Login]              # branch 1
+    - name: List orders
+      after: [Login]              # branch 2, at the same time as branch 1
+    - name: Get last order        # no after: follows List orders, still branch 2
+    - name: Build dashboard
+      after: [Get profile, Get last order]   # waits for both branches
+    - name: Send notification
+      after: [Get profile]        # a second step fed by branch 1
+```
+
+(Requests left out for brevity.)
+
+- Steps that name the same step run **at the same time**, each starting a branch. A step that names several steps **waits for all of them** (a join). `after: []` starts a step with the flow.
+- A step can only name steps **above it**, so the file order is always an order the steps can run in. The names must be unique; the validator says when one is missing, below the step, set aside or ambiguous.
+- **Variables.** Each branch starts from a copy of the variables at the point it splits off, so branches never see each other's values while they run. Where branches join, what each branch set or removed is combined. When two branches set the same variable to different values, the value from the step **lower in the file** wins; the validator warns about two parallel steps that `extract` the same name, and the joining step's result notes any conflict a script made.
+- **Failures.** With `on_failure: stop` (the default), a failed step skips only the steps that run after it, directly or through a join; other branches run to their end. A join is skipped when any step it waits for failed. `continue_on_failure: true` on the failed step lets the steps after it run. `stormix run --bail` stops every branch from going further: no new step starts after the first failure, while steps already running finish.
+- **Turned-off steps** are looked through: a step after one waits for what it waited for. The steps left out of a load test are treated the same way.
+- **Load tests.** One iteration runs the whole flow, branches at the same time, so a virtual user can have several requests in flight, like a browser loading a page. Per-step figures are unchanged; an iteration takes as long as its longest path.
+- **Results** keep the steps in file order. Each step has `startedMs`, when it was sent from the start of the run, so the overlap shows; `stormix run` prints `at +N ms` on each step when steps overlapped.
+- Files without `after:` run exactly as before. Older versions of Stormix refuse a file with `after:` rather than run its steps in the wrong order. Bruno runs requests one after another, so an export to Bruno runs the branches in file order and says so.
+
 ### Turning steps off
 
 A step with `enabled: false` keeps its place but is not sent: runs and load tests go straight from the step before it to the step after it, and it does not appear in results. Variables it would extract are not set, so later steps that use them warn. To take a step out of the order altogether without deleting it, move it under `set_aside`:
@@ -155,6 +186,7 @@ A step with `cache: true` is sent once; after that, runs and load test iteration
 | `enabled` | no | `false` skips the step in runs and load tests; defaults to `true` |
 | `cache` | no | `true` reuses the step's response instead of sending the request again; defaults to `false`. See [Caching a step](#caching-a-step) |
 | `continue_on_failure` | no | `true` runs the steps after this one even when it fails, in a flow that stops at failures; defaults to `false`. See [When a step fails](#when-a-step-fails) |
+| `after` | no | The steps this one waits for, by name; left out, the step just above. See [Parallel branches](#parallel-branches) |
 | `request` | yes | See below |
 | `extract` | no | Variables to set from the response |
 | `assert` | no | Checks on the response |

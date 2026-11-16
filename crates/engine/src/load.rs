@@ -575,10 +575,10 @@ impl Slowest {
 /// the last cached one, since a cached step may need variables from the
 /// steps before it. `None` when no enabled step is cached.
 fn setup_flow(flow: &Flow) -> Option<Flow> {
-    let enabled: Vec<_> = flow.enabled_steps().cloned().collect();
-    let last = enabled.iter().rposition(|s| s.cache)?;
+    let last = flow.steps.iter().rposition(|s| s.enabled && s.cache)?;
     let mut prefix = flow.clone();
-    prefix.steps = enabled.into_iter().take(last + 1).collect();
+    // Turned-off steps stay, so `after:` still finds the steps it names.
+    prefix.steps.truncate(last + 1);
     prefix.set_aside.clear();
     Some(prefix)
 }

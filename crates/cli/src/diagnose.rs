@@ -26,10 +26,16 @@ pub fn diagnose(args: DiagnoseArgs) -> Result<ExitCode, String> {
     let vars = prepared.once_vars();
     let Prepared { source, runner, .. } = prepared;
     let flow = &source.test.flow;
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| format!("cannot start the runtime: {e}"))?;
+    // As for `stormix run`: branches need threads so one branch's script
+    // does not hold up another's request.
+    let runtime = if flow.has_branches() {
+        tokio::runtime::Builder::new_multi_thread()
+    } else {
+        tokio::runtime::Builder::new_current_thread()
+    }
+    .enable_all()
+    .build()
+    .map_err(|e| format!("cannot start the runtime: {e}"))?;
     let diagnosis = runtime
         .block_on(runner.diagnose(flow, &vars, &args.step))
         .map_err(|message| {
