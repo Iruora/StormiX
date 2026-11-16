@@ -169,6 +169,16 @@ pub struct StepSummary {
     pub skipped: u32,
 }
 
+impl StepSummary {
+    /// Whether any response was timed. Skipped and cached steps, and steps
+    /// whose every request failed to connect, have no latency to show. The
+    /// percentiles come from the histogram, which records at least 1 µs per
+    /// sample, so they are above zero exactly when it holds one.
+    pub fn measured(&self) -> bool {
+        self.latency.p50 > 0.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
