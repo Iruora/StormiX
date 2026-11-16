@@ -63,6 +63,14 @@ async fn traced(headers: HeaderMap) -> String {
         .to_owned()
 }
 
+/// Requests to `/count`, for the test that checks a stopped run sends nothing more.
+static COUNTED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+async fn count() -> &'static str {
+    COUNTED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    "counted"
+}
+
 async fn slow() -> &'static str {
     tokio::time::sleep(Duration::from_millis(400)).await;
     "late"
@@ -76,7 +84,8 @@ async fn serve() -> String {
         .route("/echo", post(echo))
         .route("/graphql", post(graphql))
         .route("/slow", get(slow))
-        .route("/traced", get(traced));
+        .route("/traced", get(traced))
+        .route("/count", get(count));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -985,4 +994,22 @@ async fn a_slow_script_does_not_hold_up_another_branch() {
         plain.started_ms.unwrap() + plain.duration_ms < 300.0,
         "{plain:#?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_run_sends_no_request_after_a_running_script() {
+    let url = serve().await;
+    let busy = "      scripts:\n        pre_request: |\n          const t = Date.now(); while (Date.now() - t < 400) {}\n";
+    let f = flow(&format!(
+        "  name: dropped\n  steps:\n{}    - name: scripted\n      after: [start]\n      request: {{ method: GET, url: \"{{{{base}}}}/count\" }}\n{busy}{}",
+        echo_step("start", "", "0", "v", ""),
+        echo_step("plain", "      after: [start]\n", "1", "p", ""),
+    ));
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    // Stopped while the script runs, as a load test's Stop does.
+    let stopped =
+        tokio::time::timeout(Duration::from_millis(150), runner.run(&f, &base(&url))).await;
+    assert!(stopped.is_err(), "the run should still be in its script");
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(COUNTED.load(std::sync::atomic::Ordering::SeqCst), 0);
 }

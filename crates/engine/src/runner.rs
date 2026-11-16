@@ -133,16 +133,19 @@ impl Runner {
     /// Sends a request for `bru.sendRequest` / `pm.sendRequest`, with the
     /// same client settings, taking no longer than the script has left.
     /// Scripts run on a blocking thread, so this blocks too.
+    /// Whether the run this step belongs to was dropped.
+    fn was_dropped(&self) -> bool {
+        self.dropped
+            .as_ref()
+            .is_some_and(|d| d.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
     fn send_for_script(
         &self,
         call: &ScriptRequest,
         left: Duration,
     ) -> Result<ScriptResponse, String> {
-        if self
-            .dropped
-            .as_ref()
-            .is_some_and(|d| d.load(std::sync::atomic::Ordering::Relaxed))
-        {
+        if self.was_dropped() {
             return Err("the run was stopped".into());
         }
         let timeout = left.min(self.options.timeout);
@@ -591,6 +594,12 @@ impl Runner {
         };
         let sent = Sent::of(&request, multipart_text);
 
+        // The run may have been dropped while a pre-request script held the
+        // thread; then the request is not sent.
+        if self.was_dropped() {
+            result.error = Some("the run was stopped".into());
+            return result;
+        }
         let started = Instant::now();
         // When the request went out, after any pre-request script.
         result.started_ms = run_start.map(|t0| millis(started.duration_since(t0)));
