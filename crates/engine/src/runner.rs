@@ -901,7 +901,10 @@ impl Outgoing {
 
 /// Scripts are CPU work that holds the thread until done. Under load, on
 /// the multi-threaded runtime, the scheduler moves other tasks off this
-/// thread meanwhile; a current-thread runtime only runs one flow anyway.
+/// thread meanwhile, and a scripted step of a flow with branches runs in a
+/// task of its own. A current-thread runtime has one thread, so there a
+/// script holds up the other branches too: run flows with branches on a
+/// multi-threaded runtime, as the CLI and the app do.
 fn blocking<T>(f: impl FnOnce() -> T) -> T {
     match tokio::runtime::Handle::try_current() {
         Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
