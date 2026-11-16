@@ -156,3 +156,33 @@ fn an_empty_run_has_zeros() {
     assert_eq!(s.error_rate(), 0.0);
     assert_eq!(s.check_rate(), 100.0);
 }
+
+#[test]
+fn steps_without_a_timed_response_are_not_measured() {
+    let mut recorder = Recorder::new();
+    // Too fast to measure still counts as a timed response.
+    recorder.record(&ok("instant", 0.0));
+    recorder.record(&Sample {
+        error: Some("connection refused"),
+        status: None,
+        checks_passed: 0,
+        ..ok("refused", 5.0)
+    });
+    recorder.skipped("skipped");
+    recorder.cached("cached");
+    let summary = recorder.summary(Duration::from_secs(1));
+    let measured: Vec<_> = summary
+        .steps
+        .iter()
+        .map(|s| (s.name.as_str(), s.measured()))
+        .collect();
+    assert_eq!(
+        measured,
+        [
+            ("instant", true),
+            ("refused", false),
+            ("skipped", false),
+            ("cached", false)
+        ]
+    );
+}

@@ -467,8 +467,8 @@ function StepTable({ steps }: { steps: StepSummary[] }) {
                 >
                   {step.failed}
                 </td>
-                <td className="px-2 py-1.5 text-right">{(step.latency.max ?? 0) > 0 ? formatMs(step.latency.p50 ?? 0) : "–"}</td>
-                <td className="px-4 py-1.5 text-right">{(step.latency.max ?? 0) > 0 ? formatMs(step.latency.p95 ?? 0) : "–"}</td>
+                <td className="px-2 py-1.5 text-right">{(step.latency.p50 ?? 0) > 0 ? formatMs(step.latency.p50 ?? 0) : "–"}</td>
+                <td className="px-4 py-1.5 text-right">{(step.latency.p50 ?? 0) > 0 ? formatMs(step.latency.p95 ?? 0) : "–"}</td>
               </tr>
             ))}
             {rows.length === 0 && (

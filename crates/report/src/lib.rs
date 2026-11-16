@@ -780,11 +780,9 @@ fn esc(s: &str) -> String {
     out
 }
 
-/// A step with no measured response (all skipped, cached or failed to
-/// connect) has no latency to show. A measured time is at least 1 µs, so an
-/// empty histogram is the only way to a zero maximum.
+/// A step with no timed response has no latency to show.
 fn sent_ms(step: &stormix_metrics::StepSummary, value: f64) -> String {
-    if step.latency.max <= 0.0 {
+    if !step.measured() {
         "–".to_owned()
     } else {
         ms(value)
