@@ -65,7 +65,7 @@ One virtual user runs the steps in order. In a load test, each iteration is one 
 
 ### When a step fails
 
-By default a run stops at the first step that fails, a request error or a failed check (so a 4xx or 5xx stops it only when an `assert` checks the status, as in a run once), and the steps after it are **skipped**: not sent, and shown as skipped in results. The steps after a failed login would only fail too, without the token it was to give them.
+By default a run stops at the first step that fails (a request error, or any failed check or test script), and the steps after it are **skipped**: not sent, and shown as skipped in results. The steps after a failed login would only fail too, without the token it was to give them. As in a run once, a 4xx or 5xx status alone does not fail a step that has no status check.
 
 ```yaml
 flow:

@@ -182,7 +182,7 @@ pub fn load_report(report: &LoadReport) -> String {
 
     let _ = write!(
         body,
-        r#"<section><h2>Iterations</h2><p>{} iterations, {} failed{}{} · {} received</p></section>"#,
+        r#"<section><h2>Iterations</h2><p>{} iterations, {} failed{}{}{} · {} received</p></section>"#,
         s.iterations,
         s.failed_iterations,
         if s.dropped_iterations > 0 {
@@ -195,6 +195,14 @@ pub fn load_report(report: &LoadReport) -> String {
         },
         if s.interrupted_iterations > 0 {
             format!(", {} cut off at the end", s.interrupted_iterations)
+        } else {
+            String::new()
+        },
+        if s.skipped_steps > 0 {
+            format!(
+                ", {} steps skipped after an earlier step failed",
+                s.skipped_steps
+            )
         } else {
             String::new()
         },
