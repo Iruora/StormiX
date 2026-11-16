@@ -156,6 +156,18 @@ fn tree(test: &TestFile, warnings: &mut Vec<String>) -> Folder {
             "Bruno runs requests one after another, so the parallel branches run in file order there".into(),
         );
     }
+    // A failed step stops a Stormix run by default; Bruno carries on unless
+    // it runs with `--bail`, so the steps after it would still be sent.
+    let enabled: Vec<&Step> = flow.enabled_steps().collect();
+    if enabled
+        .iter()
+        .take(enabled.len().saturating_sub(1))
+        .any(|s| flow.stops_after_failure_of(s))
+    {
+        warnings.push(
+            "Stormix stops the flow at a failed step; run it with `bru run --bail` to do the same in Bruno".into(),
+        );
+    }
     if flow.trace.is_some() {
         warnings.push("`trace` is Stormix's own; Bruno sends no traceparent header".into());
     }

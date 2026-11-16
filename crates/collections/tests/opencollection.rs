@@ -215,7 +215,10 @@ fn exports_a_test_file_that_imports_back() {
     );
     assert_eq!(
         out.warnings,
-        ["load settings and thresholds are Stormix's own; Bruno has no place for them"]
+        [
+            "load settings and thresholds are Stormix's own; Bruno has no place for them",
+            "Stormix stops the flow at a failed step; run it with `bru run --bail` to do the same in Bruno"
+        ]
     );
     let login = &out.files[1].1;
     assert!(login.contains("expression: res.body.token"), "{login}");
@@ -295,7 +298,10 @@ fn exports_folders_graphql_and_a_bundle() {
     }
 
     let (yaml, warnings) = opencollection::to_bundle(&bruno.test, &[]);
-    assert_eq!(warnings, Vec::<String>::new());
+    assert!(
+        warnings.iter().all(|w| w.contains("--bail")),
+        "{warnings:?}"
+    );
     let file = dir.path().join("bundle.yml");
     std::fs::write(&file, yaml).unwrap();
     let bundled = import(&file).unwrap();
@@ -331,4 +337,23 @@ flow:
     assert!(w.contains("`F / In`: response caching"), "{w}");
     assert!(w.contains("`ids` ($.items[*].id)"), "{w}");
     assert!(w.contains("different order"), "{w}");
+    assert!(w.contains("`bru run --bail`"), "{w}");
+}
+
+#[test]
+fn warns_about_bail_only_when_a_step_stops_the_flow() {
+    let yaml = |on_failure: &str| {
+        format!(
+            "version: 1\nflow:\n  name: F\n{on_failure}  steps:\n    - name: A\n      request: {{ method: GET, url: \"http://x/a\" }}\n    - name: B\n      request: {{ method: GET, url: \"http://x/b\" }}\n"
+        )
+    };
+    let warns = |text: String| {
+        let test = TestFile::from_yaml(&text).unwrap();
+        opencollection::to_files(&test, &[])
+            .warnings
+            .iter()
+            .any(|w| w.contains("--bail"))
+    };
+    assert!(warns(yaml("")));
+    assert!(!warns(yaml("  on_failure: continue\n")));
 }
