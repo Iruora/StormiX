@@ -1159,7 +1159,13 @@ mod tests {
         )
         .unwrap();
         let result = runner
-            .run_step("f", &step, &mut Variables::default(), None, None)
+            .run_step(
+                "f",
+                &step,
+                &mut Variables::default(),
+                None,
+                Some(Instant::now()),
+            )
             .await;
         assert_eq!(result.error.as_deref(), Some("the run was stopped"));
         assert!(result.started_ms.is_none());
