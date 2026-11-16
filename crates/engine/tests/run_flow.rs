@@ -63,22 +63,6 @@ async fn traced(headers: HeaderMap) -> String {
         .to_owned()
 }
 
-/// Requests to `/count`, for the test that checks a stopped run sends nothing more.
-static COUNTED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-async fn count() -> &'static str {
-    COUNTED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    "counted"
-}
-
-/// Requests to `/entered`, which a script calls to say it has started.
-static ENTERED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-async fn entered() -> &'static str {
-    ENTERED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    "entered"
-}
-
 async fn slow() -> &'static str {
     tokio::time::sleep(Duration::from_millis(400)).await;
     "late"
@@ -92,9 +76,7 @@ async fn serve() -> String {
         .route("/echo", post(echo))
         .route("/graphql", post(graphql))
         .route("/slow", get(slow))
-        .route("/traced", get(traced))
-        .route("/count", get(count))
-        .route("/entered", get(entered));
+        .route("/traced", get(traced));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -983,7 +965,7 @@ async fn diagnose_runs_every_step_before_the_one_it_looks_at_even_with_bail() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_slow_script_does_not_hold_up_another_branch() {
     let url = serve().await;
-    let busy = "      scripts:\n        pre_request: |\n          await bru.sendRequest({ url: bru.getVar(\"base\") + \"/entered\" })\n          const t = Date.now(); while (Date.now() - t < 400) {}\n";
+    let busy = "      scripts:\n        pre_request: |\n          const t = Date.now(); while (Date.now() - t < 400) {}\n";
     let f = flow(&format!(
         "  name: slow script\n  steps:\n{}{}{}",
         echo_step("start", "", "0", "v", ""),
@@ -1007,7 +989,26 @@ async fn a_slow_script_does_not_hold_up_another_branch() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_dropped_run_sends_no_request_after_a_running_script() {
-    let url = serve().await;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+    // A server of its own, so no other test's requests are counted:
+    // `/entered` is called by the script as it starts, `/count` is the
+    // request that must not go out.
+    let (entered, counted) = (Arc::new(AtomicU32::new(0)), Arc::new(AtomicU32::new(0)));
+    let (e, c) = (entered.clone(), counted.clone());
+    let app = Router::new()
+        .route("/echo", post(echo))
+        .route(
+            "/entered",
+            get(move || async move { e.fetch_add(1, Ordering::SeqCst).to_string() }),
+        )
+        .route(
+            "/count",
+            get(move || async move { c.fetch_add(1, Ordering::SeqCst).to_string() }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let busy = "      scripts:\n        pre_request: |\n          await bru.sendRequest({ url: bru.getVar(\"base\") + \"/entered\" })\n          const t = Date.now(); while (Date.now() - t < 400) {}\n";
     let f = flow(&format!(
         "  name: dropped\n  steps:\n{}    - name: scripted\n      after: [start]\n      request: {{ method: GET, url: \"{{{{base}}}}/count\" }}\n{busy}{}",
@@ -1020,7 +1021,7 @@ async fn a_dropped_run_sends_no_request_after_a_running_script() {
     // Boxed so that dropping it drops the run itself.
     let mut run = Box::pin(runner.run(&f, &ordinary));
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while ENTERED.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+    while entered.load(Ordering::SeqCst) == 0 {
         assert!(
             tokio::time::Instant::now() < deadline,
             "the script never started"
@@ -1032,5 +1033,5 @@ async fn a_dropped_run_sends_no_request_after_a_running_script() {
     }
     drop(run);
     tokio::time::sleep(Duration::from_millis(600)).await;
-    assert_eq!(COUNTED.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(counted.load(Ordering::SeqCst), 0);
 }
