@@ -1,3 +1,5 @@
+import { parse } from "yaml";
+
 import type { Step } from "../bindings";
 
 /**
@@ -150,14 +152,17 @@ export function moveBreaksOrder(before: Step[], next: Step[]): string | null {
     steps.flatMap((s, i) =>
       (s.after ?? [])
         .filter((n) => !steps.slice(0, i).some((t) => t.name === n) && steps.slice(i + 1).some((t) => t.name === n))
-        .map((n) => [s.name, n] as const),
+        .map((n) => [s, n] as const),
     );
-  // Only a reference the move breaks counts, not one that was already wrong.
-  const was = new Set(below(before).map(([step, name]) => `${step}\u0000${name}`));
-  const broken = below(next).find(([step, name]) => !was.has(`${step}\u0000${name}`));
+  // Only a reference the move breaks counts, not one that was already
+  // wrong. A move keeps each step object, so steps that share a name are
+  // still told apart.
+  const was = new Map<Step, Set<string>>();
+  for (const [step, name] of below(before)) was.set(step, (was.get(step) ?? new Set()).add(name));
+  const broken = below(next).find(([step, name]) => !was.get(step)?.has(name));
   if (!broken) return null;
   const [step, name] = broken;
-  return `“${step}” runs after “${name}”, so it has to stay below it`;
+  return `“${step.name}” runs after “${name}”, so it has to stay below it`;
 }
 
 /** `steps` with the step at `from` moved to `to`. */
@@ -166,4 +171,18 @@ export function moved(steps: Step[], from: number, to: number): Step[] {
   const [step] = next.splice(from, 1);
   next.splice(to, 0, step);
   return next;
+}
+
+/**
+ * Whether a test file's text has a step that says `after:`, as the engine
+ * decides it: read from the YAML that was run, not the editor's state,
+ * which may be an edit ahead or behind it.
+ */
+export function yamlHasBranches(text: string): boolean {
+  try {
+    const steps = (parse(text) as { flow?: { steps?: unknown } } | null)?.flow?.steps;
+    return Array.isArray(steps) && steps.some((s) => s != null && typeof s === "object" && "after" in s);
+  } catch {
+    return false;
+  }
 }

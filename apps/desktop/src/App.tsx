@@ -70,7 +70,7 @@ import { ProxyButton } from "./views/ProxySetting";
 import { type Command, CommandPalette } from "./views/CommandPalette";
 import { Menu, MenuItem, MenuLabel, MenuSeparator, shortcut } from "./views/Menu";
 import { SettingsView } from "./views/Settings";
-import { branches } from "./lib/branches";
+import { yamlHasBranches } from "./lib/branches";
 
 export function App() {
   const info = useQuery({ queryKey: ["app-info"], queryFn: commands.getAppInfo });
@@ -431,7 +431,7 @@ function TestFileView({
   const run = useMutation({
     mutationFn: async (yaml: string) => {
       ranFrom.current.run = path;
-      ranLinear.current = !branches(shown?.flow.steps ?? []);
+      ranLinear.current = !yamlHasBranches(yaml);
       ranSecrets.current.run = aiSecrets;
       runEnv.current = envName;
       setRunStep(null);
