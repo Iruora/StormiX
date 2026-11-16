@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 use stormix_flow::{
-    Body, Flow, Header, KeyValue, Request, Scripts, Step, TestFile, CURRENT_VERSION,
+    Body, Flow, Header, KeyValue, OnFailure, Request, Scripts, Step, TestFile, CURRENT_VERSION,
 };
 
 use super::{FOLDER_FILES, ROOT_FILES};
@@ -345,6 +345,7 @@ fn build(collection: Collection) -> Imported {
                 steps,
                 set_aside: Vec::new(),
                 trace: None,
+                on_failure: OnFailure::default(),
             },
             load: None,
             data: Vec::new(),
@@ -527,6 +528,7 @@ fn request(
         name: step,
         enabled: true,
         cache: false,
+        continue_on_failure: false,
         request,
         extract: BTreeMap::new(),
         assertions: Vec::new(),

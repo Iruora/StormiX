@@ -783,7 +783,11 @@ fn record(
 
 /// Counts one iteration's requests in `recorder`.
 fn add_samples(recorder: &mut Recorder, result: &FlowResult) {
-    for step in result.steps.iter().filter(|s| !s.skipped) {
+    for step in &result.steps {
+        if step.skipped {
+            recorder.skipped(&step.name);
+            continue;
+        }
         if step.cached {
             recorder.cached(&step.name);
             continue;

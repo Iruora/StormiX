@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use stormix_flow::{
-    Body, Flow, Header, KeyValue, Request, Scripts, Step, TestFile, CURRENT_VERSION,
+    Body, Flow, Header, KeyValue, OnFailure, Request, Scripts, Step, TestFile, CURRENT_VERSION,
 };
 
 use crate::bru::{self, Block, Content};
@@ -147,6 +147,7 @@ pub fn from_dir_with_progress(
                 steps: importer.steps,
                 set_aside: Vec::new(),
                 trace: None,
+                on_failure: OnFailure::default(),
             },
             load: None,
             data: Vec::new(),
@@ -406,6 +407,7 @@ impl Importer<'_> {
             name: step,
             enabled: true,
             cache: false,
+            continue_on_failure: false,
             request,
             extract: BTreeMap::new(),
             assertions: Vec::new(),

@@ -8,7 +8,7 @@ The **Flow** tab draws the test file as a diagram: a rail from **START** to **EN
 
 - The step's number, **method**, name and URL, with its `{{variables}}` coloured. Hover a variable to see or [edit its value](/app/variables-and-scripts).
 - **sets**: the variables the step extracts or its scripts set. A long list folds to one line with **+N more**.
-- The step's **last result**: its status, timing and whether its checks passed.
+- The step's **last result**: its status, timing and whether its checks passed. When the run stopped at a failed step, that card says **The last run stopped here** and the cards after it say **skipped, an earlier step failed**.
 - A **warning** when a variable it uses comes from a step that is turned off, set aside, or now runs after it.
 
 Click a card to open the step in the Steps tab.
@@ -20,6 +20,7 @@ Each card has buttons to move the step up or down, **duplicate** it, **set it as
 - **Drag** a card by its grip to reorder it.
 - **Turn a step off** to skip it without losing its place. It is not sent by runs or load tests and does not appear in results (`enabled: false` in the file).
 - **All steps**, in the header, turns every step on, or, when they are all on, turns them all off. The header also counts how many steps will run.
+- **When a step fails**, in the header, is **Stop** by default: the steps after a failed one are skipped, in a run and in every load test iteration. **Keep going** runs them all (`on_failure: continue`). With Stop, the double-arrow button on a card lets that one step fail without stopping the run (`continue_on_failure: true`). See [When a step fails](/reference/test-file#when-a-step-fails).
 
 <Shot name="flow-warning" alt="A warning after moving a step before the one that sets its variable" />
 

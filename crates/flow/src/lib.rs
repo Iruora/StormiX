@@ -25,7 +25,7 @@ pub use duration::{Duration, DurationError};
 pub use load::{LoadProfile, Stage};
 pub use model::{
     Assertion, Body, ExtractSource, Flow, GraphqlBody, Header, HeaderAssertion, JsonAssertion,
-    KeyValue, Method, Request, Scripts, Step, TraceMode,
+    KeyValue, Method, OnFailure, Request, Scripts, Step, TraceMode,
 };
 pub use monitor::{Monitor, MonitorTarget};
 pub use template::{render, variable_refs, Rendered};

@@ -26,7 +26,10 @@ pub struct RunOptions {
     /// Accept invalid or self-signed TLS certificates.
     pub insecure: bool,
     pub follow_redirects: bool,
-    /// Stop at the first failed step; the rest are reported as skipped.
+    /// Stop at the first failed step, even in a flow with
+    /// `on_failure: continue` or a step with `continue_on_failure`. Without
+    /// it the flow decides; by default it stops too. Skipped steps are
+    /// reported as skipped.
     pub bail: bool,
     /// For each pre-request or test script.
     pub script_timeout: Duration,
@@ -162,7 +165,9 @@ impl Runner {
     }
 
     /// Runs every enabled step once. `overrides` win over the flow's own
-    /// variables. Disabled steps are left out of the result entirely.
+    /// variables. Disabled steps are left out of the result entirely. After
+    /// a step fails, the steps after it are reported as skipped, unless the
+    /// flow or the step says to carry on.
     pub async fn run(&self, flow: &Flow, overrides: &Variables) -> FlowResult {
         self.run_with_progress(flow, overrides, |_| {}).await
     }
@@ -202,7 +207,7 @@ impl Runner {
             let result = self
                 .run_step(&flow.name, step, &mut vars, tracing.as_ref())
                 .await;
-            stopped = self.options.bail && !result.passed();
+            stopped = !result.passed() && (self.options.bail || flow.stops_after_failure_of(step));
             steps.push(result);
         }
         FlowResult {

@@ -202,24 +202,37 @@ pub fn load_report(report: &LoadReport) -> String {
     );
 
     if !s.steps.is_empty() {
-        body.push_str(
-            r#"<section><h2>Steps</h2><table><thead><tr><th>Step</th><th>Requests</th><th>Failed</th><th>p50</th><th>p95</th><th>p99</th><th>max</th></tr></thead><tbody>"#,
+        // The column only shows when an iteration stopped at a failure.
+        let skipped = s.skipped_steps > 0;
+        let _ = write!(
+            body,
+            r#"<section><h2>Steps</h2><table><thead><tr><th>Step</th><th>Requests</th><th>Failed</th>{}<th>p50</th><th>p95</th><th>p99</th><th>max</th></tr></thead><tbody>"#,
+            if skipped { "<th>Skipped</th>" } else { "" },
         );
         for step in &s.steps {
             let _ = write!(
                 body,
-                r#"<tr><td>{}</td><td>{}</td><td class="{}">{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>"#,
+                r#"<tr><td>{}</td><td>{}</td><td class="{}">{}</td>{}<td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>"#,
                 esc(&step.name),
                 step.requests,
                 if step.failed > 0 { "bad" } else { "" },
                 step.failed,
+                if skipped {
+                    format!(r#"<td class="muted">{}</td>"#, step.skipped)
+                } else {
+                    String::new()
+                },
                 ms(step.latency.p50),
                 ms(step.latency.p95),
                 ms(step.latency.p99),
                 ms(step.latency.max),
             );
         }
-        body.push_str("</tbody></table></section>");
+        body.push_str("</tbody></table>");
+        if skipped {
+            body.push_str(r#"<p class="muted">Skipped: not run because an earlier step in the same iteration failed.</p>"#);
+        }
+        body.push_str("</section>");
     }
 
     if !s.failures.is_empty() {

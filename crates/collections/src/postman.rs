@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 use stormix_flow::{
-    Body, Flow, Header, KeyValue, Request, Scripts, Step, TestFile, CURRENT_VERSION,
+    Body, Flow, Header, KeyValue, OnFailure, Request, Scripts, Step, TestFile, CURRENT_VERSION,
 };
 
 use crate::common::{self, Auth};
@@ -61,6 +61,7 @@ pub fn from_json(text: &str) -> Result<Imported, ImportError> {
                 steps: importer.steps,
                 set_aside: Vec::new(),
                 trace: None,
+                on_failure: OnFailure::default(),
             },
             load: None,
             data: Vec::new(),
@@ -140,6 +141,7 @@ impl Importer {
                 name: step_name,
                 enabled: true,
                 cache: false,
+                continue_on_failure: false,
                 request: built,
                 extract: BTreeMap::new(),
                 assertions: Vec::new(),

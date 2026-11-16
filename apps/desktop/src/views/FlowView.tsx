@@ -2,7 +2,9 @@ import {
   Archive,
   ArrowDown,
   ArrowUp,
+  ChevronsDown,
   CircleCheck,
+  CircleMinus,
   CircleX,
   Copy,
   CornerUpLeft,
@@ -11,6 +13,7 @@ import {
   FileCode2,
   Flag,
   GripVertical,
+  OctagonX,
   Play,
   Plus,
   Trash2,
@@ -23,7 +26,7 @@ import type { CachedStep, FlowResult, Step, TestFile } from "../bindings";
 import { cachedTitle, storedAgo, useResponseCache } from "../lib/cache";
 import { methodTone } from "../lib/methods";
 import { useVariables, variablesSetBy, variablesUsedBy } from "../lib/variables";
-import { stepPassed } from "./RunResult";
+import { stepPassed, stoppedAt } from "./RunResult";
 import { CopyCurlButton } from "./CopyCurl";
 import { ScriptsDialog, withScripts } from "./ScriptsDialog";
 import { VarText } from "./VarField";
@@ -63,6 +66,9 @@ export function FlowView({
   const flowRef = useRef<HTMLOListElement>(null);
   const trayRef = useRef<HTMLDivElement>(null);
 
+  const stops = test.flow.on_failure !== "continue";
+  const setStops = (stop: boolean) =>
+    onChange({ ...test, flow: { ...test.flow, on_failure: stop ? undefined : "continue" } });
   const write = (nextSteps: Step[], nextAside: Step[]) =>
     onChange({ ...test, flow: { ...test.flow, steps: nextSteps, set_aside: nextAside } });
   const lists = () => ({ steps: [...steps], aside: [...aside] });
@@ -183,6 +189,7 @@ export function FlowView({
   const enabled = steps.filter(isOn).length;
   const disabled = steps.length - enabled;
   const results = useMemo(() => new Map(lastRun?.steps.map((s) => [s.name, s]) ?? []), [lastRun]);
+  const stop = useMemo(() => stoppedAt(lastRun), [lastRun]);
   const dragged = drag?.moved ? (drag.list === "steps" ? steps : aside)[drag.index] : null;
   const isDragged = (place: Place) => !!dragged && drag!.list === place.list && drag!.index === place.index;
   const gapActive = (list: List, index: number) =>
@@ -221,6 +228,7 @@ export function FlowView({
                 <Eraser size="0.6875rem" /> Clear cache ({cachedCount} step{cachedCount === 1 ? "" : "s"})
               </button>
             )}
+            <OnFailureSwitch stops={stops} onChange={setStops} />
             <span className="ml-auto text-subtle">Drag the grip to reorder or set aside. Click a step to edit it.</span>
           </div>
 
@@ -249,10 +257,18 @@ export function FlowView({
                   result={isOn(step) ? results.get(step.name) : undefined}
                   notes={notes.get(step) ?? []}
                   cached={cache.steps.get(step.name)}
+                  flowStops={stops}
+                  stoppedRun={stop?.name === step.name && isOn(step) ? stop.skipped : 0}
                   last={i === steps.length - 1}
                   onGrip={startDrag({ list: "steps", index: i })}
                   onToggle={() => update({ list: "steps", index: i }, { ...step, enabled: !isOn(step) })}
                   onCacheToggle={() => update({ list: "steps", index: i }, { ...step, cache: !step.cache })}
+                  onContinueToggle={() =>
+                    update(
+                      { list: "steps", index: i },
+                      { ...step, continue_on_failure: step.continue_on_failure ? undefined : true },
+                    )
+                  }
                   onClearCache={() => cache.clear(step.name)}
                   onScripts={() => setScripting({ list: "steps", index: i })}
                   onMove={(to) => move({ list: "steps", index: i }, { list: "steps", index: to > i ? to + 1 : to })}
@@ -384,10 +400,13 @@ function FlowNode({
   result,
   notes,
   cached,
+  flowStops,
+  stoppedRun,
   last,
   onGrip,
   onToggle,
   onCacheToggle,
+  onContinueToggle,
   onClearCache,
   onScripts,
   onMove,
@@ -403,10 +422,15 @@ function FlowNode({
   result: FlowResult["steps"][number] | undefined;
   notes: string[];
   cached: CachedStep | undefined;
+  /** Whether the flow stops at a failed step. */
+  flowStops: boolean;
+  /** In the last run, how many steps were skipped after this one failed. */
+  stoppedRun: number;
   last: boolean;
   onGrip: (e: React.PointerEvent) => void;
   onToggle: () => void;
   onCacheToggle: () => void;
+  onContinueToggle: () => void;
   onClearCache: () => void;
   onScripts: () => void;
   onMove: (to: number) => void;
@@ -417,6 +441,7 @@ function FlowNode({
 }) {
   const on = isOn(step);
   const sets = variablesSetBy(step);
+  const keepsGoing = on && flowStops && !!step.continue_on_failure;
   return (
     <div data-flow-card className={`flex items-stretch ${faded ? "opacity-30" : ""}`}>
       {/* The rail a run follows; turned off steps branch off it. */}
@@ -436,7 +461,7 @@ function FlowNode({
       <div
         className={`group min-w-0 flex-1 rounded-lg border bg-surface transition-colors ${
           on ? "border-line" : "ml-6 border-dashed border-line bg-surface-2/50"
-        }`}
+        } ${result?.skipped ? "opacity-60" : ""}`}
       >
         <div className="flex flex-wrap items-center gap-2 px-2 py-2">
           <Grip onPointerDown={onGrip} />
@@ -462,6 +487,14 @@ function FlowNode({
             </span>
           )}
 
+          {result?.skipped && (
+            <span
+              className="flex shrink-0 items-center gap-1 text-xs text-subtle"
+              title="In the last run, an earlier step failed and the run stopped before this one"
+            >
+              <CircleMinus size="0.8125rem" /> skipped, an earlier step failed
+            </span>
+          )}
           {!on && <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[0.6875rem] text-subtle">skipped</span>}
           {/* The controls move under the name, together, when the card is narrow. */}
           <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -487,11 +520,25 @@ function FlowNode({
             </div>
             <ScriptsButton step={step} onClick={onScripts} />
             <CacheToggle on={!!step.cache} onClick={onCacheToggle} />
+            {flowStops && <ContinueToggle on={!!step.continue_on_failure} onClick={onContinueToggle} />}
             <Toggle on={on} label={on ? "Turn this step off" : "Turn this step on"} onClick={onToggle} />
           </div>
         </div>
-        {(sets.length > 0 || notes.length > 0 || cached) && (
+        {(sets.length > 0 || notes.length > 0 || cached || stoppedRun > 0 || keepsGoing) && (
           <div className="space-y-1 border-t border-line px-3 py-1.5 text-[0.6875rem]">
+            {stoppedRun > 0 && (
+              <div className="flex items-center gap-1.5 text-bad">
+                <OctagonX size="0.6875rem" className="shrink-0" />
+                The last run stopped here: this step failed, so the {stoppedRun === 1 ? "step" : `${stoppedRun} steps`}{" "}
+                after it {stoppedRun === 1 ? "was" : "were"} skipped
+              </div>
+            )}
+            {keepsGoing && (
+              <div className="flex items-center gap-1.5 text-muted">
+                <ChevronsDown size="0.6875rem" className="shrink-0" />
+                Keeps going: if this step fails, the steps after it still run
+              </div>
+            )}
             {cached && (
               <div className="flex items-center gap-1.5 text-accent" title={cachedTitle(cached)}>
                 <Database size="0.6875rem" className="shrink-0" />
@@ -684,6 +731,54 @@ function ScriptsButton({ step, onClick }: { step: Step; onClick: () => void }) {
 }
 
 /** Whether the step reuses its response; stays visible when on, so a cached step stands out. */
+/**
+ * Whether a run stops at the first failed step (the default) or runs every
+ * step whatever happened before it.
+ */
+export function OnFailureSwitch({ stops, onChange }: { stops: boolean; onChange: (stops: boolean) => void }) {
+  const option = (value: boolean, label: string, title: string) => (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={stops === value}
+      title={title}
+      onClick={() => onChange(value)}
+      className={`rounded px-1.5 py-px ${stops === value ? "bg-accent-soft font-medium text-accent" : "hover:text-ink"}`}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div role="radiogroup" aria-label="When a step fails" className="flex items-center gap-1 rounded border border-line px-1 py-0.5">
+      <span className="pl-0.5 text-subtle">When a step fails</span>
+      {option(true, "Stop", "Skip the steps after a failed one: they usually need what it was to give them, like a token")}
+      {option(false, "Keep going", "Run every step, whatever happened before it")}
+    </div>
+  );
+}
+
+/** Lets one step fail without stopping a flow that stops at failures. */
+export function ContinueToggle({ on, onClick }: { on: boolean; onClick: () => void }) {
+  const label = on
+    ? "Keeps going: if this step fails, the steps after it still run. Click to stop the run at it instead."
+    : "Stops the run if it fails. Click to keep going after this step even when it fails.";
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label="Keep going if this step fails"
+      title={label}
+      onClick={onClick}
+      className={`shrink-0 rounded p-1 ${
+        on ? "bg-accent-soft text-accent" : "text-subtle opacity-60 hover:bg-surface-2 hover:text-ink group-hover:opacity-100"
+      }`}
+    >
+      <ChevronsDown size="0.8125rem" />
+    </button>
+  );
+}
+
 export function CacheToggle({ on, onClick }: { on: boolean; onClick: () => void }) {
   const label = on
     ? "Caching: runs reuse this step's response. Click to send it every time."

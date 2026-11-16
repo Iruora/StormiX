@@ -723,6 +723,12 @@ export type Flow_Deserialize = {
 	 *  Stormix records. A step that sets its own `traceparent` keeps it.
 	 */
 	trace?: TraceMode | null,
+	/**
+	 *  What a run does after a step fails: stop and skip the steps after
+	 *  it (the default), or carry on with them. A step can opt out of
+	 *  stopping with `continue_on_failure: true`.
+	 */
+	on_failure?: OnFailure,
 };
 
 /**
@@ -749,6 +755,12 @@ export type Flow_Serialize = {
 	 *  Stormix records. A step that sets its own `traceparent` keeps it.
 	 */
 	trace?: TraceMode,
+	/**
+	 *  What a run does after a step fails: stop and skip the steps after
+	 *  it (the default), or carry on with them. A step can opt out of
+	 *  stopping with `continue_on_failure: true`.
+	 */
+	on_failure?: OnFailure,
 };
 
 /**  A provider found on this machine. */
@@ -1527,6 +1539,16 @@ export type Monitor_Serialize =
  */
 ({ dynatrace: MonitorTarget_Serialize }) & { actuator?: never; prometheus?: never };
 
+/**  What a run does after a step fails. */
+export type OnFailure = 
+/**
+ *  Skip the rest of the steps: they usually need what the failed step
+ *  was to give them, like a token, and would only fail after it.
+ */
+"stop" | 
+/**  Run every step whatever happened before it. */
+"continue";
+
 /**  A body, as text. Binary bodies are described rather than kept. */
 export type Payload = {
 	text: string,
@@ -2195,6 +2217,11 @@ export type StepSummary_Deserialize = {
 	 *  request. Not counted in `requests` or the latency figures.
 	 */
 	cached?: number,
+	/**
+	 *  Times the step was not run because an earlier step in the same
+	 *  iteration failed. Not counted in `requests`.
+	 */
+	skipped?: number,
 };
 
 export type StepSummary_Serialize = {
@@ -2207,6 +2234,11 @@ export type StepSummary_Serialize = {
 	 *  request. Not counted in `requests` or the latency figures.
 	 */
 	cached: number,
+	/**
+	 *  Times the step was not run because an earlier step in the same
+	 *  iteration failed. Not counted in `requests`.
+	 */
+	skipped: number,
 };
 
 export type Step_Deserialize = {
@@ -2224,6 +2256,12 @@ export type Step_Deserialize = {
 	 *  call. Checks, extraction and test scripts still run on it.
 	 */
 	cache?: boolean,
+	/**
+	 *  When this step fails, run the steps after it anyway, in a flow that
+	 *  otherwise stops at the first failure. For a step whose outcome the
+	 *  rest do not depend on, like a best-effort cleanup or a probe.
+	 */
+	continue_on_failure?: boolean,
 	request: Request_Deserialize,
 	/**  Variables to set from the response, by variable name. */
 	extract?: { [key in string]: ExtractSource },
@@ -2247,6 +2285,12 @@ export type Step_Serialize = {
 	 *  call. Checks, extraction and test scripts still run on it.
 	 */
 	cache?: boolean,
+	/**
+	 *  When this step fails, run the steps after it anyway, in a flow that
+	 *  otherwise stops at the first failure. For a step whose outcome the
+	 *  rest do not depend on, like a best-effort cleanup or a probe.
+	 */
+	continue_on_failure?: boolean,
 	request: Request_Serialize,
 	/**  Variables to set from the response, by variable name. */
 	extract?: { [key in string]: ExtractSource },
@@ -2295,6 +2339,11 @@ export type Summary_Deserialize = {
 	 *  request went out for them, so they are not in `requests`.
 	 */
 	cachedResponses?: number,
+	/**
+	 *  Steps not run because an earlier step in their iteration failed and
+	 *  the flow stops at a failure. No request went out for them.
+	 */
+	skippedSteps?: number,
 	/**  Requests per second over the whole run. */
 	rps: number | null,
 	latency: Latency,
@@ -2329,6 +2378,11 @@ export type Summary_Serialize = {
 	 *  request went out for them, so they are not in `requests`.
 	 */
 	cachedResponses: number,
+	/**
+	 *  Steps not run because an earlier step in their iteration failed and
+	 *  the flow stops at a failure. No request went out for them.
+	 */
+	skippedSteps: number,
 	/**  Requests per second over the whole run. */
 	rps: number | null,
 	latency: Latency,
