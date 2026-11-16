@@ -887,9 +887,11 @@ fn measured(t: &stormix_metrics::ThresholdResult) -> String {
     }
 }
 
-/// A step that sent nothing (all cached or skipped) has no latency to show.
+/// A step with no measured response (all skipped, cached or failed to
+/// connect) has no latency to show. A measured time is at least 1 µs, so an
+/// empty histogram is the only way to a zero maximum.
 fn sent_ms(step: &stormix_metrics::StepSummary, value: f64) -> String {
-    if step.requests == 0 {
+    if step.latency.max <= 0.0 {
         "–".to_owned()
     } else {
         ms(value)
