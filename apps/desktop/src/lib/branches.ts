@@ -176,13 +176,16 @@ export function moved(steps: Step[], from: number, to: number): Step[] {
 /**
  * Whether a test file's text has a step that says `after:`, as the engine
  * decides it: read from the YAML that was run, not the editor's state,
- * which may be an edit ahead or behind it.
+ * which may be an edit ahead or behind it. Text this parser cannot read
+ * counts as branching, so nothing is assumed about its order.
  */
 export function yamlHasBranches(text: string): boolean {
   try {
-    const steps = (parse(text) as { flow?: { steps?: unknown } } | null)?.flow?.steps;
+    // The engine sets no limit on alias use, so neither does this.
+    const doc = parse(text, { maxAliasCount: -1 }) as { flow?: { steps?: unknown } } | null;
+    const steps = doc?.flow?.steps;
     return Array.isArray(steps) && steps.some((s) => s != null && typeof s === "object" && "after" in s);
   } catch {
-    return false;
+    return true;
   }
 }
