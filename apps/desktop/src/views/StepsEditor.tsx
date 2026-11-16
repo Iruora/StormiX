@@ -45,6 +45,7 @@ export function StepsEditor({
   selected,
   onSelect,
   lastRun = null,
+  lastRunLinear = true,
 }: {
   test: TestFile;
   onChange: (next: TestFile) => void;
@@ -52,11 +53,18 @@ export function StepsEditor({
   onSelect: (next: StepsSelection) => void;
   /** To mark the steps the last run skipped after a failure. */
   lastRun?: FlowResult | null;
+  /** Whether the flow had no branches when `lastRun` ran. */
+  lastRunLinear?: boolean;
 }) {
   const steps = test.flow.steps;
   const stops = test.flow.on_failure !== "continue";
   const results = useMemo(() => new Map(lastRun?.steps.map((s) => [s.name, s]) ?? []), [lastRun]);
-  const stop = useMemo(() => stoppedAt(lastRun, !branches(steps)), [lastRun, steps]);
+  // Read the run as the flow was when it ran, and as it is now: an edit can
+  // add branches after the run, or take them away.
+  const stop = useMemo(
+    () => stoppedAt(lastRun, lastRunLinear && !branches(steps)),
+    [lastRun, lastRunLinear, steps],
+  );
   const cache = useResponseCache(test.flow.name);
   const listRef = useRef<HTMLDivElement>(null);
   // A step that no longer exists falls back to the last one.

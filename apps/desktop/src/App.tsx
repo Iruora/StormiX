@@ -70,6 +70,7 @@ import { ProxyButton } from "./views/ProxySetting";
 import { type Command, CommandPalette } from "./views/CommandPalette";
 import { Menu, MenuItem, MenuLabel, MenuSeparator, shortcut } from "./views/Menu";
 import { SettingsView } from "./views/Settings";
+import { branches } from "./lib/branches";
 
 export function App() {
   const info = useQuery({ queryKey: ["app-info"], queryFn: commands.getAppInfo });
@@ -424,9 +425,13 @@ function TestFileView({
   // result explained after a secret changed still hides the value it used.
   const ranSecrets = useRef<{ run: string[]; load: string[] }>({ run: [], load: [] });
   const hiddenFor = (kind: "run" | "load") => [...new Set([...ranSecrets.current[kind], ...aiSecrets])];
+  // Whether the flow had no branches when it last ran, so its result is read
+  // the same way after the steps are edited.
+  const ranLinear = useRef(true);
   const run = useMutation({
     mutationFn: async (yaml: string) => {
       ranFrom.current.run = path;
+      ranLinear.current = !branches(shown?.flow.steps ?? []);
       ranSecrets.current.run = aiSecrets;
       runEnv.current = envName;
       setRunStep(null);
@@ -1141,6 +1146,7 @@ function TestFileView({
                   selected={selectedStep}
                   onSelect={setSelectedStep}
                   lastRun={run.data ?? null}
+                  lastRunLinear={ranLinear.current}
                 />
               </CurlContext.Provider>
             </VariableEditContext.Provider>
