@@ -1188,3 +1188,50 @@ data:
     assert_eq!(hits.len(), 10);
     assert!(hits.values().all(|&n| n == 1), "{hits:?}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn iterations_skip_the_steps_after_a_failure_and_count_them() {
+    let url = serve().await;
+    let test = test_file(
+        r#"
+flow:
+  name: stops
+  steps:
+    - name: first
+      request: { method: GET, url: "{{base}}/fast" }
+    - name: broken
+      request: { method: GET, url: "{{base}}/missing" }
+      assert: [{ status: 200 }]
+    - name: after
+      request: { method: GET, url: "{{base}}/fast" }
+load:
+  constant_rate: { rate: 20, duration: 1s }
+"#,
+    );
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let report = run_load(
+        &runner,
+        &test.flow,
+        &base(&url),
+        test.load.as_ref().unwrap(),
+        &[],
+        &LoadOptions::default(),
+        |_| {},
+    )
+    .await;
+
+    let s = &report.summary;
+    assert_eq!(s.iterations, 20);
+    assert_eq!(s.failed_iterations, 20);
+    assert_eq!(s.requests, 40);
+    assert_eq!(s.skipped_steps, 20);
+    let per_step: Vec<_> = s
+        .steps
+        .iter()
+        .map(|st| (st.name.as_str(), st.requests, st.skipped))
+        .collect();
+    assert_eq!(
+        per_step,
+        [("first", 20, 0), ("broken", 20, 0), ("after", 0, 20)]
+    );
+}

@@ -1,10 +1,24 @@
-import { ArrowDown, ArrowUp, Copy, Eraser, FileCode2, Plus, Settings2, Trash2, X } from "lucide-react";
-import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, CircleMinus, Copy, Eraser, FileCode2, OctagonX, Plus, Settings2, Trash2, X } from "lucide-react";
+import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import type { Assertion, Body, CachedStep, GraphqlBody, Header, KeyValue, LoadProfile, Method, Step, TestFile } from "../bindings";
+import type {
+  Assertion,
+  Body,
+  CachedStep,
+  FlowResult,
+  GraphqlBody,
+  Header,
+  KeyValue,
+  LoadProfile,
+  Method,
+  Step,
+  StepResult,
+  TestFile,
+} from "../bindings";
 import { cachedTitle, useResponseCache } from "../lib/cache";
 import { methodText, methodTone } from "../lib/methods";
 import { CopyCurlButton } from "./CopyCurl";
+import { stoppedAt } from "./RunResult";
 import { ScriptsDialog, withScripts } from "./ScriptsDialog";
 import { TraceSetting } from "./TraceSetting";
 import { VarField } from "./VarField";
@@ -28,13 +42,19 @@ export function StepsEditor({
   onChange,
   selected,
   onSelect,
+  lastRun = null,
 }: {
   test: TestFile;
   onChange: (next: TestFile) => void;
   selected: StepsSelection;
   onSelect: (next: StepsSelection) => void;
+  /** To mark the steps the last run skipped after a failure. */
+  lastRun?: FlowResult | null;
 }) {
   const steps = test.flow.steps;
+  const stops = test.flow.on_failure !== "continue";
+  const results = useMemo(() => new Map(lastRun?.steps.map((s) => [s.name, s]) ?? []), [lastRun]);
+  const stop = useMemo(() => stoppedAt(lastRun), [lastRun]);
   const cache = useResponseCache(test.flow.name);
   const listRef = useRef<HTMLDivElement>(null);
   // A step that no longer exists falls back to the last one.
@@ -97,6 +117,16 @@ export function StepsEditor({
                 <span className={`min-w-0 flex-1 truncate ${off ? "line-through decoration-subtle" : ""}`} title={s.name}>
                   {s.name}
                 </span>
+                {!off && results.get(s.name)?.skipped && (
+                  <span title="Skipped in the last run: an earlier step failed" className="shrink-0 text-subtle">
+                    <CircleMinus size="0.75rem" />
+                  </span>
+                )}
+                {!off && stop?.name === s.name && (
+                  <span title="The last run stopped here: this step failed" className="shrink-0 text-bad">
+                    <OctagonX size="0.75rem" />
+                  </span>
+                )}
                 {cache.steps.has(s.name) && (
                   <span title="A response is cached for this step" className="size-1.5 shrink-0 rounded-full bg-accent" />
                 )}
@@ -127,6 +157,9 @@ export function StepsEditor({
                   step={step}
                   last={current === steps.length - 1}
                   cached={cache.steps.get(step.name)}
+                  flowStops={stops}
+                  result={step.enabled !== false ? results.get(step.name) : undefined}
+                  stoppedRun={stop?.name === step.name && step.enabled !== false ? stop.skipped : 0}
                   onClearCache={() => cache.clear(step.name)}
                   onChange={(next) => setSteps(steps.map((x, j) => (j === current ? next : x)))}
                   onMove={(to) => move(current as number, to)}
@@ -159,6 +192,12 @@ export function StepsEditor({
                 compact
                 value={test.flow.trace ?? null}
                 onChange={(trace) => onChange({ ...test, flow: { ...test.flow, trace } })}
+              />
+              <OnFailureSetting
+                stops={stops}
+                onChange={(stop) =>
+                  onChange({ ...test, flow: { ...test.flow, on_failure: stop ? undefined : "continue" } })
+                }
               />
               <LoadEditor
                 load={test.load ?? null}
@@ -221,6 +260,9 @@ function StepCard({
   step,
   last,
   cached,
+  flowStops,
+  result,
+  stoppedRun,
   onClearCache,
   onChange,
   onMove,
@@ -231,6 +273,11 @@ function StepCard({
   step: Step;
   last: boolean;
   cached: CachedStep | undefined;
+  flowStops: boolean;
+  /** This step in the last run. */
+  result: StepResult | undefined;
+  /** In the last run, how many steps were skipped after this one failed. */
+  stoppedRun: number;
   onClearCache: () => void;
   onChange: (next: Step) => void;
   onMove: (to: number) => void;
@@ -266,6 +313,22 @@ function StepCard({
           className="min-w-0 flex-1 basis-32 bg-transparent font-medium outline-none"
         />
         {!on && <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[0.6875rem] text-subtle">turned off, skipped in runs</span>}
+        {result?.skipped && (
+          <span
+            className="flex items-center gap-1 rounded bg-surface-2 px-1.5 py-0.5 text-[0.6875rem] text-subtle"
+            title="Not sent in the last run: an earlier step failed, and the flow stops at a failure"
+          >
+            <CircleMinus size="0.6875rem" /> skipped in the last run, an earlier step failed
+          </span>
+        )}
+        {stoppedRun > 0 && (
+          <span
+            className="flex items-center gap-1 rounded bg-bad-soft px-1.5 py-0.5 text-[0.6875rem] text-bad"
+            title="This step failed in the last run, so the steps after it were skipped"
+          >
+            <OctagonX size="0.6875rem" /> the last run stopped here, {stoppedRun} skipped after it
+          </span>
+        )}
         {/* The step's controls stay together when the header wraps. */}
         <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
           <label className="flex items-center gap-1 text-xs text-subtle" title="Off steps keep their place but are not sent">
@@ -291,6 +354,21 @@ function StepCard({
             />
             cache
           </label>
+          {flowStops && (
+            <label
+              className="flex items-center gap-1 text-xs text-subtle"
+              title="If this step fails, run the steps after it anyway. Otherwise the run stops here and skips them."
+            >
+              <input
+                type="checkbox"
+                aria-label="Keep going if this step fails"
+                checked={!!step.continue_on_failure}
+                onChange={() => onChange({ ...step, continue_on_failure: step.continue_on_failure ? undefined : true })}
+                className="accent-[var(--accent)]"
+              />
+              keep going on failure
+            </label>
+          )}
           {cached && (
             <button
               type="button"
@@ -926,5 +1004,52 @@ function IconButton({
     >
       {children}
     </button>
+  );
+}
+
+/** The flow's `on_failure`: stop at the first failed step, or run every step. */
+function OnFailureSetting({ stops, onChange }: { stops: boolean; onChange: (stops: boolean) => void }) {
+  const options = [
+    {
+      value: true,
+      label: "Stop the run",
+      title: "Skip the steps after a failed one: they usually need what it was to give them, like a token",
+    },
+    { value: false, label: "Keep going", title: "Run every step, whatever happened before it" },
+  ];
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <span className="flex items-center gap-1.5 text-xs font-medium text-subtle">
+          <OctagonX size="0.8125rem" />
+          When a step fails
+        </span>
+        <div role="radiogroup" aria-label="When a step fails" className="flex rounded-md border border-line p-0.5">
+          {options.map((o) => {
+            const on = stops === o.value;
+            return (
+              <button
+                key={o.label}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                title={o.title}
+                onClick={() => onChange(o.value)}
+                className={`rounded px-2 py-0.5 text-xs ${
+                  on ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-surface-2 hover:text-ink"
+                }`}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <p className="mt-1 text-xs text-subtle">
+        {stops
+          ? "The steps after a failed one are skipped, in single runs and in every load test iteration. A step can still say to keep going."
+          : "Every step runs, even after one fails."}
+      </p>
+    </div>
   );
 }

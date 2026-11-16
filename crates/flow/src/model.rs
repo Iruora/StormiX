@@ -29,6 +29,30 @@ pub struct Flow {
     /// Stormix records. A step that sets its own `traceparent` keeps it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace: Option<TraceMode>,
+    /// What a run does after a step fails: stop and skip the steps after
+    /// it (the default), or carry on with them. A step can opt out of
+    /// stopping with `continue_on_failure: true`.
+    #[serde(default, skip_serializing_if = "OnFailure::is_stop")]
+    pub on_failure: OnFailure,
+}
+
+/// What a run does after a step fails.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
+pub enum OnFailure {
+    /// Skip the rest of the steps: they usually need what the failed step
+    /// was to give them, like a token, and would only fail after it.
+    #[default]
+    Stop,
+    /// Run every step whatever happened before it.
+    Continue,
+}
+
+impl OnFailure {
+    pub fn is_stop(&self) -> bool {
+        *self == Self::Stop
+    }
 }
 
 /// How requests are grouped into traces.
@@ -48,6 +72,11 @@ impl Flow {
     pub fn enabled_steps(&self) -> impl Iterator<Item = &Step> {
         self.steps.iter().filter(|s| s.enabled)
     }
+
+    /// Whether a run stops after `step` fails.
+    pub fn stops_after_failure_of(&self, step: &Step) -> bool {
+        self.on_failure.is_stop() && !step.continue_on_failure
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -66,6 +95,11 @@ pub struct Step {
     /// call. Checks, extraction and test scripts still run on it.
     #[serde(default, skip_serializing_if = "is_no")]
     pub cache: bool,
+    /// When this step fails, run the steps after it anyway, in a flow that
+    /// otherwise stops at the first failure. For a step whose outcome the
+    /// rest do not depend on, like a best-effort cleanup or a probe.
+    #[serde(default, skip_serializing_if = "is_no")]
+    pub continue_on_failure: bool,
     pub request: Request,
     /// Variables to set from the response, by variable name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]

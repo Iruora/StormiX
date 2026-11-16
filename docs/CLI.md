@@ -54,7 +54,7 @@ A proxy set only by an automatic configuration script (a PAC file, "Use setup sc
 | Option | |
 |---|---|
 | `-v`, `--verbose` | Show passed checks, extracted values and script logs, not only failures |
-| `--bail` | Stop at the first failed step; the rest are reported as skipped |
+| `--bail` | Stop at the first failed step, even in a flow with `on_failure: continue` or a step with `continue_on_failure: true`. Flows stop at a failure by default anyway; the rest are reported as skipped |
 
 ```
 $ stormix run tests/api.stormix.yaml --env tests/staging.yaml

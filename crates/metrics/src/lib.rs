@@ -57,6 +57,8 @@ struct Stats {
     bytes: u64,
     /// Responses reused from the cache, not sent for, so not requests.
     cached: u64,
+    /// Not run because an earlier step in the iteration failed.
+    skipped: u64,
 }
 
 impl Stats {
@@ -72,6 +74,7 @@ impl Stats {
             checks_failed: 0,
             bytes: 0,
             cached: 0,
+            skipped: 0,
         }
     }
 
@@ -160,6 +163,20 @@ pub struct StepSummary {
     /// request. Not counted in `requests` or the latency figures.
     #[serde(default)]
     pub cached: u32,
+    /// Times the step was not run because an earlier step in the same
+    /// iteration failed. Not counted in `requests`.
+    #[serde(default)]
+    pub skipped: u32,
+}
+
+impl StepSummary {
+    /// Whether any response was timed. Skipped and cached steps, and steps
+    /// whose every request failed to connect, have no latency to show. The
+    /// percentiles come from the histogram, which records at least 1 µs per
+    /// sample, so they are above zero exactly when it holds one.
+    pub fn measured(&self) -> bool {
+        self.latency.p50 > 0.0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -191,6 +208,10 @@ pub struct Summary {
     /// request went out for them, so they are not in `requests`.
     #[serde(default)]
     pub cached_responses: u32,
+    /// Steps not run because an earlier step in their iteration failed and
+    /// the flow stops at a failure. No request went out for them.
+    #[serde(default)]
+    pub skipped_steps: u32,
     /// Requests per second over the whole run.
     pub rps: f64,
     pub latency: Latency,
@@ -301,6 +322,20 @@ impl Recorder {
         }
     }
 
+    /// A step not run because an earlier one in its iteration failed. Like
+    /// a cached step, it shows in the step table without adding requests.
+    pub fn skipped(&mut self, step: &str) {
+        self.total.skipped += 1;
+        match self.steps.iter_mut().find(|(name, _)| name == step) {
+            Some((_, stats)) => stats.skipped += 1,
+            None => {
+                let mut stats = Stats::new();
+                stats.skipped = 1;
+                self.steps.push((step.to_owned(), stats));
+            }
+        }
+    }
+
     fn fail(&mut self, reason: String) {
         // Bounded, so a URL with a random id in every error cannot grow it
         // without limit; the rest still count in `failed_requests`.
@@ -361,6 +396,7 @@ impl Recorder {
             requests: self.total.requests as u32,
             failed_requests: self.total.failed as u32,
             cached_responses: self.total.cached as u32,
+            skipped_steps: self.total.skipped as u32,
             rps: if secs > 0.0 {
                 self.total.requests as f64 / secs
             } else {
@@ -379,6 +415,7 @@ impl Recorder {
                     failed: stats.failed as u32,
                     latency: stats.latency(),
                     cached: stats.cached as u32,
+                    skipped: stats.skipped as u32,
                 })
                 .collect(),
             failures,

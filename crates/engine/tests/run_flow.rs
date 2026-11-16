@@ -8,7 +8,7 @@ use axum::routing::{get, post};
 use axum::Router;
 use serde_json::{json, Value};
 use stormix_engine::{Exchanges, Payload, RunOptions, Runner, Variables};
-use stormix_flow::TestFile;
+use stormix_flow::{OnFailure, TestFile};
 
 async fn login(Json(body): Json<Value>) -> (StatusCode, Json<Value>) {
     if body["password"] == "secret" {
@@ -177,13 +177,33 @@ async fn overrides_beat_flow_variables_and_bail_skips_the_rest() {
 }
 
 #[tokio::test]
-async fn without_bail_later_steps_run_and_warn_about_missing_values() {
+async fn a_flow_stops_at_the_first_failure_by_default() {
     let url = serve().await;
     let mut vars = base(&url);
     vars.set("password", "wrong");
     let result = Runner::new(RunOptions::default())
         .unwrap()
         .run(&flow(LOGIN), &vars)
+        .await;
+
+    assert_eq!(result.steps[0].status, Some(401));
+    let profile = &result.steps[1];
+    assert!(profile.skipped);
+    assert_eq!(profile.status, None);
+    assert_eq!(result.failed_steps(), 1);
+    assert!(!result.passed());
+}
+
+#[tokio::test]
+async fn a_flow_set_to_continue_runs_later_steps_and_warns_about_missing_values() {
+    let url = serve().await;
+    let mut vars = base(&url);
+    vars.set("password", "wrong");
+    let mut f = flow(LOGIN);
+    f.on_failure = OnFailure::Continue;
+    let result = Runner::new(RunOptions::default())
+        .unwrap()
+        .run(&f, &vars)
         .await;
 
     let profile = &result.steps[1];
@@ -193,6 +213,41 @@ async fn without_bail_later_steps_run_and_warn_about_missing_values() {
         profile.warnings,
         ["`{{token}}` has no value, so it was sent as written"]
     );
+}
+
+#[tokio::test]
+async fn a_step_can_let_the_flow_continue_after_it_fails_unless_bailing() {
+    let url = serve().await;
+    let f = flow(
+        r#"
+  name: probes
+  steps:
+    - name: optional probe
+      continue_on_failure: true
+      request: { method: GET, url: "{{base}}/me" }
+      assert: [{ status: 200 }]
+    - name: required
+      request: { method: POST, url: "{{base}}/echo", body: { raw: hi } }
+      assert: [{ status: 500 }]
+    - name: after
+      request: { method: POST, url: "{{base}}/echo", body: { raw: hi } }
+"#,
+    );
+    let result = Runner::new(RunOptions::default())
+        .unwrap()
+        .run(&f, &base(&url))
+        .await;
+    let skipped: Vec<bool> = result.steps.iter().map(|s| s.skipped).collect();
+    assert_eq!(skipped, [false, false, true], "{result:#?}");
+    assert_eq!(result.failed_steps(), 2);
+
+    let bail = RunOptions {
+        bail: true,
+        ..RunOptions::default()
+    };
+    let result = Runner::new(bail).unwrap().run(&f, &base(&url)).await;
+    let skipped: Vec<bool> = result.steps.iter().map(|s| s.skipped).collect();
+    assert_eq!(skipped, [false, true, true]);
 }
 
 #[tokio::test]
@@ -230,6 +285,7 @@ async fn reports_timeouts_and_refused_connections() {
     let f = flow(
         r#"
   name: failures
+  on_failure: continue
   steps:
     - name: slow
       request: { method: GET, url: "{{base}}/slow" }
@@ -556,6 +612,7 @@ async fn graphql_steps_send_typed_variables_and_fail_on_errors() {
         r#"
   name: graphql
   variables: { id: "42", on: "true", name: Ada }
+  on_failure: continue
   steps:
     - name: typed
       request:

@@ -59,8 +59,34 @@ Always `1` for now. A file with an unknown version is rejected rather than misre
 | `steps` | yes | One or more steps, run in order |
 | `set_aside` | no | Steps kept with the file but out of the flow. They are never run or checked; the desktop app's Flow view puts them back |
 | `trace` | no | `request` or `flow`: send a W3C `traceparent` header with every request, for Dynatrace and other APM tools. See [Tracing requests](#tracing-requests) |
+| `on_failure` | no | `stop` (the default) skips the steps after a failed one; `continue` runs them all. See [When a step fails](#when-a-step-fails) |
 
 One virtual user runs the steps in order. In a load test, each iteration is one pass through all the enabled steps, with its own copy of the variables.
+
+### When a step fails
+
+By default a run stops at the first step that fails (a request error, or any failed check or test script), and the steps after it are **skipped**: not sent, and shown as skipped in results. The steps after a failed login would only fail too, without the token it was to give them. As in a run once, a 4xx or 5xx status alone does not fail a step that has no status check.
+
+```yaml
+flow:
+  name: checkout
+  on_failure: stop        # the default; `continue` runs every step anyway
+  steps:
+    - name: Log in
+      request: { method: POST, url: "{{baseUrl}}/login" }
+      extract: { token: { json: $.token } }
+      assert: [{ status: 200 }]
+    - name: Warm the cache
+      continue_on_failure: true   # a failure here does not stop the run
+      request: { method: GET, url: "{{baseUrl}}/warmup" }
+    - name: Order
+      request: { method: POST, url: "{{baseUrl}}/orders" }
+```
+
+- The same goes for every load test iteration: an iteration stops at its failed step, and the steps after it are counted as **skipped** per step (`skipped`, and `skipped_steps` in the summary), not as requests, so they stay out of the request count, error rate and latency figures. The failed step is counted as usual and the iteration as failed.
+- `continue_on_failure: true` on a step lets the run go on after it fails. The step still fails and the run still fails.
+- `stormix run --bail` stops at the first failure even in a flow with `on_failure: continue` or a step with `continue_on_failure`.
+- Files from before 1.12 have no `on_failure`, so they now stop at a failure. Add `on_failure: continue` to keep the old behaviour.
 
 ### Turning steps off
 
@@ -128,6 +154,7 @@ A step with `cache: true` is sent once; after that, runs and load test iteration
 | `name` | yes | Unique names make reports and comparisons clearer |
 | `enabled` | no | `false` skips the step in runs and load tests; defaults to `true` |
 | `cache` | no | `true` reuses the step's response instead of sending the request again; defaults to `false`. See [Caching a step](#caching-a-step) |
+| `continue_on_failure` | no | `true` runs the steps after this one even when it fails, in a flow that stops at failures; defaults to `false`. See [When a step fails](#when-a-step-fails) |
 | `request` | yes | See below |
 | `extract` | no | Variables to set from the response |
 | `assert` | no | Checks on the response |

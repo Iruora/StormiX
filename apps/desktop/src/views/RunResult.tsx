@@ -37,7 +37,8 @@ export function RunResult({ result, diagnose }: { result: FlowResult; diagnose?:
   const failed = ran.filter((s) => !stepPassed(s)).length;
   const checks = ran.flatMap((s) => s.checks);
   const passedChecks = checks.filter((c) => c.passed).length;
-  const ok = failed === 0 && ran.length === result.steps.length;
+  const skipped = result.steps.length - ran.length;
+  const ok = failed === 0 && skipped === 0;
   const [open, setOpen] = useState<StepResult | null>(null);
 
   return (
@@ -49,6 +50,11 @@ export function RunResult({ result, diagnose }: { result: FlowResult; diagnose?:
           <CircleX size="1rem" className="text-bad" />
         )}
         <span className="font-semibold">{ok ? "Run passed" : "Run failed"}</span>
+        {skipped > 0 && (
+          <span className="text-xs text-muted">
+            · stopped after a failed step, {skipped} skipped
+          </span>
+        )}
         <span className="ml-auto text-xs text-muted">
           {passedChecks}/{checks.length} checks · {formatMs(result.durationMs ?? 0)}
         </span>
@@ -79,10 +85,12 @@ function Step({ step, onDetails }: { step: StepResult; onDetails: () => void }) 
         ) : (
           <CircleX size="0.875rem" className="shrink-0 text-bad" />
         )}
-        <span className="min-w-0 flex-1 basis-32 truncate">{step.name}</span>
+        <span className={`min-w-0 flex-1 basis-32 truncate ${step.skipped ? "text-muted" : ""}`}>{step.name}</span>
         <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted">
           {step.skipped ? (
-            "skipped"
+            <span title="Not sent: an earlier step failed, and the flow stops at a failure">
+              skipped, an earlier step failed
+            </span>
           ) : (
             <>
               {step.status != null && <StatusPill status={step.status} />}
@@ -161,6 +169,14 @@ function StatusPill({ status }: { status: number }) {
   const tone =
     status < 300 ? "bg-ok-soft text-ok" : status < 400 ? "bg-surface-2 text-muted" : "bg-bad-soft text-bad";
   return <span className={`mono rounded px-1.5 py-px font-semibold ${tone}`}>{status}</span>;
+}
+
+/** In a run that stopped at a failure: the step it stopped at and how many were skipped after it. */
+export function stoppedAt(run: FlowResult | null): { name: string; skipped: number } | null {
+  if (!run) return null;
+  const first = run.steps.findIndex((s) => s.skipped);
+  if (first <= 0) return null;
+  return { name: run.steps[first - 1].name, skipped: run.steps.length - first };
 }
 
 export function stepPassed(step: StepResult): boolean {

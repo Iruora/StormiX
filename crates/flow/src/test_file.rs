@@ -170,6 +170,32 @@ thresholds:
     }
 
     #[test]
+    fn flows_stop_at_a_failure_unless_they_or_a_step_say_otherwise() {
+        use crate::OnFailure;
+        let file = TestFile::from_yaml(LOGIN).unwrap();
+        assert_eq!(file.flow.on_failure, OnFailure::Stop);
+        assert!(file.flow.stops_after_failure_of(&file.flow.steps[0]));
+        // The default is not written back.
+        let plain = file.to_yaml();
+        assert!(!plain.contains("on_failure") && !plain.contains("continue_on_failure"));
+
+        let yaml = LOGIN
+            .replace("  steps:\n", "  on_failure: continue\n  steps:\n")
+            .replace(
+                "    - name: Profile\n",
+                "    - name: Profile\n      continue_on_failure: true\n",
+            );
+        let file = TestFile::from_yaml(&yaml).unwrap();
+        assert_eq!(file.flow.on_failure, OnFailure::Continue);
+        assert!(!file.flow.steps[0].continue_on_failure);
+        assert!(file.flow.steps[1].continue_on_failure);
+        assert!(!file.flow.stops_after_failure_of(&file.flow.steps[0]));
+        let written = file.to_yaml();
+        assert!(written.contains("on_failure: continue"), "{written}");
+        assert_eq!(TestFile::from_yaml(&written).unwrap(), file);
+    }
+
+    #[test]
     fn tracing_is_off_unless_the_flow_asks_for_it() {
         use crate::TraceMode;
         assert_eq!(TestFile::from_yaml(LOGIN).unwrap().flow.trace, None);

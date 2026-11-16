@@ -1133,7 +1133,13 @@ function TestFileView({
           <VariablesContext.Provider value={variables}>
             <VariableEditContext.Provider value={variableEditing}>
               <CurlContext.Provider value={curlMaker}>
-                <StepsEditor test={shown} onChange={editSteps} selected={selectedStep} onSelect={setSelectedStep} />
+                <StepsEditor
+                  test={shown}
+                  onChange={editSteps}
+                  selected={selectedStep}
+                  onSelect={setSelectedStep}
+                  lastRun={run.data ?? null}
+                />
               </CurlContext.Provider>
             </VariableEditContext.Provider>
           </VariablesContext.Provider>

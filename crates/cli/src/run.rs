@@ -87,7 +87,9 @@ pub struct RunArgs {
     /// Show passed checks and extracted values, not only failures.
     #[arg(long, short)]
     verbose: bool,
-    /// Stop at the first failed step.
+    /// Stop at the first failed step, even where the file says to carry on
+    /// (`on_failure: continue`, `continue_on_failure: true`). Files stop at
+    /// a failure by default anyway.
     #[arg(long)]
     bail: bool,
 }

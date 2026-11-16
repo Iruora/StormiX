@@ -260,6 +260,12 @@ export function LoadResult({
           not in the request count or the latency figures.
         </div>
       )}
+      {!!s.skippedSteps && (
+        <div className="border-t border-line px-4 py-2 text-xs text-muted">
+          {s.skippedSteps} steps were skipped because an earlier step in their iteration failed, and the flow stops at
+          a failure. No request went out for them, so they are not in the request count or the latency figures.
+        </div>
+      )}
       {(s.droppedIterations > 0 || s.interruptedIterations > 0) && (
         <div className="border-t border-line px-4 py-2 text-xs text-warn">
           {s.droppedIterations > 0 && `${s.droppedIterations} iterations dropped: too many were already in flight. `}
@@ -435,10 +441,25 @@ function StepTable({ steps }: { steps: StepSummary[] }) {
                 </td>
                 <td
                   className="px-2 py-1.5 text-right"
-                  title={step.cached ? `Plus ${step.cached} responses reused from the cache, not sent` : undefined}
+                  title={
+                    [
+                      step.cached && `Plus ${step.cached} responses reused from the cache, not sent`,
+                      step.skipped && `${step.skipped} times not run: an earlier step in the iteration failed`,
+                    ]
+                      .filter(Boolean)
+                      .join(". ") || undefined
+                  }
                 >
-                  {step.requests}
-                  {!!step.cached && <span className="ml-1 text-accent">+{step.cached} cached</span>}
+                  {/* A step that never ran shows only that, to keep the column narrow. */}
+                  {step.requests === 0 && !!step.skipped && !step.cached ? (
+                    <span className="text-subtle">{step.skipped} skipped</span>
+                  ) : (
+                    <>
+                      {step.requests}
+                      {!!step.cached && <span className="ml-1 text-accent">+{step.cached} cached</span>}
+                      {!!step.skipped && <span className="ml-1 text-subtle">+{step.skipped} skipped</span>}
+                    </>
+                  )}
                 </td>
                 <td
                   className={`px-2 py-1.5 text-right ${step.failed > 0 ? "text-bad" : ""}`}
@@ -446,8 +467,8 @@ function StepTable({ steps }: { steps: StepSummary[] }) {
                 >
                   {step.failed}
                 </td>
-                <td className="px-2 py-1.5 text-right">{step.requests ? formatMs(step.latency.p50 ?? 0) : "–"}</td>
-                <td className="px-4 py-1.5 text-right">{step.requests ? formatMs(step.latency.p95 ?? 0) : "–"}</td>
+                <td className="px-2 py-1.5 text-right">{(step.latency.p50 ?? 0) > 0 ? formatMs(step.latency.p50 ?? 0) : "–"}</td>
+                <td className="px-4 py-1.5 text-right">{(step.latency.p50 ?? 0) > 0 ? formatMs(step.latency.p95 ?? 0) : "–"}</td>
               </tr>
             ))}
             {rows.length === 0 && (

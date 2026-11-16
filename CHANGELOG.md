@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Stop a flow at a failed step
+
+- **A run stops at the first failed step** and skips the steps after it, instead of sending them without the token or ID the failed step was to give them. The same goes for each load test iteration. Skipped steps are marked in the run result, the Flow tab and the Steps tab, and counted per step in load test results, apart from requests.
+- **Keep going when it suits.** **When a step fails** in the Flow tab header or in Flow settings switches a flow to run every step (`on_failure: continue`), and **keep going on failure** on a step lets just that one fail without stopping the run (`continue_on_failure: true`).
+- **Changes what existing files do:** a file without `on_failure` now stops at a failure. Add `on_failure: continue` to keep the old behaviour. `stormix run --bail` now also overrides `continue`.
+
 ### Explain results with your own AI
 
 - **Explain** a failed step (in its Details) or a load test (at the top of its results) with **Claude Code** or **GitHub Copilot CLI**, whichever is installed and signed in on your computer. Stormix needs no API key and opens no connection of its own; the AI command line uses your account and its own proxy settings.
