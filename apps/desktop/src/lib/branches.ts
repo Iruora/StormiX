@@ -181,7 +181,8 @@ export function moved(steps: Step[], from: number, to: number): Step[] {
  */
 export function yamlHasBranches(text: string): boolean {
   try {
-    // The engine sets no limit on alias use, so neither does this.
+    // The engine allows far more alias use than this parser's default of
+    // 100, so this sets no limit of its own.
     const doc = parse(text, { maxAliasCount: -1 }) as { flow?: { steps?: unknown } } | null;
     const steps = doc?.flow?.steps;
     return Array.isArray(steps) && steps.some((s) => s != null && typeof s === "object" && "after" in s);
