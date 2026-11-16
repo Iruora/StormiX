@@ -903,3 +903,59 @@ async fn a_failed_branch_skips_only_what_runs_after_it() {
     let result = runner.run(&carry_on, &base(&url)).await;
     assert!(result.steps.iter().all(|s| !s.skipped));
 }
+
+#[tokio::test]
+async fn a_branch_that_sets_a_variable_to_the_value_it_had_still_wins() {
+    let url = serve().await;
+    let f = flow(&format!(
+        "  name: same value\n  steps:\n{}{}{}{}",
+        echo_step("start", "", "0", "v", ""),
+        echo_step("left", "      after: [start]\n", "1", "v", ""),
+        echo_step("right", "      after: [start]\n", "0", "v", ""),
+        echo_step("join", "      after: [left, right]\n", "{{v}}", "j", ""),
+    ));
+    let result = Runner::new(RunOptions::default())
+        .unwrap()
+        .run(&f, &base(&url))
+        .await;
+    assert_eq!(result.steps[3].extracted["j"], "0", "{result:#?}");
+}
+
+#[tokio::test]
+async fn diagnose_keeps_branches_apart_as_a_run_does() {
+    let url = serve().await;
+    let f = flow(&format!(
+        "  name: diagnose branches\n  steps:\n{}{}{}{}",
+        echo_step("start", "", "0", "v", ""),
+        echo_step("left", "      after: [start]\n", "1", "v", ""),
+        echo_step("right", "      after: [start]\n", "{{v}}", "w", ""),
+        echo_step("join", "      after: [left, right]\n", "{{w}}", "j", ""),
+    ));
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let run = runner.run(&f, &base(&url)).await;
+    assert_eq!(run.steps[3].extracted["j"], "0");
+    let diagnosis = runner.diagnose(&f, &base(&url), "join").await.unwrap();
+    assert_eq!(diagnosis.step.extracted["j"], "0");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_slow_script_does_not_hold_up_another_branch() {
+    let url = serve().await;
+    let busy = "      scripts:\n        pre_request: |\n          const t = Date.now(); while (Date.now() - t < 400) {}\n";
+    let f = flow(&format!(
+        "  name: slow script\n  steps:\n{}{}{}",
+        echo_step("start", "", "0", "v", ""),
+        echo_step("scripted", "      after: [start]\n", "1", "a", busy),
+        echo_step("plain", "      after: [start]\n", "2", "b", ""),
+    ));
+    let result = Runner::new(RunOptions::default())
+        .unwrap()
+        .run(&f, &base(&url))
+        .await;
+    assert!(result.passed(), "{result:#?}");
+    let scripted = result.steps[1].started_ms.unwrap();
+    let plain = &result.steps[2];
+    // The request goes out after its script, and the other branch did not wait.
+    assert!(scripted >= 350.0, "{scripted}");
+    assert!(plain.started_ms.unwrap() + plain.duration_ms < 300.0, "{plain:#?}");
+}

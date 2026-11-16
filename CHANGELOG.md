@@ -6,7 +6,7 @@
 
 - **`after:` on a step** names the steps it waits for. Steps that name the same step run at the same time, each starting a branch, and a step that names several waits for all of them before it runs. Files without `after:` run as before. See [Parallel branches](TEST_FILE.md#parallel-branches).
 - **Variables join predictably.** Each branch works on its own copy of the variables; where branches join, what each set is combined, and when two set the same variable, the step lower in the file wins, with a warning.
-- **A failed step stops only its branch.** The steps after it, and any join waiting for it, are skipped; other branches run to their end. `--bail` still stops everything.
+- **A failed step stops only its branch.** The steps after it, and any join waiting for it, are skipped; other branches run to their end. With `--bail`, no new step starts on any branch after the first failure; steps already running finish.
 - **The Flow tab draws the branches** side by side with GRAFCET double bars where they split and join. **Branch** on a card adds a parallel step, and each card's **after** line, also in the Steps tab, picks the steps it runs after. The run result shows when each step ran, and `stormix run` prints when steps overlapped.
 - **Load tests** run each iteration's branches at the same time, and steps left out of a load test no longer cut the steps after them loose.
 

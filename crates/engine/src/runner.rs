@@ -232,11 +232,15 @@ impl Runner {
                 total,
                 name: &step.name,
             });
-            let at = millis(started.elapsed());
-            let mut result = self
-                .run_step(&flow.name, step, &mut vars, tracing().as_ref())
+            let result = self
+                .run_step(
+                    &flow.name,
+                    step,
+                    &mut vars,
+                    tracing().as_ref(),
+                    Some(started),
+                )
                 .await;
-            result.started_ms = Some(at);
             stopped = !result.passed() && (self.options.bail || flow.stops_after_failure_of(step));
             steps.push(result);
         }
@@ -248,7 +252,8 @@ impl Runner {
     /// where branches join, what each changed is combined, and when two set
     /// the same variable, the step lower in the file wins. After a failed
     /// step, only the steps that run after it are skipped (unless the flow
-    /// or the step carries on); `bail` stops every branch.
+    /// or the step carries on); with `bail`, no new step starts on any
+    /// branch after a failure, while steps already running finish.
     async fn run_graph(
         &self,
         flow: &Flow,
@@ -256,8 +261,28 @@ impl Runner {
         vars: Variables,
         started: Instant,
         tracing: impl Fn() -> Option<TraceParent>,
-        mut on_step: impl FnMut(StepStart<'_>),
+        on_step: impl FnMut(StepStart<'_>),
     ) -> Vec<StepResult> {
+        let (results, _) = self
+            .run_nodes(flow, graph, &vars, started, tracing, on_step, Nodes::All)
+            .await;
+        results.into_iter().flatten().collect()
+    }
+
+    /// Runs the graph's nodes, or only `only` of them, and returns each
+    /// node's result and what it and the steps before it set.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn run_nodes(
+        &self,
+        flow: &Flow,
+        graph: &StepGraph,
+        vars: &Variables,
+        started: Instant,
+        tracing: impl Fn() -> Option<TraceParent>,
+        mut on_step: impl FnMut(StepStart<'_>),
+        nodes: Nodes<'_>,
+    ) -> (Vec<Option<StepResult>>, Vec<Option<Finished>>) {
+        use futures_util::future::BoxFuture;
         use futures_util::stream::{FuturesUnordered, StreamExt};
 
         let n = graph.nodes.len();
@@ -274,55 +299,90 @@ impl Runner {
             while more {
                 more = false;
                 for node in 0..n {
-                    if begun[node] || graph.nodes[node].after.iter().any(|&d| done[d].is_none()) {
+                    if begun[node]
+                        || !nodes.includes(node)
+                        || graph.nodes[node].after.iter().any(|&d| done[d].is_none())
+                    {
                         continue;
                     }
                     begun[node] = true;
                     more = true;
                     let step = step_of(node);
                     let blocked = halted
-                        || graph.nodes[node]
-                            .after
-                            .iter()
-                            .any(|&d| done[d].as_ref().is_some_and(|f| !f.carry_on));
+                        || (!nodes.keeps_going()
+                            && graph.nodes[node]
+                                .after
+                                .iter()
+                                .any(|&d| done[d].as_ref().is_some_and(|f| !f.carry_on)));
                     if blocked {
                         results[node] = Some(skipped(step));
                         done[node] = Some(Finished::default());
                         continue;
                     }
                     let (writes, conflicts) = join(graph, &graph.nodes[node].after, &done);
-                    let mut vars = vars.clone();
-                    for (name, (value, _)) in &writes {
-                        match value {
-                            Some(value) => vars.set(name.clone(), value.clone()),
-                            None => vars.remove(name),
-                        }
-                    }
+                    let mut vars = with_writes(vars, &writes);
+                    vars.track();
                     on_step(StepStart {
                         index,
                         total: n,
                         name: &step.name,
                     });
                     index += 1;
-                    let at = millis(started.elapsed());
                     let tracing = tracing();
+                    let scripted =
+                        step.scripts.pre_request.is_some() || step.scripts.test.is_some();
+                    let threads = tokio::runtime::Handle::try_current().is_ok_and(|h| {
+                        h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread
+                    });
+                    let run: BoxFuture<'_, (StepResult, Variables)> = if scripted && threads {
+                        // A script holds its thread until done; in a task of
+                        // its own, it does not hold up the other branches.
+                        let (runner, step, name) = (self.clone(), step.clone(), flow.name.clone());
+                        Box::pin(async move {
+                            let task = tokio::spawn(async move {
+                                let mut vars = vars;
+                                let result = runner
+                                    .run_step(
+                                        &name,
+                                        &step,
+                                        &mut vars,
+                                        tracing.as_ref(),
+                                        Some(started),
+                                    )
+                                    .await;
+                                (result, vars)
+                            });
+                            match task.await {
+                                Ok(out) => out,
+                                Err(err) => std::panic::resume_unwind(err.into_panic()),
+                            }
+                        })
+                    } else {
+                        Box::pin(async move {
+                            let result = self
+                                .run_step(
+                                    &flow.name,
+                                    step,
+                                    &mut vars,
+                                    tracing.as_ref(),
+                                    Some(started),
+                                )
+                                .await;
+                            (result, vars)
+                        })
+                    };
                     running.push(async move {
-                        let before = vars.to_map();
-                        let mut result = self
-                            .run_step(&flow.name, step, &mut vars, tracing.as_ref())
-                            .await;
-                        result.started_ms = Some(at);
-                        (node, result, before, vars, writes, conflicts)
+                        let (result, vars) = run.await;
+                        (node, result, vars, writes, conflicts)
                     });
                 }
             }
-            let Some((node, mut result, before, after, mut writes, conflicts)) =
-                running.next().await
+            let Some((node, mut result, after, mut writes, conflicts)) = running.next().await
             else {
                 break;
             };
             let step = step_of(node);
-            for (name, value) in changes(&before, &after.to_map()) {
+            for (name, value) in after.touched() {
                 writes.insert(name, (value, node));
             }
             for (name, (kept, lost)) in conflicts {
@@ -343,7 +403,7 @@ impl Runner {
                 writes: Arc::new(writes),
             });
         }
-        results.into_iter().flatten().collect()
+        (results, done)
     }
 
     /// Sends one step's request and checks the response. Variables the step
@@ -358,6 +418,7 @@ impl Runner {
         step: &Step,
         vars: &mut Variables,
         tracing: Option<&TraceParent>,
+        run_start: Option<Instant>,
     ) -> StepResult {
         let mut checks = Vec::new();
         let mut logs = Vec::new();
@@ -511,6 +572,8 @@ impl Runner {
         let sent = Sent::of(&request, multipart_text);
 
         let started = Instant::now();
+        // When the request went out, after any pre-request script.
+        result.started_ms = run_start.map(|t0| millis(started.duration_since(t0)));
         let kept = cache_key.as_ref().and_then(|key| self.cache.get(key));
         // A reused response was never sent, so it belongs to no trace.
         if kept.is_none() {
@@ -851,22 +914,22 @@ fn script_checks(label: &str, tests: Vec<TestOutcome>, error: Option<String>) ->
 
 /// Variables set along a branch: the value (`None` once removed) and the
 /// node that set it.
-type Writes = BTreeMap<String, (Option<String>, usize)>;
+pub(crate) type Writes = BTreeMap<String, (Option<String>, usize)>;
 
 /// A finished (or skipped) step in a branching run.
 #[derive(Debug, Default)]
-struct Finished {
+pub(crate) struct Finished {
     /// The steps after it may run.
-    carry_on: bool,
+    pub(crate) carry_on: bool,
     /// Every variable set by it and the steps before it.
-    writes: Arc<Writes>,
+    pub(crate) writes: Arc<Writes>,
 }
 
 /// What the steps before a join set, combined: when two set the same
 /// variable, the one lower in the file wins. Also returns the variables two
 /// parallel branches set to different values, with the node kept and the
 /// node lost.
-fn join(
+pub(crate) fn join(
     graph: &StepGraph,
     after: &[usize],
     done: &[Option<Finished>],
@@ -880,7 +943,7 @@ fn join(
     for branch in branches {
         for (name, (value, by)) in branch.writes.iter() {
             match writes.get(name) {
-                Some((kept, other)) if other == by => {}
+                Some((_, other)) if other == by => {}
                 Some((kept, other)) => {
                     let (winner, loser) = if by > other {
                         (*by, *other)
@@ -903,23 +966,38 @@ fn join(
     (writes, conflicts)
 }
 
-/// What changed from `before` to `after`: new values, and removals as `None`.
-fn changes(
-    before: &BTreeMap<String, String>,
-    after: &BTreeMap<String, String>,
-) -> Vec<(String, Option<String>)> {
-    let mut out: Vec<_> = after
-        .iter()
-        .filter(|(k, v)| before.get(*k) != Some(*v))
-        .map(|(k, v)| (k.clone(), Some(v.clone())))
-        .collect();
-    out.extend(
-        before
-            .keys()
-            .filter(|k| !after.contains_key(*k))
-            .map(|k| (k.clone(), None)),
-    );
-    out
+/// `vars` with what the steps before a step set.
+pub(crate) fn with_writes(vars: &Variables, writes: &Writes) -> Variables {
+    let mut vars = vars.clone();
+    for (name, (value, _)) in writes {
+        match value {
+            Some(value) => vars.set(name.clone(), value.clone()),
+            None => vars.remove(name),
+        }
+    }
+    vars
+}
+
+/// Which nodes [`Runner::run_nodes`] runs.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Nodes<'a> {
+    /// All, as a run does.
+    All,
+    /// These, whatever fails: what Diagnose runs before the step it looks at.
+    Only(&'a std::collections::BTreeSet<usize>),
+}
+
+impl Nodes<'_> {
+    fn includes(self, node: usize) -> bool {
+        match self {
+            Self::All => true,
+            Self::Only(nodes) => nodes.contains(&node),
+        }
+    }
+
+    fn keeps_going(self) -> bool {
+        matches!(self, Self::Only(_))
+    }
 }
 
 fn skipped(step: &Step) -> StepResult {

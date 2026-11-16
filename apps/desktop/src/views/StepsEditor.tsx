@@ -15,7 +15,7 @@ import type {
   StepResult,
   TestFile,
 } from "../bindings";
-import { renameRefs, withoutStep } from "../lib/branches";
+import { branches, renameRefs, withoutStep } from "../lib/branches";
 import { cachedTitle, useResponseCache } from "../lib/cache";
 import { methodText, methodTone } from "../lib/methods";
 import { CopyCurlButton } from "./CopyCurl";
@@ -56,7 +56,7 @@ export function StepsEditor({
   const steps = test.flow.steps;
   const stops = test.flow.on_failure !== "continue";
   const results = useMemo(() => new Map(lastRun?.steps.map((s) => [s.name, s]) ?? []), [lastRun]);
-  const stop = useMemo(() => stoppedAt(lastRun), [lastRun]);
+  const stop = useMemo(() => stoppedAt(lastRun, !branches(steps)), [lastRun, steps]);
   const cache = useResponseCache(test.flow.name);
   const listRef = useRef<HTMLDivElement>(null);
   // A step that no longer exists falls back to the last one.

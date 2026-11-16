@@ -47,7 +47,8 @@ export function FlowDiagram({
         });
       });
       setRects(next);
-      setSize({ w: el.scrollWidth, h: el.scrollHeight });
+      // The grid's own box: its scroll size would include the svg's old size.
+      setSize({ w: el.offsetWidth, h: el.offsetHeight });
     };
     measure();
     const observer = new ResizeObserver(measure);

@@ -73,8 +73,11 @@ export function FlowView({
   const stops = test.flow.on_failure !== "continue";
   const setStops = (stop: boolean) =>
     onChange({ ...test, flow: { ...test.flow, on_failure: stop ? undefined : "continue" } });
-  const write = (nextSteps: Step[], nextAside: Step[]) =>
+  // Any other change makes a pending Undo stale, so it goes.
+  const write = (nextSteps: Step[], nextAside: Step[]) => {
+    setRemoved(null);
     onChange({ ...test, flow: { ...test.flow, steps: nextSteps, set_aside: nextAside } });
+  };
   const lists = () => ({ steps: [...steps], aside: [...aside] });
 
   const move = (from: Place, to: Place) => {
@@ -103,12 +106,12 @@ export function FlowView({
     const step = next[place.list][place.index];
     if (place.list === "steps") next.steps = withoutStep(next.steps, place.index);
     else next.aside.splice(place.index, 1);
-    setRemoved({ ...place, step, before: lists() });
+    const before = lists();
     write(next.steps, next.aside);
+    setRemoved({ ...place, step, before });
   };
   const undoRemove = () => {
     if (!removed) return;
-    setRemoved(null);
     write(removed.before.steps, removed.before.aside);
   };
   const duplicate = (place: Place) => {

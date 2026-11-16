@@ -11,7 +11,7 @@ use tokio::net::TcpStream;
 
 use crate::connection::ProxyChoice;
 use crate::result::{Certificate, HeaderPair, StepResult};
-use crate::runner::{Exchanges, Runner};
+use crate::runner::{join, with_writes, Exchanges, Nodes, Runner};
 use crate::trace::{self, TraceParent};
 use crate::Variables;
 
@@ -82,26 +82,33 @@ impl Runner {
             (None, _) => None,
         };
 
-        // Only the steps it runs after: a step on another branch sets
-        // nothing this one sees.
+        // Only the steps it runs after, with their branches kept apart and
+        // joined as a run does: a step on another branch sets nothing this
+        // one sees.
         let graph = flow.graph();
-        let earlier: Vec<_> = graph.nodes[index]
-            .ancestors
-            .iter()
-            .map(|&a| steps[a])
-            .collect();
+        let earlier = &graph.nodes[index].ancestors;
         let mut stages = Vec::new();
         if !earlier.is_empty() {
             let count = earlier.len();
-            let mut failed = Vec::new();
-            for step in earlier {
-                let result = runner
-                    .run_step(&flow.name, step, &mut vars, tracing().as_ref())
-                    .await;
-                if !result.passed() {
-                    failed.push(format!("`{}`", result.name));
-                }
-            }
+            let (results, done) = runner
+                .run_nodes(
+                    flow,
+                    &graph,
+                    &vars,
+                    std::time::Instant::now(),
+                    tracing,
+                    |_| {},
+                    Nodes::Only(earlier),
+                )
+                .await;
+            let (writes, _) = join(&graph, &graph.nodes[index].after, &done);
+            vars = with_writes(&vars, &writes);
+            let failed: Vec<String> = results
+                .iter()
+                .flatten()
+                .filter(|r| !r.passed())
+                .map(|r| format!("`{}`", r.name))
+                .collect();
             stages.push(if failed.is_empty() {
                 DiagnosisStage::new(
                     "Earlier steps",
@@ -129,7 +136,7 @@ impl Runner {
         step.cache = false;
         let before = vars.clone();
         let result = runner
-            .run_step(&flow.name, &step, &mut vars, tracing().as_ref())
+            .run_step(&flow.name, &step, &mut vars, tracing().as_ref(), None)
             .await;
         let (more, mut verdict, ok) = self.probe(&result).await;
         stages.extend(more);
@@ -142,7 +149,7 @@ impl Runner {
             if let Ok(direct) = runner.with_proxy(ProxyChoice::None) {
                 let mut vars = before;
                 let again = direct
-                    .run_step(&flow.name, &step, &mut vars, tracing().as_ref())
+                    .run_step(&flow.name, &step, &mut vars, tracing().as_ref(), None)
                     .await;
                 let (stage, advice) = compare_direct(&proxy.shown, &host, &result, &again);
                 stages.push(stage);

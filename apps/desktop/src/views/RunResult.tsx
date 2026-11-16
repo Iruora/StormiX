@@ -202,8 +202,13 @@ function StatusPill({ status }: { status: number }) {
 }
 
 /** In a run that stopped at a failure: the step it stopped at and how many were skipped after it. */
-export function stoppedAt(run: FlowResult | null): { name: string; skipped: number } | null {
-  if (!run) return null;
+/**
+ * Only for a flow without branches: there, the failed step is the one just
+ * before the first skipped one. With branches, the Flow tab works it out
+ * from the graph.
+ */
+export function stoppedAt(run: FlowResult | null, linear = true): { name: string; skipped: number } | null {
+  if (!run || !linear) return null;
   const first = run.steps.findIndex((s) => s.skipped);
   if (first <= 0) return null;
   // With branches, skipped steps need not follow one failure; the Flow tab
