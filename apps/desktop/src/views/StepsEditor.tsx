@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, CircleMinus, Copy, Eraser, FileCode2, OctagonX, Plus, Settings2, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, CircleMinus, Copy, Eraser, FileCode2, GitMerge, OctagonX, Plus, Settings2, Split, Trash2, X } from "lucide-react";
 import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type {
@@ -15,6 +15,7 @@ import type {
   StepResult,
   TestFile,
 } from "../bindings";
+import { renameRefs, withoutStep } from "../lib/branches";
 import { cachedTitle, useResponseCache } from "../lib/cache";
 import { methodText, methodTone } from "../lib/methods";
 import { CopyCurlButton } from "./CopyCurl";
@@ -22,6 +23,7 @@ import { stoppedAt } from "./RunResult";
 import { ScriptsDialog, withScripts } from "./ScriptsDialog";
 import { TraceSetting } from "./TraceSetting";
 import { VarField } from "./VarField";
+import { RunsAfter } from "./RunsAfter";
 
 const METHODS: Method[] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
@@ -117,6 +119,11 @@ export function StepsEditor({
                 <span className={`min-w-0 flex-1 truncate ${off ? "line-through decoration-subtle" : ""}`} title={s.name}>
                   {s.name}
                 </span>
+                {s.after != null && (
+                  <span title={s.after.length ? `Runs after ${s.after.join(", ")}` : "Starts with the flow"} className="shrink-0 text-subtle">
+                    {s.after.length > 1 ? <GitMerge size="0.75rem" /> : <Split size="0.75rem" className="rotate-180" />}
+                  </span>
+                )}
                 {!off && results.get(s.name)?.skipped && (
                   <span title="Skipped in the last run: an earlier step failed" className="shrink-0 text-subtle">
                     <CircleMinus size="0.75rem" />
@@ -161,7 +168,10 @@ export function StepsEditor({
                   result={step.enabled !== false ? results.get(step.name) : undefined}
                   stoppedRun={stop?.name === step.name && step.enabled !== false ? stop.skipped : 0}
                   onClearCache={() => cache.clear(step.name)}
-                  onChange={(next) => setSteps(steps.map((x, j) => (j === current ? next : x)))}
+                  steps={steps}
+                  onChange={(next) =>
+                    setSteps(renameRefs(steps.map((x, j) => (j === current ? next : x)), step.name, next.name))
+                  }
                   onMove={(to) => move(current as number, to)}
                   onDuplicate={() => {
                     const i = current as number;
@@ -170,7 +180,7 @@ export function StepsEditor({
                   }}
                   onDelete={() => {
                     const i = current as number;
-                    setSteps(steps.filter((_, j) => j !== i));
+                    setSteps(withoutStep(steps, i));
                     onSelect(steps.length > 1 ? Math.max(0, i - 1) : "flow");
                   }}
                 />
@@ -268,6 +278,7 @@ function StepCard({
   onMove,
   onDuplicate,
   onDelete,
+  steps,
 }: {
   index: number;
   step: Step;
@@ -278,6 +289,8 @@ function StepCard({
   result: StepResult | undefined;
   /** In the last run, how many steps were skipped after this one failed. */
   stoppedRun: number;
+  /** The flow's steps, to pick which ones this one runs after. */
+  steps: Step[];
   onClearCache: () => void;
   onChange: (next: Step) => void;
   onMove: (to: number) => void;
@@ -405,6 +418,10 @@ function StepCard({
         </div>
       </div>
       <div className="space-y-2 px-3 py-2.5">
+        <div className="flex items-center gap-1 text-xs text-muted" title="Steps that run after the same step run at the same time, each a branch">
+          Runs
+          <RunsAfter steps={steps} index={index} onChange={(after) => onChange({ ...step, after })} />
+        </div>
         <div className="flex flex-wrap gap-2">
           <select
             aria-label="Method"

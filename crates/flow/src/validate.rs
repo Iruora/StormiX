@@ -73,9 +73,18 @@ impl TestFile {
                 scripts.extend(earlier.scripts.pre_request.as_deref());
                 scripts.extend(earlier.scripts.test.as_deref());
             }
-            for &other in graph.nodes[..node].iter().enumerate().filter(|(o, _)| graph.parallel(*o, node)).map(|(_, n)| &n.step) {
+            for &other in graph.nodes[..node]
+                .iter()
+                .enumerate()
+                .filter(|(o, _)| graph.parallel(*o, node))
+                .map(|(_, n)| &n.step)
+            {
                 let other = &flow.steps[other];
-                for name in step.extract.keys().filter(|k| other.extract.contains_key(*k)) {
+                for name in step
+                    .extract
+                    .keys()
+                    .filter(|k| other.extract.contains_key(*k))
+                {
                     issues.warning(
                         &format!("{at}.extract.{name}"),
                         &format!("`{name}` is also extracted by `{}`, which runs in parallel with this step; where the branches join, the value from this step wins", other.name),

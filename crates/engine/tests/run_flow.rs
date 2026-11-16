@@ -843,7 +843,10 @@ async fn parallel_branches_overlap_and_join_their_variables() {
     assert_eq!(result.steps[4].extracted["j"], "late+b-s");
     // The two slow steps ran at the same time.
     assert!(result.duration_ms < 750.0, "{}", result.duration_ms);
-    let (a, b) = (result.steps[1].started_ms.unwrap(), result.steps[2].started_ms.unwrap());
+    let (a, b) = (
+        result.steps[1].started_ms.unwrap(),
+        result.steps[2].started_ms.unwrap(),
+    );
     assert!((a - b).abs() < 200.0);
     assert!(result.steps[4].warnings.is_empty());
 }
@@ -878,12 +881,22 @@ async fn a_failed_branch_skips_only_what_runs_after_it() {
         echo_step("after bad", "", "2", "b", ""),
         echo_step("good", "      after: [start]\n", "3", "c", ""),
         echo_step("after good", "", "4", "d", ""),
-        echo_step("join", "      after: [after bad, after good]\n", "5", "e", ""),
+        echo_step(
+            "join",
+            "      after: [after bad, after good]\n",
+            "5",
+            "e",
+            ""
+        ),
     ));
     let runner = Runner::new(RunOptions::default()).unwrap();
     let result = runner.run(&f, &base(&url)).await;
     let skipped: Vec<bool> = result.steps.iter().map(|s| s.skipped).collect();
-    assert_eq!(skipped, [false, false, true, false, false, true], "{result:#?}");
+    assert_eq!(
+        skipped,
+        [false, false, true, false, false, true],
+        "{result:#?}"
+    );
 
     let mut carry_on = f.clone();
     carry_on.on_failure = OnFailure::Continue;

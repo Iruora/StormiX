@@ -61,6 +61,12 @@ async fn admin(headers: HeaderMap) -> StatusCode {
     }
 }
 
+/// Answers after `ms` milliseconds (at most 5 s), to see parallel branches overlap.
+async fn slow(Path(ms): Path<u64>) -> Json<Value> {
+    tokio::time::sleep(std::time::Duration::from_millis(ms.min(5000))).await;
+    Json(json!({ "waited_ms": ms.min(5000) }))
+}
+
 /// Sends back what it got, to check bodies.
 async fn echo(headers: HeaderMap, body: String) -> Json<Value> {
     let content_type = headers
@@ -101,6 +107,7 @@ async fn main() {
         .route("/users/{id}", get(user))
         .route("/admin", get(admin))
         .route("/echo", post(echo))
+        .route("/slow/{ms}", get(slow))
         .route("/graphql", post(graphql));
     let listener = tokio::net::TcpListener::bind(ADDR).await.unwrap();
     println!("demo API listening on http://{ADDR}");

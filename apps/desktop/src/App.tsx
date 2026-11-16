@@ -565,7 +565,9 @@ function TestFileView({
     if (cacheChanged || traceChanged || JSON.stringify([test.load, test.thresholds ?? [], test.monitor ?? [], test.capacity ?? null, test.data ?? []]) !== JSON.stringify([profile, thresholds, monitor, capacity, data])) {
       await editSteps(configured);
     }
-    const steps = configured.flow.steps.filter((_, i) => included.includes(i));
+    // Steps left out are turned off rather than removed, so steps that run
+    // after them still find them and wait for what they waited for.
+    const steps = configured.flow.steps.map((s, i) => (included.includes(i) ? s : { ...s, enabled: false }));
     const yaml = await commands.testFileToYaml({ ...configured, flow: { ...configured.flow, steps } } as TestFile_Deserialize);
     run.reset();
     panel.setOpen(true);

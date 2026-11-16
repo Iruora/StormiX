@@ -91,10 +91,7 @@ impl Flow {
             if !step.enabled {
                 continue;
             }
-            let after: Vec<usize> = effective[i]
-                .iter()
-                .filter_map(|&d| position[d])
-                .collect();
+            let after: Vec<usize> = effective[i].iter().filter_map(|&d| position[d]).collect();
             let mut ancestors = BTreeSet::new();
             for &a in &after {
                 ancestors.insert(a);
@@ -159,7 +156,9 @@ mod tests {
     }
 
     fn step(name: &str, extra: &str) -> String {
-        format!("    - name: {name}\n      request: {{ method: GET, url: http://x/{name} }}\n{extra}")
+        format!(
+            "    - name: {name}\n      request: {{ method: GET, url: http://x/{name} }}\n{extra}"
+        )
     }
 
     #[test]

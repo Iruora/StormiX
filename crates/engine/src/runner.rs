@@ -882,7 +882,11 @@ fn join(
             match writes.get(name) {
                 Some((kept, other)) if other == by => {}
                 Some((kept, other)) => {
-                    let (winner, loser) = if by > other { (*by, *other) } else { (*other, *by) };
+                    let (winner, loser) = if by > other {
+                        (*by, *other)
+                    } else {
+                        (*other, *by)
+                    };
                     if kept != value && graph.parallel(*by, *other) {
                         conflicts.insert(name.clone(), (winner, loser));
                     }
