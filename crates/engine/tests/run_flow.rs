@@ -957,5 +957,8 @@ async fn a_slow_script_does_not_hold_up_another_branch() {
     let plain = &result.steps[2];
     // The request goes out after its script, and the other branch did not wait.
     assert!(scripted >= 350.0, "{scripted}");
-    assert!(plain.started_ms.unwrap() + plain.duration_ms < 300.0, "{plain:#?}");
+    assert!(
+        plain.started_ms.unwrap() + plain.duration_ms < 300.0,
+        "{plain:#?}"
+    );
 }
