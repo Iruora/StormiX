@@ -222,10 +222,10 @@ pub fn load_report(report: &LoadReport) -> String {
                 } else {
                     String::new()
                 },
-                ms(step.latency.p50),
-                ms(step.latency.p95),
-                ms(step.latency.p99),
-                ms(step.latency.max),
+                sent_ms(step, step.latency.p50),
+                sent_ms(step, step.latency.p95),
+                sent_ms(step, step.latency.p99),
+                sent_ms(step, step.latency.max),
             );
         }
         body.push_str("</tbody></table>");
@@ -770,6 +770,15 @@ fn esc(s: &str) -> String {
         }
     }
     out
+}
+
+/// A step that sent nothing (all skipped or cached) has no latency to show.
+fn sent_ms(step: &stormix_metrics::StepSummary, value: f64) -> String {
+    if step.requests == 0 {
+        "–".to_owned()
+    } else {
+        ms(value)
+    }
 }
 
 fn ms(v: f64) -> String {
