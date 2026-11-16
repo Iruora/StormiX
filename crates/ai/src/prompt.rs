@@ -618,6 +618,7 @@ mod tests {
             error: None,
             skipped: false,
             cached: false,
+            started_ms: None,
             trace_id: None,
             span_id: None,
             exchange: Some(Exchange {

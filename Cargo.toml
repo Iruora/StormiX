@@ -34,6 +34,7 @@ base64 = "0.22"
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
 fastrand = "2"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hdrhistogram = { version = "7", default-features = false }
 http = "1"
 hyper-util = { version = "0.1", default-features = false, features = ["client-proxy", "client-proxy-system"] }

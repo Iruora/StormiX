@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use reqwest::header::{HeaderMap, CONTENT_TYPE};
 use reqwest::redirect::Policy;
-use stormix_flow::{Body, Flow, GraphqlBody, KeyValue, Request, Step, TraceMode};
+use stormix_flow::{Body, Flow, GraphqlBody, KeyValue, Request, Step, StepGraph, TraceMode};
 use stormix_script::{
     self as script, Phase, ScriptInput, ScriptRequest, ScriptResponse, TestOutcome,
 };
@@ -172,23 +172,56 @@ impl Runner {
         self.run_with_progress(flow, overrides, |_| {}).await
     }
 
-    /// Like [`Runner::run`], calling `on_step` as each step starts.
+    /// Like [`Runner::run`], calling `on_step` as each step starts. Steps
+    /// on parallel branches (see [`Flow::graph`]) run at the same time.
     pub async fn run_with_progress(
         &self,
         flow: &Flow,
         overrides: &Variables,
-        mut on_step: impl FnMut(StepStart<'_>),
+        on_step: impl FnMut(StepStart<'_>),
     ) -> FlowResult {
         let mut vars = Variables::new();
         vars.extend(flow.variables.iter().map(|(k, v)| (k.as_str(), v.as_str())));
         vars.extend(overrides.entries());
 
         let started = Instant::now();
+        // One trace for the whole run, when the flow asks for that.
+        let run_trace = (flow.trace == Some(TraceMode::Flow)).then(trace::new_trace_id);
+        let tracing = || match (flow.trace, &run_trace) {
+            (Some(_), Some(trace_id)) => Some(TraceParent::child_of(trace_id)),
+            (Some(_), None) => Some(TraceParent::new()),
+            (None, _) => None,
+        };
+        let steps = if flow.has_branches() {
+            let graph = flow.graph();
+            if graph.is_linear() {
+                self.run_line(flow, vars, started, tracing, on_step).await
+            } else {
+                self.run_graph(flow, &graph, vars, started, tracing, on_step)
+                    .await
+            }
+        } else {
+            self.run_line(flow, vars, started, tracing, on_step).await
+        };
+        FlowResult {
+            name: flow.name.clone(),
+            steps,
+            duration_ms: millis(started.elapsed()),
+        }
+    }
+
+    /// One step after the other, every step seeing what all earlier ones set.
+    async fn run_line(
+        &self,
+        flow: &Flow,
+        mut vars: Variables,
+        started: Instant,
+        tracing: impl Fn() -> Option<TraceParent>,
+        mut on_step: impl FnMut(StepStart<'_>),
+    ) -> Vec<StepResult> {
         let mut steps = Vec::with_capacity(flow.steps.len());
         let mut stopped = false;
         let total = flow.enabled_steps().count();
-        // One trace for the whole run, when the flow asks for that.
-        let run_trace = (flow.trace == Some(TraceMode::Flow)).then(trace::new_trace_id);
         for (index, step) in flow.enabled_steps().enumerate() {
             if stopped {
                 steps.push(skipped(step));
@@ -199,22 +232,118 @@ impl Runner {
                 total,
                 name: &step.name,
             });
-            let tracing = match (flow.trace, &run_trace) {
-                (Some(_), Some(trace_id)) => Some(TraceParent::child_of(trace_id)),
-                (Some(_), None) => Some(TraceParent::new()),
-                (None, _) => None,
-            };
-            let result = self
-                .run_step(&flow.name, step, &mut vars, tracing.as_ref())
+            let at = millis(started.elapsed());
+            let mut result = self
+                .run_step(&flow.name, step, &mut vars, tracing().as_ref())
                 .await;
+            result.started_ms = Some(at);
             stopped = !result.passed() && (self.options.bail || flow.stops_after_failure_of(step));
             steps.push(result);
         }
-        FlowResult {
-            name: flow.name.clone(),
-            steps,
-            duration_ms: millis(started.elapsed()),
+        steps
+    }
+
+    /// Steps start as soon as every step they run after has finished, so
+    /// branches overlap. Each branch works on its own copy of the variables;
+    /// where branches join, what each changed is combined, and when two set
+    /// the same variable, the step lower in the file wins. After a failed
+    /// step, only the steps that run after it are skipped (unless the flow
+    /// or the step carries on); `bail` stops every branch.
+    async fn run_graph(
+        &self,
+        flow: &Flow,
+        graph: &StepGraph,
+        vars: Variables,
+        started: Instant,
+        tracing: impl Fn() -> Option<TraceParent>,
+        mut on_step: impl FnMut(StepStart<'_>),
+    ) -> Vec<StepResult> {
+        use futures_util::stream::{FuturesUnordered, StreamExt};
+
+        let n = graph.nodes.len();
+        let step_of = |node: usize| &flow.steps[graph.nodes[node].step];
+        let mut results: Vec<Option<StepResult>> = (0..n).map(|_| None).collect();
+        let mut done: Vec<Option<Finished>> = (0..n).map(|_| None).collect();
+        let mut begun = vec![false; n];
+        let mut halted = false;
+        let mut index = 0;
+        let mut running = FuturesUnordered::new();
+        loop {
+            // Start, or skip, every step whose steps before it are all done.
+            let mut more = true;
+            while more {
+                more = false;
+                for node in 0..n {
+                    if begun[node] || graph.nodes[node].after.iter().any(|&d| done[d].is_none()) {
+                        continue;
+                    }
+                    begun[node] = true;
+                    more = true;
+                    let step = step_of(node);
+                    let blocked = halted
+                        || graph.nodes[node]
+                            .after
+                            .iter()
+                            .any(|&d| done[d].as_ref().is_some_and(|f| !f.carry_on));
+                    if blocked {
+                        results[node] = Some(skipped(step));
+                        done[node] = Some(Finished::default());
+                        continue;
+                    }
+                    let (writes, conflicts) = join(graph, &graph.nodes[node].after, &done);
+                    let mut vars = vars.clone();
+                    for (name, (value, _)) in &writes {
+                        match value {
+                            Some(value) => vars.set(name.clone(), value.clone()),
+                            None => vars.remove(name),
+                        }
+                    }
+                    on_step(StepStart {
+                        index,
+                        total: n,
+                        name: &step.name,
+                    });
+                    index += 1;
+                    let at = millis(started.elapsed());
+                    let tracing = tracing();
+                    running.push(async move {
+                        let before = vars.to_map();
+                        let mut result = self
+                            .run_step(&flow.name, step, &mut vars, tracing.as_ref())
+                            .await;
+                        result.started_ms = Some(at);
+                        (node, result, before, vars, writes, conflicts)
+                    });
+                }
+            }
+            let Some((node, mut result, before, after, mut writes, conflicts)) =
+                running.next().await
+            else {
+                break;
+            };
+            let step = step_of(node);
+            for (name, value) in changes(&before, &after.to_map()) {
+                writes.insert(name, (value, node));
+            }
+            for (name, (kept, lost)) in conflicts {
+                result.warnings.push(format!(
+                    "`{name}` was set to different values on parallel branches, by `{}` and `{}`; this step got the value from `{}`, the step lower in the file",
+                    step_of(lost).name,
+                    step_of(kept).name,
+                    step_of(kept).name,
+                ));
+            }
+            let passed = result.passed();
+            if !passed && self.options.bail {
+                halted = true;
+            }
+            results[node] = Some(result);
+            done[node] = Some(Finished {
+                carry_on: passed || (!self.options.bail && !flow.stops_after_failure_of(step)),
+                writes: Arc::new(writes),
+            });
         }
+        results.into_iter().flatten().collect()
     }
 
     /// Sends one step's request and checks the response. Variables the step
@@ -278,6 +407,7 @@ impl Runner {
             error: None,
             skipped: false,
             cached: false,
+            started_ms: None,
             trace_id: None,
             span_id: None,
             exchange: None,
@@ -719,6 +849,75 @@ fn script_checks(label: &str, tests: Vec<TestOutcome>, error: Option<String>) ->
     checks
 }
 
+/// Variables set along a branch: the value (`None` once removed) and the
+/// node that set it.
+type Writes = BTreeMap<String, (Option<String>, usize)>;
+
+/// A finished (or skipped) step in a branching run.
+#[derive(Debug, Default)]
+struct Finished {
+    /// The steps after it may run.
+    carry_on: bool,
+    /// Every variable set by it and the steps before it.
+    writes: Arc<Writes>,
+}
+
+/// What the steps before a join set, combined: when two set the same
+/// variable, the one lower in the file wins. Also returns the variables two
+/// parallel branches set to different values, with the node kept and the
+/// node lost.
+fn join(
+    graph: &StepGraph,
+    after: &[usize],
+    done: &[Option<Finished>],
+) -> (Writes, BTreeMap<String, (usize, usize)>) {
+    let mut writes: Writes = BTreeMap::new();
+    let mut conflicts = BTreeMap::new();
+    let mut branches = after.iter().filter_map(|&d| done[d].as_ref());
+    if let Some(first) = branches.next() {
+        writes.clone_from(&first.writes);
+    }
+    for branch in branches {
+        for (name, (value, by)) in branch.writes.iter() {
+            match writes.get(name) {
+                Some((kept, other)) if other == by => {}
+                Some((kept, other)) => {
+                    let (winner, loser) = if by > other { (*by, *other) } else { (*other, *by) };
+                    if kept != value && graph.parallel(*by, *other) {
+                        conflicts.insert(name.clone(), (winner, loser));
+                    }
+                    if by > other {
+                        writes.insert(name.clone(), (value.clone(), *by));
+                    }
+                }
+                None => {
+                    writes.insert(name.clone(), (value.clone(), *by));
+                }
+            }
+        }
+    }
+    (writes, conflicts)
+}
+
+/// What changed from `before` to `after`: new values, and removals as `None`.
+fn changes(
+    before: &BTreeMap<String, String>,
+    after: &BTreeMap<String, String>,
+) -> Vec<(String, Option<String>)> {
+    let mut out: Vec<_> = after
+        .iter()
+        .filter(|(k, v)| before.get(*k) != Some(*v))
+        .map(|(k, v)| (k.clone(), Some(v.clone())))
+        .collect();
+    out.extend(
+        before
+            .keys()
+            .filter(|k| !after.contains_key(*k))
+            .map(|k| (k.clone(), None)),
+    );
+    out
+}
+
 fn skipped(step: &Step) -> StepResult {
     StepResult {
         name: step.name.clone(),
@@ -735,6 +934,7 @@ fn skipped(step: &Step) -> StepResult {
         error: None,
         skipped: true,
         cached: false,
+        started_ms: None,
         trace_id: None,
         span_id: None,
         exchange: None,

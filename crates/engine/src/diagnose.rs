@@ -82,10 +82,19 @@ impl Runner {
             (None, _) => None,
         };
 
+        // Only the steps it runs after: a step on another branch sets
+        // nothing this one sees.
+        let graph = flow.graph();
+        let earlier: Vec<_> = graph.nodes[index]
+            .ancestors
+            .iter()
+            .map(|&a| steps[a])
+            .collect();
         let mut stages = Vec::new();
-        if index > 0 {
+        if !earlier.is_empty() {
+            let count = earlier.len();
             let mut failed = Vec::new();
-            for step in &steps[..index] {
+            for step in earlier {
                 let result = runner
                     .run_step(&flow.name, step, &mut vars, tracing().as_ref())
                     .await;
@@ -97,10 +106,10 @@ impl Runner {
                 DiagnosisStage::new(
                     "Earlier steps",
                     StageOutcome::Passed,
-                    if index == 1 {
+                    if count == 1 {
                         "Ran the step before it for the variables it sets.".into()
                     } else {
-                        format!("Ran the {index} steps before it for the variables they set.")
+                        format!("Ran the {count} steps before it for the variables they set.")
                     },
                 )
             } else {

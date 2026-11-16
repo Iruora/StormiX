@@ -43,6 +43,11 @@ pub struct StepResult {
     /// lookup's. Missing from runs saved before 1.4.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cached: bool,
+    /// When the step was sent, from the start of the run, in milliseconds.
+    /// Steps on parallel branches overlap. Missing for skipped steps and
+    /// on runs saved before 1.12.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_ms: Option<f64>,
     /// The W3C trace this request was sent in, from the `traceparent`
     /// header: Stormix's own when the flow has `trace` on, or one the step
     /// set itself. Look it up in Dynatrace or another APM tool to see what

@@ -170,6 +170,7 @@ mod tests {
             error: error.map(Into::into),
             skipped,
             cached: false,
+            started_ms: None,
             trace_id: None,
             span_id: None,
             exchange: None,

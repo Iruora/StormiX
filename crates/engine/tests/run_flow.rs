@@ -814,3 +814,79 @@ async fn tracing_does_not_stop_a_cached_step_from_matching() {
     assert!(second.steps[1].trace_id.is_some());
     assert_eq!(calls.load(Ordering::SeqCst), 3);
 }
+
+/// A step that echoes `text` and extracts all of it into `var`.
+fn echo_step(name: &str, after: &str, text: &str, var: &str, extra: &str) -> String {
+    format!(
+        "    - name: {name}\n{after}      request: {{ method: POST, url: \"{{{{base}}}}/echo\", body: {{ raw: \"{text}\" }} }}\n      extract: {{ {var}: {{ regex: \"(.*)\" }} }}\n{extra}"
+    )
+}
+
+#[tokio::test]
+async fn parallel_branches_overlap_and_join_their_variables() {
+    let url = serve().await;
+    let f = flow(&format!(
+        "  name: branches\n  steps:\n{}{}{}{}{}",
+        echo_step("start", "", "s", "s", ""),
+        "    - name: slow a\n      after: [start]\n      request: { method: GET, url: \"{{base}}/slow\" }\n      extract: { a: { regex: \"(.*)\" } }\n",
+        "    - name: slow b\n      after: [start]\n      request: { method: GET, url: \"{{base}}/slow\" }\n",
+        echo_step("b2", "", "b-{{s}}", "b", ""),
+        echo_step("join", "      after: [slow a, b2]\n", "{{a}}+{{b}}", "j", ""),
+    ));
+    let result = Runner::new(RunOptions::default())
+        .unwrap()
+        .run(&f, &base(&url))
+        .await;
+    assert!(result.passed(), "{result:#?}");
+    let names: Vec<&str> = result.steps.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["start", "slow a", "slow b", "b2", "join"]);
+    assert_eq!(result.steps[4].extracted["j"], "late+b-s");
+    // The two slow steps ran at the same time.
+    assert!(result.duration_ms < 750.0, "{}", result.duration_ms);
+    let (a, b) = (result.steps[1].started_ms.unwrap(), result.steps[2].started_ms.unwrap());
+    assert!((a - b).abs() < 200.0);
+    assert!(result.steps[4].warnings.is_empty());
+}
+
+#[tokio::test]
+async fn at_a_join_the_step_lower_in_the_file_wins_with_a_warning() {
+    let url = serve().await;
+    let f = flow(&format!(
+        "  name: conflict\n  steps:\n{}{}{}{}",
+        echo_step("start", "", "0", "v", ""),
+        echo_step("left", "      after: [start]\n", "1", "v", ""),
+        echo_step("right", "      after: [start]\n", "2", "v", ""),
+        echo_step("join", "      after: [right, left]\n", "{{v}}", "j", ""),
+    ));
+    let result = Runner::new(RunOptions::default())
+        .unwrap()
+        .run(&f, &base(&url))
+        .await;
+    assert_eq!(result.steps[3].extracted["j"], "2");
+    assert_eq!(result.steps[3].warnings.len(), 1, "{result:#?}");
+    assert!(result.steps[3].warnings[0].contains("`right`"));
+}
+
+#[tokio::test]
+async fn a_failed_branch_skips_only_what_runs_after_it() {
+    let url = serve().await;
+    let fails = "      assert: [{ status: 500 }]\n";
+    let f = flow(&format!(
+        "  name: failing branch\n  steps:\n{}{}{}{}{}{}",
+        echo_step("start", "", "0", "v", ""),
+        echo_step("bad", "      after: [start]\n", "1", "a", fails),
+        echo_step("after bad", "", "2", "b", ""),
+        echo_step("good", "      after: [start]\n", "3", "c", ""),
+        echo_step("after good", "", "4", "d", ""),
+        echo_step("join", "      after: [after bad, after good]\n", "5", "e", ""),
+    ));
+    let runner = Runner::new(RunOptions::default()).unwrap();
+    let result = runner.run(&f, &base(&url)).await;
+    let skipped: Vec<bool> = result.steps.iter().map(|s| s.skipped).collect();
+    assert_eq!(skipped, [false, false, true, false, false, true], "{result:#?}");
+
+    let mut carry_on = f.clone();
+    carry_on.on_failure = OnFailure::Continue;
+    let result = runner.run(&carry_on, &base(&url)).await;
+    assert!(result.steps.iter().all(|s| !s.skipped));
+}

@@ -142,6 +142,7 @@ impl Importer {
                 enabled: true,
                 cache: false,
                 continue_on_failure: false,
+                after: None,
                 request: built,
                 extract: BTreeMap::new(),
                 assertions: Vec::new(),

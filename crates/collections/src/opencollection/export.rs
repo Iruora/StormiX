@@ -151,6 +151,11 @@ fn tree(test: &TestFile, warnings: &mut Vec<String>) -> Folder {
             "load settings and thresholds are Stormix's own; Bruno has no place for them".into(),
         );
     }
+    if !flow.graph().is_linear() {
+        warnings.push(
+            "Bruno runs requests one after another, so the parallel branches run in file order there".into(),
+        );
+    }
     if flow.trace.is_some() {
         warnings.push("`trace` is Stormix's own; Bruno sends no traceparent header".into());
     }
