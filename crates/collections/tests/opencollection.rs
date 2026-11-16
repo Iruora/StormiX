@@ -356,4 +356,16 @@ fn warns_about_bail_only_when_a_step_stops_the_flow() {
     };
     assert!(warns(yaml("")));
     assert!(!warns(yaml("  on_failure: continue\n")));
+
+    // Mixed: `--bail` cannot keep the step that lets the flow go on.
+    let mixed = TestFile::from_yaml(&format!(
+        "{}    - name: C\n      request: {{ method: GET, url: \"http://x/c\" }}\n",
+        yaml("").replace(
+            "    - name: B\n",
+            "      continue_on_failure: true\n    - name: B\n"
+        )
+    ))
+    .unwrap();
+    let w = opencollection::to_files(&mixed, &[]).warnings.join("\n");
+    assert!(w.contains("cannot keep those exceptions"), "{w}");
 }

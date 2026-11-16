@@ -77,6 +77,9 @@ pub struct Runner {
     /// To report the proxy each request went through; the client makes the
     /// same choice from the same settings.
     pub(crate) proxies: Arc<Proxies>,
+    /// Set when the run this step belongs to was dropped: a script still
+    /// running then sends no more requests.
+    dropped: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 /// A step about to run, as [`Runner::run_with_progress`] reports it.
@@ -94,6 +97,7 @@ impl Runner {
         Ok(Self {
             client,
             proxies: Arc::new(Proxies::new(&options.proxy)),
+            dropped: None,
             options,
             cache: Arc::default(),
         })
@@ -109,6 +113,7 @@ impl Runner {
         Ok(Self {
             client: build_client(&options)?,
             proxies: Arc::new(Proxies::new(&options.proxy)),
+            dropped: None,
             options,
             cache: self.cache.clone(),
         })
@@ -133,6 +138,13 @@ impl Runner {
         call: &ScriptRequest,
         left: Duration,
     ) -> Result<ScriptResponse, String> {
+        if self
+            .dropped
+            .as_ref()
+            .is_some_and(|d| d.load(std::sync::atomic::Ordering::Relaxed))
+        {
+            return Err("the run was stopped".into());
+        }
         let timeout = left.min(self.options.timeout);
         match tokio::runtime::Handle::try_current() {
             // Inside `block_in_place`, so the runtime can drive this.
@@ -337,11 +349,15 @@ impl Runner {
                     let run: BoxFuture<'_, (StepResult, Variables)> = if scripted && threads {
                         // A script holds its thread until done; in a task of
                         // its own, it does not hold up the other branches.
-                        let (runner, step, name) = (self.clone(), step.clone(), flow.name.clone());
+                        let (mut runner, step, name) =
+                            (self.clone(), step.clone(), flow.name.clone());
+                        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                        runner.dropped = Some(dropped.clone());
                         Box::pin(async move {
                             // Aborted if the run is dropped, as when a load
-                            // test stops mid iteration.
-                            let mut task = AbortOnDrop(tokio::spawn(async move {
+                            // test stops mid iteration; a script that is
+                            // running then sends nothing more.
+                            let task = tokio::spawn(async move {
                                 let mut vars = vars;
                                 let result = runner
                                     .run_step(
@@ -353,7 +369,8 @@ impl Runner {
                                     )
                                     .await;
                                 (result, vars)
-                            }));
+                            });
+                            let mut task = AbortOnDrop(task, dropped);
                             match (&mut task.0).await {
                                 Ok(out) => out,
                                 Err(err) => std::panic::resume_unwind(err.into_panic()),
@@ -982,10 +999,16 @@ pub(crate) fn with_writes(vars: &Variables, writes: &Writes) -> Variables {
 }
 
 /// A spawned task that is stopped when its handle is dropped.
-struct AbortOnDrop<T>(tokio::task::JoinHandle<T>);
+/// It also raises the flag the task's runner checks before a script sends
+/// a request, since a script holds its thread and cannot be aborted midway.
+struct AbortOnDrop<T>(
+    tokio::task::JoinHandle<T>,
+    Arc<std::sync::atomic::AtomicBool>,
+);
 
 impl<T> Drop for AbortOnDrop<T> {
     fn drop(&mut self) {
+        self.1.store(true, std::sync::atomic::Ordering::Relaxed);
         self.0.abort();
     }
 }

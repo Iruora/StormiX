@@ -169,9 +169,7 @@ export function StepsEditor({
                   onClearCache={() => cache.clear(step.name)}
                   steps={steps}
                   onChange={(next) => setSteps(steps.map((x, j) => (j === current ? next : x)))}
-                  onRename={(name) =>
-                    setSteps(renameRefs(steps.map((x, j) => (j === current ? { ...x, name } : x)), step.name, name))
-                  }
+                  onRename={(name) => setSteps(renameRefs(steps, current as number, name))}
                   onMove={(to) => move(current as number, to)}
                   moveBlocked={(to) => moveBreaksOrder(steps, moved(steps, current as number, to))}
                   onDuplicate={() => {

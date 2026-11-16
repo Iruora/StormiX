@@ -43,10 +43,20 @@ export function branches(steps: Step[]): boolean {
   });
 }
 
-/** Steps' `after:` with `from` renamed to `to`, when a step is renamed. */
-export function renameRefs(steps: Step[], from: string, to: string): Step[] {
-  if (from === to || !steps.some((s) => s.after?.includes(from))) return steps;
-  return steps.map((s) => (s.after?.includes(from) ? { ...s, after: s.after.map((n) => (n === from ? to : n)) } : s));
+/**
+ * The steps with `steps[index]` renamed to `to`, and the `after:` lists
+ * that name it following along. Only names that point at that step (the
+ * nearest step above with that name) change, so another step that shares
+ * the old name keeps its own.
+ */
+export function renameRefs(steps: Step[], index: number, to: string): Step[] {
+  const from = steps[index].name;
+  return steps.map((s, j) => {
+    if (j === index) return { ...s, name: to };
+    if (j < index || !s.after?.includes(from)) return s;
+    const nearest = steps.slice(0, j).map((t) => t.name).lastIndexOf(from);
+    return nearest === index ? { ...s, after: s.after.map((n) => (n === from ? to : n)) } : s;
+  });
 }
 
 /**
@@ -142,10 +152,11 @@ export function moveBreaksOrder(before: Step[], next: Step[]): string | null {
         .filter((n) => !steps.slice(0, i).some((t) => t.name === n) && steps.slice(i + 1).some((t) => t.name === n))
         .map((n) => [s.name, n] as const),
     );
-  const was = below(before).length;
-  const now = below(next);
-  if (now.length <= was) return null;
-  const [step, name] = now[0];
+  // Only a reference the move breaks counts, not one that was already wrong.
+  const was = new Set(below(before).map(([step, name]) => `${step}\u0000${name}`));
+  const broken = below(next).find(([step, name]) => !was.has(`${step}\u0000${name}`));
+  if (!broken) return null;
+  const [step, name] = broken;
   return `“${step}” runs after “${name}”, so it has to stay below it`;
 }
 
