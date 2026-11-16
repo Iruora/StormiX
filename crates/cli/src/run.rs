@@ -227,10 +227,16 @@ pub fn run(args: RunArgs) -> Result<ExitCode, String> {
     let vars = prepared.once_vars();
     let Prepared { source, runner, .. } = prepared;
     let test = &source.test;
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| format!("cannot start the runtime: {e}"))?;
+    // Parallel branches need threads, so one branch's script does not hold
+    // up a request on another; a straight line runs fine on one.
+    let runtime = if test.flow.has_branches() {
+        tokio::runtime::Builder::new_multi_thread()
+    } else {
+        tokio::runtime::Builder::new_current_thread()
+    }
+    .enable_all()
+    .build()
+    .map_err(|e| format!("cannot start the runtime: {e}"))?;
     let result = runtime.block_on(runner.run(&test.flow, &vars));
 
     if let Some(path) = &args.junit {
