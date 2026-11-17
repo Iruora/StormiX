@@ -11,7 +11,7 @@
 use serde_json::{json, Map, Value};
 use stormix_flow::{Assertion, Body, ExtractSource, GraphqlBody, Header, Step, TestFile};
 
-use crate::common::js_string;
+use crate::common::{js_string, membership_js};
 use crate::environment::Environment;
 use crate::opencollection::export::{json_path_expr, method};
 
@@ -225,15 +225,14 @@ fn item(step: &Step, name: &str, warnings: &mut Vec<String>) -> Value {
                     let body = match (&j.equals, j.exists) {
                         (Some(v), _) => format!("pm.expect({actual}).to.eql({});", json_value(v)),
                         (None, _) if j.one_of.is_some() || j.not_in.is_some() => {
-                            let (not, list) = match (&j.one_of, &j.not_in) {
-                                (Some(l), _) => ("", l),
-                                (None, Some(l)) => ("not.", l),
+                            let (negate, list) = match (&j.one_of, &j.not_in) {
+                                (Some(l), _) => (false, l),
+                                (None, Some(l)) => (true, l),
                                 (None, None) => unreachable!(),
                             };
-                            format!(
-                                "pm.expect({actual}).to.{not}be.oneOf({});",
-                                json_value(&Value::Array(list.clone()))
-                            )
+                            let items: Vec<String> = list.iter().map(json_value).collect();
+                            let list = format!("[{}]", items.join(", "));
+                            membership_js("pm.expect", &actual, &list, negate)
                         }
                         (None, Some(false)) => format!("pm.expect({actual}).to.be.undefined;"),
                         (None, _) => format!("pm.expect({actual}).to.not.be.undefined;"),
@@ -463,12 +462,11 @@ flow:
         assert!(tests
             .iter()
             .any(|l| l.contains("pm.expect(pm.response.json().data.ok).to.eql(true)")));
-        assert!(tests.iter().any(|l| l.contains(
-            "pm.expect(pm.response.json().data.state).to.be.oneOf([\"ACTIVE\",\"EXPIRED\"])"
-        )));
-        assert!(tests.iter().any(
-            |l| l.contains("pm.expect(pm.response.json().data.role).to.not.be.oneOf([\"banned\"])")
-        ));
+        let script = tests.join("\n");
+        assert!(script.contains("const actual = pm.response.json().data.state;"));
+        assert!(script.contains(r#"const list = ["ACTIVE", "EXPIRED"];"#));
+        assert!(script.contains(r#"const list = ["banned"];"#));
+        assert!(script.contains(".to.equal(false);"));
         assert_eq!(doc["item"][1]["name"], "Read the profile");
         assert_eq!(
             doc["item"].as_array().unwrap().len(),

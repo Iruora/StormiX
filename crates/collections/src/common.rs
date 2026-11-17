@@ -149,6 +149,31 @@ pub fn js_string(s: &str) -> String {
     serde_json::Value::from(s).to_string()
 }
 
+/// The body of a test that `actual` is (or, with `negate`, is not) one of
+/// the items of the JavaScript array `list`, compared the way Stormix
+/// compares: deeply for objects and arrays, and a string item matches a
+/// number or boolean with the same JSON text. A missing value fails.
+/// `expect` is the assertion function, `pm.expect` or Bruno's `expect`.
+pub fn membership_js(expect: &str, actual: &str, list: &str, negate: bool) -> String {
+    format!(
+        r#"const actual = {actual};
+  const list = {list};
+  const same = (a, b) => {{
+    if (typeof b === "string" && (typeof a === "number" || typeof a === "boolean")) {{
+      try {{ return JSON.parse(b) === a; }} catch (e) {{ return false; }}
+    }}
+    if (a === b) return true;
+    if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    const ka = Object.keys(a);
+    return ka.length === Object.keys(b).length && ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && same(a[k], b[k]));
+  }};
+  {expect}(actual, "no match").to.not.be.undefined;
+  {expect}(list.some((v) => same(actual, v)), "got " + JSON.stringify(actual)).to.equal({});"#,
+        !negate
+    )
+}
+
 /// Replaces `:name` path segments, the way Postman and Bruno path
 /// variables work. The query string is left alone.
 pub fn path_variables(url: &str, vars: &[(String, String)]) -> String {

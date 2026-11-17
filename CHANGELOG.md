@@ -5,7 +5,7 @@
 ### Check a value against a list
 
 - **`in:` on a `json` assertion** passes when the value is one of a list, like `in: [ACTIVE, EXPIRED]`, and **`not_in:`** when it is none of them. Variables work in each item, and `"7"` matches the number 7 as with `equals`. See [`assert`](TEST_FILE.md#assert).
-- The YAML editor suggests both, and exports to Postman and Bruno carry them over.
+- The YAML editor suggests both, and exports to Postman and Bruno carry them over as test scripts that compare the same way.
 
 ## 1.12.0 (2026-11-17)
 
