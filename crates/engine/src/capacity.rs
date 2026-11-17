@@ -310,22 +310,19 @@ pub(crate) fn peak_memory(resources: &[ResourceSeries], start_s: f64, end_s: f64
         .reduce(f64::max)
 }
 
-/// The most memory any API used during a run that ended at `end_s`.
-/// Dynatrace stamps a minute still open when it is read at the read's time,
-/// and the read after the end replaces the series, so a minute that began
-/// before the end counts even when its stamp lands after it. Other monitors
-/// count up to the end.
-pub(crate) fn run_peak_memory(resources: &[ResourceSeries], end_s: f64) -> Option<f64> {
-    resources
-        .iter()
-        .filter_map(|series| {
-            let end = if series.format == "dynatrace" {
-                end_s + 60.0
-            } else {
-                end_s
-            };
-            peak_memory(std::slice::from_ref(series), 0.0, end)
-        })
+/// The most memory any API used during a run that ended at `end_s`:
+/// `in_run`, the peak read before Dynatrace's last read replaced its series,
+/// or a reading from that last read stamped before the end. A minute still
+/// open at the end keeps the values read during the run, even when the last
+/// read gives it a lower one, and nothing stamped after the end counts.
+pub(crate) fn run_peak_memory(
+    in_run: Option<f64>,
+    resources: &[ResourceSeries],
+    end_s: f64,
+) -> Option<f64> {
+    in_run
+        .into_iter()
+        .chain(peak_memory(resources, 0.0, end_s))
         .reduce(f64::max)
 }
 
@@ -564,23 +561,21 @@ mod tests {
     }
 
     #[test]
-    fn a_dynatrace_minute_open_at_the_end_counts_for_the_run() {
+    fn a_dynatrace_minute_open_at_the_end_keeps_its_in_run_peak() {
         use crate::monitor::ResourceSample;
         let mem = |t, mb: f64| ResourceSample {
             t,
             memory_bytes: Some(mb * 1_048_576.0),
             ..Default::default()
         };
-        let series = |format: &str| ResourceSeries {
+        let series = |samples| ResourceSeries {
             name: "api".into(),
             url: "http://api".into(),
-            format: format.into(),
+            format: "dynatrace".into(),
             cpu_cores: None,
             heap_max_bytes: None,
             memory_kind: None,
-            // The run ended at 20 s; the read at 21 s replaced the open
-            // minute's 700 MiB, first seen at 10 s, with its stamp at 21 s.
-            samples: vec![mem(0.0, 300.0), mem(21.0, 700.0)],
+            samples,
             failed_reads: 0,
             error: None,
             health_url: None,
@@ -589,14 +584,26 @@ mod tests {
             failing: false,
         };
         let mib = |b: Option<f64>| b.map(|b| b / 1_048_576.0);
-        assert_eq!(
-            mib(run_peak_memory(&[series("dynatrace")], 20.0)),
-            Some(700.0)
-        );
-        // A scrape after the end is not the run's.
-        assert_eq!(
-            mib(run_peak_memory(&[series("prometheus")], 20.0)),
-            Some(300.0)
-        );
+        // During a run that ends at 20 s, the open minute read 700 MiB at 10 s.
+        let during = [series(vec![mem(0.0, 300.0), mem(10.0, 700.0)])];
+        let in_run = peak_memory(&during, 0.0, 20.0);
+        assert_eq!(mib(in_run), Some(700.0));
+        // The last read replaces the series: that minute, now complete and
+        // lower, stamped at 21 s, and a minute that began after the end.
+        let after = [series(vec![
+            mem(0.0, 300.0),
+            mem(21.0, 650.0),
+            mem(70.0, 900.0),
+        ])];
+        assert_eq!(mib(run_peak_memory(in_run, &after, 20.0)), Some(700.0));
+        // A higher complete minute that ended before the end counts.
+        let earlier = [series(vec![
+            mem(0.0, 300.0),
+            mem(15.0, 800.0),
+            mem(21.0, 650.0),
+        ])];
+        assert_eq!(mib(run_peak_memory(in_run, &earlier, 20.0)), Some(800.0));
+        // Nothing read at all.
+        assert_eq!(run_peak_memory(None, &[], 20.0), None);
     }
 }
