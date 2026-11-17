@@ -329,6 +329,9 @@ pub async fn run_load(
     // was still open).
     drain(&mut monitor_rx, &mut resources);
     let in_run_memory = capacity::peak_memory(&resources, 0.0, elapsed.as_secs_f64());
+    // A find_limit step still open closes on what was read during the run,
+    // like the steps closed before it.
+    let in_run = limit.is_some().then(|| resources.clone());
     // Dynatrace reads once more for the minutes the test ended in, unless
     // the test was stopped. A read gives up within 10 s.
     if stop.is_stopped() {
@@ -360,7 +363,7 @@ pub async fn run_load(
     // A stop the user made; a found limit ends the test as planned.
     let aborted = outcome.aborted && stop.is_stopped();
     let limit = limit.map(|tracker| {
-        let mut search = tracker.finish(elapsed, aborted, &resources);
+        let mut search = tracker.finish(elapsed, aborted, in_run.as_deref().unwrap_or(&resources));
         if let Some(step) = search
             .sustained
             .or(search.steps.first().map(|_| 0))
