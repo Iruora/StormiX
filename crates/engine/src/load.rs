@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use stormix_flow::{Capacity, Flow, LoadProfile, Metric, Monitor, Per, Threshold};
-use stormix_metrics::{check_thresholds, Recorder, Sample, Second, Summary, ThresholdResult};
+use stormix_metrics::{
+    check_thresholds, ApiReadings, Recorder, Sample, Second, Summary, ThresholdResult,
+};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 
@@ -341,8 +343,12 @@ pub async fn run_load(
     recorder.interrupted(outcome.interrupted);
 
     let summary = recorder.summary(elapsed);
-    let api_cpu = capacity::average_cpu(&resources, 0.0, f64::INFINITY);
-    let mut checked = check_thresholds(thresholds, &summary, &recorder, api_cpu);
+    // Dynatrace's last read can land past the end; health counts to it.
+    let api = ApiReadings {
+        unhealthy_s: capacity::unhealthy_seconds(&resources, 0.0, elapsed.as_secs_f64()),
+        ..api_readings(&resources, 0.0, f64::INFINITY)
+    };
+    let mut checked = check_thresholds(thresholds, &summary, &recorder, api);
     // A stop the user made; a found limit ends the test as planned.
     let aborted = outcome.aborted && stop.is_stopped();
     let limit = limit.map(|tracker| {
@@ -356,7 +362,7 @@ pub async fn run_load(
             // the test's, since every later one was meant to break.
             checked = step.thresholds.clone();
             checked.extend(
-                check_thresholds(thresholds, &summary, &recorder, api_cpu)
+                check_thresholds(thresholds, &summary, &recorder, api)
                     .into_iter()
                     .zip(thresholds)
                     .filter(|(_, t)| t.metric == Metric::Throughput)
@@ -452,19 +458,27 @@ impl<'a> LimitTracker<'a> {
         let (start_s, end_s) = (start.as_secs_f64(), end.as_secs_f64());
         let api_cpu = capacity::average_cpu(resources, start_s, end_s);
         let api_memory_bytes = capacity::average_memory(resources, start_s, end_s);
-        let mut thresholds = check_thresholds(&self.thresholds, &summary, &window, api_cpu);
+        let api = api_readings(resources, start_s, end_s);
+        let mut thresholds = check_thresholds(&self.thresholds, &summary, &window, api);
         // Monitors read every few seconds (Dynatrace once a minute), so a
-        // step can end without a CPU reading: that decides nothing, as long
-        // as some reading came in. Without any, the threshold fails.
-        let cpu_read = resources
-            .iter()
-            .any(|r| r.samples.iter().any(|s| s.cpu_percent.is_some()));
-        if api_cpu.is_none() && cpu_read {
-            for (result, t) in thresholds.iter_mut().zip(&self.thresholds) {
-                if t.metric == Metric::ApiCpu && !partial {
-                    result.passed = true;
-                    result.note = Some("no CPU reading during this step".into());
-                }
+        // step can end without a CPU or memory reading: that decides
+        // nothing, as long as some reading came in. Without any, the
+        // threshold fails.
+        let read = |f: fn(&monitor::ResourceSample) -> Option<f64>| {
+            resources
+                .iter()
+                .any(|r| r.samples.iter().any(|s| f(s).is_some()))
+        };
+        let undecided = |metric: Metric| match metric {
+            Metric::ApiCpu => api.cpu.is_none() && read(|s| s.cpu_percent),
+            Metric::ApiMemory => api.memory_mib.is_none() && read(|s| s.memory_bytes),
+            _ => false,
+        };
+        for (result, t) in thresholds.iter_mut().zip(&self.thresholds) {
+            if !partial && undecided(t.metric) {
+                let what = t.metric.monitored().unwrap_or_default();
+                result.passed = true;
+                result.note = Some(format!("no {what} reading during this step"));
             }
         }
         let passed = !partial && summary.requests > 0 && thresholds.iter().all(|t| t.passed);
@@ -880,6 +894,16 @@ impl Schedule {
             start += len;
         }
         total
+    }
+}
+
+/// What the API's monitors read from `start_s` to `end_s` (seconds since
+/// the load started), for thresholds.
+fn api_readings(resources: &[ResourceSeries], start_s: f64, end_s: f64) -> ApiReadings {
+    ApiReadings {
+        cpu: capacity::average_cpu(resources, start_s, end_s),
+        memory_mib: capacity::peak_memory(resources, start_s, end_s).map(|b| b / 1_048_576.0),
+        unhealthy_s: capacity::unhealthy_seconds(resources, start_s, end_s),
     }
 }
 

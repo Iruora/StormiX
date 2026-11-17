@@ -305,11 +305,11 @@ impl TestFile {
 
         if self.monitor.is_empty() {
             for (t, threshold) in self.thresholds.iter().enumerate() {
-                if threshold.metric.needs_monitor() {
+                if let Some(what) = threshold.metric.monitored() {
                     issues.warning(
                         &format!("thresholds[{t}]"),
                         &format!(
-                            "`{threshold}` reads the API's CPU from a `monitor`; add one, or it always fails"
+                            "`{threshold}` reads the API's {what} from a `monitor`; add one, or it always fails"
                         ),
                     );
                 }

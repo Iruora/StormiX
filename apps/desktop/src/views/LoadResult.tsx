@@ -533,6 +533,10 @@ function Threshold({ result }: { result: ThresholdResult }) {
       ? `${actual.toFixed(2)}%`
       : metric === "cpu"
         ? `${Math.round(actual)}%`
+        : metric === "memory"
+        ? `${Math.round(actual)} MB`
+        : metric === "unhealthy"
+        ? `${Math.round(actual)} s`
         : metric === "rps"
         ? `${actual.toFixed(1)}/s`
         : formatMs(actual);

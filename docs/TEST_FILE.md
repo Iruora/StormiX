@@ -335,8 +335,10 @@ A threshold is `<metric> <operator> <value>`. The operator is `<`, `<=`, `>` or 
 | `checks` | Passed assertions and script tests, in percent | `checks > 99%` |
 | `rps` | Requests per second over the run, a plain number | `rps > 200` |
 | `cpu` | The API's average CPU from a [`monitor`](#monitor), in percent where 100% is one core | `cpu < 80%` |
+| `memory` | The most memory the API used, from a [`monitor`](#monitor), in `MB` or `GB` (counted in 1024s, as the app shows MiB) | `memory < 1GB` |
+| `unhealthy` | How long the API's health check said it was not healthy, from a [`monitor`](#monitor) with a health check, in `s` or `ms` | `unhealthy <= 0s`, `unhealthy < 10s` |
 
-Thresholds apply only under load. A `cpu` threshold fails when no monitor read the CPU. Under `find_limit` each step is checked on its own (`rps` thresholds only at the end). `stormix load --threshold "p95 < 300ms"` adds one from the command line.
+Thresholds apply only under load. A `cpu`, `memory` or `unhealthy` threshold fails when no monitor read that figure. With several monitors, the busiest API counts (the highest CPU or memory, the longest unhealthy). Under `find_limit` each step is checked on its own (`rps` thresholds only at the end), so `unhealthy <= 0s` stops the search at the first step where the API went down. `stormix load --threshold "p95 < 300ms"` adds one from the command line.
 
 ## `data`
 

@@ -876,12 +876,14 @@ fn measured(t: &stormix_metrics::ThresholdResult) -> String {
         .split([' ', '<', '>'])
         .next()
         .unwrap_or_default();
+    if let Some(note) = &t.note {
+        return note.clone();
+    }
     match metric {
         "errors" | "checks" => format!("{:.2}%", t.actual),
-        "cpu" => match &t.note {
-            Some(note) => note.clone(),
-            None => format!("{:.0}%", t.actual),
-        },
+        "cpu" => format!("{:.0}%", t.actual),
+        "memory" => format!("{:.0} MB", t.actual),
+        "unhealthy" => format!("{:.0} s", t.actual),
         "rps" => format!("{:.1}/s", t.actual),
         _ => ms(t.actual),
     }

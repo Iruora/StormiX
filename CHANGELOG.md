@@ -1,12 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Fail a load test on the API's memory and health.** Two new thresholds read the API's [`monitor`](docs/TEST_FILE.md#monitor), beside `cpu`: `memory < 1GB` holds the most memory the API used to a limit, and `unhealthy <= 0s` (or `unhealthy < 10s`) fails the test when the API's health check said it was down. Under `find_limit` they stop the search at the first step that breaks them. See [Thresholds](docs/TEST_FILE.md#thresholds).
+- **Fixed** two links in the 1.12.0 notes that led nowhere on GitHub.
+
 ## 1.12.0 (2026-11-17)
 
-**Changes what existing files do:** a flow now stops at its first failed step. Add `on_failure: continue` to a file to keep running every step, as before. See [When a step fails](TEST_FILE.md#when-a-step-fails).
+**Changes what existing files do:** a flow now stops at its first failed step. Add `on_failure: continue` to a file to keep running every step, as before. See [When a step fails](docs/TEST_FILE.md#when-a-step-fails).
 
 ### Run steps in parallel branches
 
-- **`after:` on a step** names the steps it waits for. Steps that name the same step run at the same time, each starting a branch, and a step that names several waits for all of them before it runs. Files without `after:` run as before. See [Parallel branches](TEST_FILE.md#parallel-branches).
+- **`after:` on a step** names the steps it waits for. Steps that name the same step run at the same time, each starting a branch, and a step that names several waits for all of them before it runs. Files without `after:` run as before. See [Parallel branches](docs/TEST_FILE.md#parallel-branches).
 - **Variables join predictably.** Each branch works on its own copy of the variables; where branches join, what each set is combined, and when two set the same variable, the step lower in the file wins, with a warning.
 - **A failed step stops only its branch.** The steps after it, and any join waiting for it, are skipped; other branches run to their end. With `--bail`, no new step starts on any branch after the first failure; steps already running finish.
 - **The Flow tab draws the branches** side by side with GRAFCET double bars where they split and join. **Branch** on a card adds a parallel step, and each card's **after** line, also in the Steps tab, picks the steps it runs after. The run result shows when each step ran, and `stormix run` prints when steps overlapped.

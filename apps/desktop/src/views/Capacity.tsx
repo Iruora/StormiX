@@ -111,6 +111,8 @@ function measuredText(threshold: string, actual: number): string {
   const metric = threshold.split(/[\s<>]/)[0];
   if (metric === "errors" || metric === "checks") return `${actual.toFixed(2)}%`;
   if (metric === "cpu") return `${Math.round(actual)}%`;
+  if (metric === "memory") return `${Math.round(actual)} MB`;
+  if (metric === "unhealthy") return `${Math.round(actual)} s`;
   if (metric === "rps") return `${actual.toFixed(1)}/s`;
   return formatMs(actual);
 }

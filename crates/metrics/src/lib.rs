@@ -439,29 +439,52 @@ pub struct ThresholdResult {
     pub actual: f64,
     pub passed: bool,
     /// Why it could not be measured, like a `cpu` threshold with no
-    /// monitor. It fails then.
+    /// monitor. It fails then, unless it says it decides nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
 
+/// What the API's monitors read during the run, for the `cpu`, `memory`
+/// and `unhealthy` thresholds. Each is None when no monitor read it.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ApiReadings {
+    /// Average CPU, in percent where 100 is one core.
+    pub cpu: Option<f64>,
+    /// The most memory used, in MiB.
+    pub memory_mib: Option<f64>,
+    /// Seconds the health check said the API was not healthy.
+    pub unhealthy_s: Option<f64>,
+}
+
 /// Checks each threshold against the run. Percentiles are read from the
-/// recorder, so `p97` is as exact as `p95`. `api_cpu` is the API's average
-/// CPU over the run, from its monitor, when one was read.
+/// recorder, so `p97` is as exact as `p95`. `api` holds what the API's
+/// monitors read, when any did.
 pub fn check_thresholds(
     thresholds: &[Threshold],
     summary: &Summary,
     recorder: &Recorder,
-    api_cpu: Option<f64>,
+    api: ApiReadings,
 ) -> Vec<ThresholdResult> {
     thresholds
         .iter()
         .map(|t| {
-            if t.metric == Metric::ApiCpu && api_cpu.is_none() {
+            let api_value = match t.metric {
+                Metric::ApiCpu => Some(api.cpu),
+                Metric::ApiMemory => Some(api.memory_mib),
+                Metric::ApiUnhealthy => Some(api.unhealthy_s),
+                _ => None,
+            };
+            if let (Some(None), Some(what)) = (api_value, t.metric.monitored()) {
+                let how = if t.metric == Metric::ApiUnhealthy {
+                    "add a monitor with a health check"
+                } else {
+                    "add a monitor"
+                };
                 return ThresholdResult {
                     threshold: t.to_string(),
                     actual: 0.0,
                     passed: false,
-                    note: Some("the API's CPU was not read; add a monitor".into()),
+                    note: Some(format!("the API's {what} was not read; {how}")),
                 };
             }
             let actual = match t.metric {
@@ -471,7 +494,9 @@ pub fn check_thresholds(
                 Metric::ErrorRate => summary.error_rate(),
                 Metric::CheckRate => summary.check_rate(),
                 Metric::Throughput => summary.rps,
-                Metric::ApiCpu => api_cpu.unwrap_or_default(),
+                Metric::ApiCpu | Metric::ApiMemory | Metric::ApiUnhealthy => {
+                    api_value.flatten().unwrap_or_default()
+                }
             };
             ThresholdResult {
                 threshold: t.to_string(),
