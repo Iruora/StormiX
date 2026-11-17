@@ -64,7 +64,7 @@ features:
     linkText: Test data
   - icon: 📦
     title: Find the limit, size the pods
-    details: Step the rate up until the API breaks, read its CPU and memory along the way, and get how many pods your production peak needs.
+    details: Step the rate up until the API breaks, watch its CPU, memory and health, fail the test when it uses too much or goes down, and get how many pods your production peak needs.
     link: /features/capacity
     linkText: Capacity and pods
 ---
