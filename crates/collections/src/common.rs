@@ -264,3 +264,51 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod membership_tests {
+    use super::membership_js;
+
+    /// Runs the exported check in QuickJS with a tiny `expect`, and says
+    /// whether it passed.
+    fn passes(actual: &str, list: &str, negate: bool) -> bool {
+        let code = format!(
+            r#"const expect = (v, msg) => ({{
+                to: {{
+                    equal: (w) => {{ if (v !== w) throw new Error(msg); }},
+                    not: {{ be: {{ get undefined() {{ if (v === undefined) throw new Error(msg); return true; }} }} }},
+                }},
+            }});
+            (function () {{ try {{ {} return true; }} catch (e) {{ return false; }} }})()"#,
+            membership_js("expect", actual, list, negate)
+        );
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = rquickjs::Context::full(&rt).unwrap();
+        ctx.with(|ctx| ctx.eval::<bool, _>(code).unwrap())
+    }
+
+    #[test]
+    fn compares_like_the_engine() {
+        // A string item matches a number or boolean with the same text...
+        assert!(passes("7", r#"["7", 8]"#, false));
+        assert!(!passes("7", r#"["7"]"#, true));
+        assert!(passes("true", r#"["true"]"#, false));
+        // ...but only at the top level: nested fields compare exactly.
+        assert!(!passes(r#"({"id": 7})"#, r#"[{"id": "7"}]"#, false));
+        assert!(passes(r#"({"id": 7})"#, r#"[{"id": "7"}]"#, true));
+        // Objects and arrays compare deeply.
+        assert!(passes(
+            r#"({"id": 1, "tags": [1, 2]})"#,
+            r#"[{"tags": [1, 2], "id": 1}]"#,
+            false
+        ));
+        assert!(!passes("[1, 2]", "[[2, 1]]", false));
+        // Items stay whole.
+        assert!(passes(r#""a,b""#, r#"["a,b"]"#, false));
+        assert!(!passes(r#""a""#, r#"["a,b"]"#, false));
+        // A missing value fails both ways; null is a value.
+        assert!(!passes("undefined", r#"["a"]"#, false));
+        assert!(!passes("undefined", r#"["a"]"#, true));
+        assert!(passes("null", "[null]", false));
+    }
+}
