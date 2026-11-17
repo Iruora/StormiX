@@ -302,7 +302,15 @@ mod membership_tests {
             r#"[{"tags": [1, 2], "id": 1}]"#,
             false
         ));
+        assert!(!passes(
+            r#"({"id": 1, "tags": [1, 2]})"#,
+            r#"[{"id": 1, "tags": [1, 2]}]"#,
+            true
+        ));
+        assert!(passes("[1, 2]", "[[1, 2]]", false));
+        assert!(!passes("[1, 2]", "[[1, 2]]", true));
         assert!(!passes("[1, 2]", "[[2, 1]]", false));
+        assert!(passes("[1, 2]", "[[2, 1]]", true));
         // Items stay whole.
         assert!(passes(r#""a,b""#, r#"["a,b"]"#, false));
         assert!(!passes(r#""a""#, r#"["a,b"]"#, false));
@@ -310,5 +318,7 @@ mod membership_tests {
         assert!(!passes("undefined", r#"["a"]"#, false));
         assert!(!passes("undefined", r#"["a"]"#, true));
         assert!(passes("null", "[null]", false));
+        assert!(!passes("null", "[null]", true));
+        assert!(passes("null", r#"["null"]"#, true));
     }
 }
