@@ -1,15 +1,14 @@
-Stormix 1.11.0 tells you how far your API goes and how many pods it needs, and lets you watch its CPU, memory and health during a load test.
+Stormix 1.12.0 runs flow steps in parallel, stops a flow at its first failure, fills load tests with test data, copies any step as cURL, and can explain a failure with your own Claude Code or Copilot CLI.
 
-- **Find the limit.** A `find_limit` load profile raises the rate step by step, checks each step against the thresholds on its own (all but `rps`, which is checked on the whole run), and stops at the first step that breaks one. The last step that held is what the tested pods sustain together; set `tested_pods` and the sizing divides it per pod.
-- **`cpu` threshold**, like `cpu < 85%`, so a step can also break on a CPU ceiling.
-- **Pods needed.** Give the production peak, growth, target CPU and pod memory limit, and the result works out how many pods you need for CPU and for memory, compared with the pods you run today, plus the requests in flight per pod for sizing thread and connection pools. The memory count needs a monitor that read the API's memory on at least two steps.
-- **Stop and Replay load tests.** **Stop** ends a running test and keeps what was measured so far (Ctrl+C in the CLI). **Replay** runs a finished test again with the same profile and thresholds.
-- **API CPU and memory during a load test**, read from Spring Boot Actuator, Prometheus `/metrics` endpoints (Quarkus, prom-client, prometheus-net, Go) or Dynatrace, shown live, in the results, the HTML report and the run history.
-- **Health of the API during the test**: when it went `DOWN` or stopped answering, what was down, and when it came back.
-- **Fixes:** a virtual-user load test longer than 30 seconds no longer stops early, and editing the flow while a load test runs no longer hides it or lets a second one start.
-- **Documentation website** at [iruora.github.io/StormiX](https://iruora.github.io/StormiX/).
+**Changes what existing files do:** a flow now stops at its first failed step and skips the rest, instead of sending them without the token or ID the failed step was to give them. Add `on_failure: continue` to a file to keep the old behaviour, or `continue_on_failure: true` on one step to let just that step fail.
 
-If you are on 1.1 or later, the app offers this update by itself. On 1.0, download it once from the table below. If you tried 1.11.0-rc.1 on Linux, delete its AppImage when you switch to the `.deb` or `.rpm`.
+- **Parallel branches.** `after:` on a step names the steps it waits for: steps after the same step run at the same time, and a step after several waits for all of them. The Flow tab draws the branches side by side, and **Branch** on a card adds one. A failed step stops only its own branch. Files without `after:` run as before.
+- **Stop at a failed step.** Skipped steps are marked in the run result, the Flow tab and the Steps tab, and counted per step in load test results. **When a step fails** in the Flow tab header switches a flow back to running every step.
+- **Test data for load tests.** A `data` section (**Test data** in the load test setup) holds lists of values, typed in, imported from CSV or linked as a file, that fill `{{variables}}` differently for each iteration or each virtual user, picked at random, in order or each once.
+- **Copy as cURL** on every step, in the Flow tab and Steps, without running first, with variables and secrets filled in, for bash or Windows cmd.
+- **Explain with your own AI.** **Explain** on a failed step or a load test result asks Claude Code or GitHub Copilot CLI, whichever is installed and signed in on your computer. Stormix needs no API key; secrets and tokens are hidden first, and **Show what is sent** shows the exact text. Also `stormix explain RESULT.json` in the CLI.
+
+If you are on 1.1 or later, the app offers this update by itself. On 1.0, download it once from the table below.
 
 See the [changelog](https://github.com/Iruora/StormiX/blob/main/CHANGELOG.md) for details and [Getting started](https://github.com/Iruora/StormiX/blob/main/docs/GETTING_STARTED.md) to begin.
 
