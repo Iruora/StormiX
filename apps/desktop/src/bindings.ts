@@ -2475,7 +2475,7 @@ export type ThresholdResult_Deserialize = {
 	passed: boolean,
 	/**
 	 *  Why it could not be measured, like a `cpu` threshold with no
-	 *  monitor. It fails then.
+	 *  monitor. It fails then, unless it says it decides nothing.
 	 */
 	note?: string | null,
 };
@@ -2488,7 +2488,7 @@ export type ThresholdResult_Serialize = {
 	passed: boolean,
 	/**
 	 *  Why it could not be measured, like a `cpu` threshold with no
-	 *  monitor. It fails then.
+	 *  monitor. It fails then, unless it says it decides nothing.
 	 */
 	note?: string,
 };
