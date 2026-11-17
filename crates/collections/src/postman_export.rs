@@ -224,6 +224,17 @@ fn item(step: &Step, name: &str, warnings: &mut Vec<String>) -> Value {
                     let actual = body_expr(&expr);
                     let body = match (&j.equals, j.exists) {
                         (Some(v), _) => format!("pm.expect({actual}).to.eql({});", json_value(v)),
+                        (None, _) if j.one_of.is_some() || j.not_in.is_some() => {
+                            let (not, list) = match (&j.one_of, &j.not_in) {
+                                (Some(l), _) => ("", l),
+                                (None, Some(l)) => ("not.", l),
+                                (None, None) => unreachable!(),
+                            };
+                            format!(
+                                "pm.expect({actual}).to.{not}be.oneOf({});",
+                                json_value(&Value::Array(list.clone()))
+                            )
+                        }
                         (None, Some(false)) => format!("pm.expect({actual}).to.be.undefined;"),
                         (None, _) => format!("pm.expect({actual}).to.not.be.undefined;"),
                     };
@@ -410,6 +421,8 @@ flow:
       assert:
         - status: 200
         - json: { path: $.data.ok, equals: true }
+        - json: { path: $.data.state, in: [ACTIVE, EXPIRED] }
+        - json: { path: $.data.role, not_in: [banned] }
     - name: Read the profile
       request:
         method: GET
@@ -450,6 +463,12 @@ flow:
         assert!(tests
             .iter()
             .any(|l| l.contains("pm.expect(pm.response.json().data.ok).to.eql(true)")));
+        assert!(tests.iter().any(|l| l.contains(
+            "pm.expect(pm.response.json().data.state).to.be.oneOf([\"ACTIVE\",\"EXPIRED\"])"
+        )));
+        assert!(tests.iter().any(
+            |l| l.contains("pm.expect(pm.response.json().data.role).to.not.be.oneOf([\"banned\"])")
+        ));
         assert_eq!(doc["item"][1]["name"], "Read the profile");
         assert_eq!(
             doc["item"].as_array().unwrap().len(),

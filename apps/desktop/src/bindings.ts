@@ -938,20 +938,37 @@ export type Issue = {
 	message: string,
 };
 
-/**  With neither `equals` nor `exists`, checks the path matches something. */
+/**
+ *  With none of `equals`, `in`, `not_in` or `exists`, checks the path
+ *  matches something.
+ */
 export type JsonAssertion = JsonAssertion_Serialize | JsonAssertion_Deserialize;
 
-/**  With neither `equals` nor `exists`, checks the path matches something. */
+/**
+ *  With none of `equals`, `in`, `not_in` or `exists`, checks the path
+ *  matches something.
+ */
 export type JsonAssertion_Deserialize = {
 	path: string,
 	equals?: unknown | null,
+	/**  The match equals one of these values. */
+	in?: unknown[] | null,
+	/**  The match equals none of these values. */
+	not_in?: unknown[] | null,
 	exists?: boolean | null,
 };
 
-/**  With neither `equals` nor `exists`, checks the path matches something. */
+/**
+ *  With none of `equals`, `in`, `not_in` or `exists`, checks the path
+ *  matches something.
+ */
 export type JsonAssertion_Serialize = {
 	path: string,
 	equals?: unknown,
+	/**  The match equals one of these values. */
+	in?: unknown[],
+	/**  The match equals none of these values. */
+	not_in?: unknown[],
 	exists?: boolean,
 };
 

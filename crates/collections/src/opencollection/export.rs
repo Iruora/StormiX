@@ -358,6 +358,14 @@ fn request(step: &Step, name: &str, seq: usize, warnings: &mut Vec<String>) -> V
                 Some(expr) => match (&j.equals, j.exists) {
                     (Some(Value::String(s)), _) => assertions.push(assert(&expr, "eq", Some(literal(s)))),
                     (Some(v), _) => assertions.push(assert(&expr, "eq", Some(v.to_string()))),
+                    (None, _) if j.one_of.is_some() => {
+                        let list = Value::Array(j.one_of.clone().unwrap_or_default());
+                        assertions.push(assert(&expr, "in", Some(list.to_string())))
+                    }
+                    (None, _) if j.not_in.is_some() => {
+                        let list = Value::Array(j.not_in.clone().unwrap_or_default());
+                        assertions.push(assert(&expr, "notIn", Some(list.to_string())))
+                    }
                     (None, Some(false)) => assertions.push(assert(&expr, "isUndefined", None)),
                     (None, _) => assertions.push(assert(&expr, "isDefined", None)),
                 },

@@ -280,4 +280,36 @@ thresholds:
         let err = TestFile::from_yaml(&bad).unwrap_err().to_string();
         assert!(err.starts_with("flow.steps[1].request.method:"), "{err}");
     }
+
+    #[test]
+    fn json_assertions_take_in_and_not_in_lists() {
+        let text = r#"
+version: 1
+flow:
+  name: Lists
+  steps:
+    - name: status
+      request: { method: GET, url: "http://x/" }
+      assert:
+        - json:
+            path: $.status
+            in:
+              - ACTIVE
+              - EXPIRED
+        - json: { path: $.status, not_in: [BLOCKED] }
+"#;
+        let file = TestFile::from_yaml(text).unwrap();
+        let checks = &file.flow.steps[0].assertions;
+        let Assertion::Json(a) = &checks[0] else {
+            panic!()
+        };
+        assert_eq!(a.one_of, Some(vec!["ACTIVE".into(), "EXPIRED".into()]));
+        let Assertion::Json(b) = &checks[1] else {
+            panic!()
+        };
+        assert_eq!(b.not_in, Some(vec!["BLOCKED".into()]));
+        let yaml = file.to_yaml();
+        assert!(yaml.contains("in:\n"), "{yaml}");
+        assert_eq!(TestFile::from_yaml(&yaml).unwrap(), file);
+    }
 }

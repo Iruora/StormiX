@@ -259,9 +259,11 @@ Each entry sets a variable for the steps after it. A source that matches nothing
 | `json: { path: $.items }` | The JSONPath matches something |
 | `json: { path: $.items[0].id, equals: 7 }` | The match equals the value (any YAML value; `"7"` also matches the number 7) |
 | `json: { path: $.error, exists: false }` | The path matches nothing |
+| `json: { path: $.status, in: [ACTIVE, EXPIRED] }` | The match equals one of the values |
+| `json: { path: $.status, not_in: [BLOCKED, DELETED] }` | The match equals none of the values (a path that matches nothing fails) |
 | `body_contains: "ok"` | The body contains the text |
 
-Variables work in every value, such as `equals: "{{user}}"`. With no assertion on a step, a 4xx or 5xx status still counts as a failed request under load, but a functional run passes it.
+Variables work in every value, such as `equals: "{{user}}"` or `in: ["{{plan}}", free]`. With no assertion on a step, a 4xx or 5xx status still counts as a failed request under load, but a functional run passes it.
 
 ### `scripts`
 
