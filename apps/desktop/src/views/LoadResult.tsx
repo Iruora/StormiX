@@ -17,6 +17,7 @@ import { useMemo, useState } from "react";
 
 import type { DataUse, LoadProgress, LoadReport, Second, SlowRequest, StepResult, StepSummary, ThresholdResult } from "../bindings";
 import { describePick } from "../lib/data";
+import { unhealthyText } from "../lib/units";
 import { ProgressBar } from "./Busy";
 import { LimitResult, LiveLimitSteps } from "./Capacity";
 import { ApiResources, liveResources, reportResources, wentUnhealthy } from "./Resources";
@@ -533,6 +534,10 @@ function Threshold({ result }: { result: ThresholdResult }) {
       ? `${actual.toFixed(2)}%`
       : metric === "cpu"
         ? `${Math.round(actual)}%`
+        : metric === "memory"
+        ? `${Math.round(actual)} MB`
+        : metric === "unhealthy"
+        ? unhealthyText(actual)
         : metric === "rps"
         ? `${actual.toFixed(1)}/s`
         : formatMs(actual);

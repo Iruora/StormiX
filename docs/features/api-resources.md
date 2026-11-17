@@ -65,6 +65,19 @@ The results say **Healthy throughout**, or list each time the API went unhealthy
 
 If a read fails, for example with `401 Unauthorized`, `404 Not Found` or a timeout, the load test carries on. The results say how many reads failed and why the last one did.
 
+## Failing a test on them
+
+Thresholds can fail a load test, and a CI job, on what the API did, not only on what the clients saw:
+
+```yaml
+thresholds:
+  - cpu < 80%          # the API's average CPU over the test
+  - memory < 1GB       # the most memory the API used
+  - unhealthy <= 0s    # the API never went unhealthy; unhealthy < 10s allows a short blip
+```
+
+Each fails, with a note saying why, when no monitor read that figure, and `unhealthy` needs a health check. The time unhealthy is counted from the read that saw the API go down to the read that saw it back up, so it moves in steps of the monitor's `interval`. Under `find_limit`, each step is checked on its own, so the search stops at the first rate where the API used too much memory or went down. See [Thresholds](/reference/test-file#thresholds).
+
 ## Things to know
 
 - The figures are what the process reports about itself. A JVM's heap doesn't show a container's memory limit, and for a service with several replicas each endpoint is one instance. Add one `monitor` entry per instance that you want to watch.
