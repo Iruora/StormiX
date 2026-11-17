@@ -22,6 +22,8 @@ You don't need a run to get the command. Each step card in the **Flow** tab and 
 - which secrets the command holds, since their real values are in it;
 - that a pre-request script was not run, when the step has one, since what it changes is not in the command.
 
+<Shot name="curl-copied" alt="Copy as cURL on a Flow card, noting a token that has no value yet" />
+
 ## The Connection tab
 
 Every request records its route: the proxy it went through and where that setting came from, the address it connected to, the HTTP version and, without a proxy, the server's TLS certificate and issuer.

@@ -22,6 +22,8 @@ Each card has buttons to move the step up or down, **duplicate** it, **set it as
 - **All steps**, in the header, turns every step on, or, when they are all on, turns them all off. The header also counts how many steps will run.
 - **When a step fails**, in the header, is **Stop** by default: the steps after a failed one are skipped, in a run and in every load test iteration. **Keep going** runs them all (`on_failure: continue`). With Stop, the double-arrow button on a card lets that one step fail without stopping the run (`continue_on_failure: true`). See [When a step fails](/reference/test-file#when-a-step-fails).
 
+<Shot name="flow-stopped" alt="A run that stopped at a failed Log in step, the three steps after it skipped" />
+
 <Shot name="flow-warning" alt="A warning after moving a step before the one that sets its variable" />
 
 ## Parallel branches

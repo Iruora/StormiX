@@ -12,9 +12,13 @@ Stormix can ask the AI command line you already use, **Claude Code** or **GitHub
 
 In a step's **Details**, **Explain** (on the Failure tab, or the Explain tab) asks why the step failed. The AI sees the step as written in the test file, the request and response, failed checks, script logs, the connection, and the **Diagnose** result when you ran it. It answers with the most likely cause, the evidence and what to try next.
 
+<Shot name="ai-explain-step" alt="Claude Code explaining why a step got 401 Unauthorized, with the token hidden" />
+
 ## Explain a load test
 
 **Explain** at the top of a load test's results asks what the figures say: the summary, thresholds, each step's latency and errors, the timeline (thinned to about 40 seconds), the most common failures with the first failing response of each step, and the slowest traced requests. When they are in the result, it also gets the API's CPU, memory and health read by a [monitor](/features/api-resources), each rate step of a **Find the limit** run with the pods it works out, how the test data was used, and whether the test was stopped by hand.
+
+<Shot name="ai-explain-load" alt="An explanation at the top of a load test's results" />
 
 ## What is sent, and what is not
 

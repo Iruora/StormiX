@@ -14,6 +14,14 @@ const tabs = [
     link: '/app/flow',
   },
   {
+    id: 'branches',
+    label: 'Branches',
+    title: 'Run steps side by side, then join',
+    text: 'Steps that wait for the same step run at the same time and join where a step waits for all of them. A failed step stops only its branch, and by default a flow stops at its first failure instead of sending the next requests without their token.',
+    shot: 'flow-branches',
+    link: '/app/flow#parallel-branches',
+  },
+  {
     id: 'load',
     label: 'Load tests',
     title: 'Pick the endpoints, set the load, watch it live',
@@ -44,6 +52,14 @@ const tabs = [
     text: 'Diagnose sends a failed request again and checks each stage: proxy, DNS, connection, TLS certificate and response, then tells you whether the API, a firewall, a CDN or a corporate proxy answered.',
     shot: 'diagnose',
     link: '/app/debugging',
+  },
+  {
+    id: 'ai',
+    label: 'Explain',
+    title: 'Ask your own AI why it failed',
+    text: 'Explain sends a failed step or a load test result to Claude Code or GitHub Copilot CLI on your computer, with secrets and tokens hidden first, and shows the likely cause and what to try next.',
+    shot: 'ai-explain-step',
+    link: '/features/ai',
   },
   {
     id: 'env',
