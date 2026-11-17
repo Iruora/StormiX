@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.12.0 (2026-11-17)
+
+**Changes what existing files do:** a flow now stops at its first failed step. Add `on_failure: continue` to a file to keep running every step, as before. See [When a step fails](TEST_FILE.md#when-a-step-fails).
 
 ### Run steps in parallel branches
 
