@@ -346,7 +346,7 @@ pub async fn run_load(
     // Dynatrace's last read can land past the end: memory and health count
     // to the end, CPU keeps that read as it did before.
     let api = ApiReadings {
-        memory_mib: capacity::peak_memory(&resources, 0.0, elapsed.as_secs_f64())
+        memory_mib: capacity::run_peak_memory(&resources, elapsed.as_secs_f64())
             .map(|b| b / 1_048_576.0),
         unhealthy_s: capacity::unhealthy_seconds(&resources, 0.0, elapsed.as_secs_f64()),
         ..api_readings(&resources, 0.0, f64::INFINITY)

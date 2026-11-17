@@ -310,6 +310,25 @@ pub(crate) fn peak_memory(resources: &[ResourceSeries], start_s: f64, end_s: f64
         .reduce(f64::max)
 }
 
+/// The most memory any API used during a run that ended at `end_s`.
+/// Dynatrace stamps a minute still open when it is read at the read's time,
+/// and the read after the end replaces the series, so a minute that began
+/// before the end counts even when its stamp lands after it. Other monitors
+/// count up to the end.
+pub(crate) fn run_peak_memory(resources: &[ResourceSeries], end_s: f64) -> Option<f64> {
+    resources
+        .iter()
+        .filter_map(|series| {
+            let end = if series.format == "dynatrace" {
+                end_s + 60.0
+            } else {
+                end_s
+            };
+            peak_memory(std::slice::from_ref(series), 0.0, end)
+        })
+        .reduce(f64::max)
+}
+
 /// How long, in seconds from `start_s` to `end_s`, the least healthy API
 /// said it was not healthy. An unhealthy state still standing at the end
 /// counts until `end_s`. None when no monitor read a health check.
@@ -542,5 +561,42 @@ mod tests {
             ..all[0].clone()
         };
         assert_eq!(unhealthy_seconds(&[unread], 0.0, 12.0), None);
+    }
+
+    #[test]
+    fn a_dynatrace_minute_open_at_the_end_counts_for_the_run() {
+        use crate::monitor::ResourceSample;
+        let mem = |t, mb: f64| ResourceSample {
+            t,
+            memory_bytes: Some(mb * 1_048_576.0),
+            ..Default::default()
+        };
+        let series = |format: &str| ResourceSeries {
+            name: "api".into(),
+            url: "http://api".into(),
+            format: format.into(),
+            cpu_cores: None,
+            heap_max_bytes: None,
+            memory_kind: None,
+            // The run ended at 20 s; the read at 21 s replaced the open
+            // minute's 700 MiB, first seen at 10 s, with its stamp at 21 s.
+            samples: vec![mem(0.0, 300.0), mem(21.0, 700.0)],
+            failed_reads: 0,
+            error: None,
+            health_url: None,
+            health: Vec::new(),
+            health_error: None,
+            failing: false,
+        };
+        let mib = |b: Option<f64>| b.map(|b| b / 1_048_576.0);
+        assert_eq!(
+            mib(run_peak_memory(&[series("dynatrace")], 20.0)),
+            Some(700.0)
+        );
+        // A scrape after the end is not the run's.
+        assert_eq!(
+            mib(run_peak_memory(&[series("prometheus")], 20.0)),
+            Some(300.0)
+        );
     }
 }
