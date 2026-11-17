@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import type { Capacity, LimitSearch, LimitStep } from "../bindings";
 import { capacityInput, sizePods, type CapacityInput } from "../lib/sizing";
+import { unhealthyText } from "../lib/units";
 
 const input =
   "rounded-md border border-line bg-surface px-2 py-1 text-[0.8125rem] outline-none focus:border-accent";
@@ -112,7 +113,7 @@ function measuredText(threshold: string, actual: number): string {
   if (metric === "errors" || metric === "checks") return `${actual.toFixed(2)}%`;
   if (metric === "cpu") return `${Math.round(actual)}%`;
   if (metric === "memory") return `${Math.round(actual)} MB`;
-  if (metric === "unhealthy") return `${actual > 0 && actual < 10 ? actual.toFixed(1) : Math.round(actual)} s`;
+  if (metric === "unhealthy") return unhealthyText(actual);
   if (metric === "rps") return `${actual.toFixed(1)}/s`;
   return formatMs(actual);
 }

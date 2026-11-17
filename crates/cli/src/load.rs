@@ -869,10 +869,14 @@ fn bytes(value: f64) -> String {
     }
 }
 
-/// Time unhealthy: tenths below 10 s, so a short outage that broke
-/// `unhealthy <= 0s` does not read as `0 s`.
+/// Time unhealthy, so a short outage that broke `unhealthy <= 0s` never
+/// reads as `0 s`: milliseconds below 1 s, tenths below 10 s.
 fn seconds(s: f64) -> String {
-    if s > 0.0 && s < 10.0 {
+    if s <= 0.0 {
+        "0 s".into()
+    } else if s < 1.0 {
+        format!("{:.0} ms", (s * 1000.0).max(1.0))
+    } else if s < 10.0 {
         format!("{s:.1} s")
     } else {
         format!("{s:.0} s")
@@ -966,7 +970,10 @@ mod tests {
             note: None,
         };
         assert_eq!(measured(&result(0.0)), "0 s");
-        assert_eq!(measured(&result(0.4)), "0.4 s");
+        assert_eq!(measured(&result(0.4)), "400 ms");
+        assert_eq!(measured(&result(0.04)), "40 ms");
+        assert_eq!(measured(&result(0.0001)), "1 ms");
+        assert_eq!(measured(&result(1.25)), "1.2 s");
         assert_eq!(measured(&result(6.0)), "6.0 s");
         assert_eq!(measured(&result(42.3)), "42 s");
     }
