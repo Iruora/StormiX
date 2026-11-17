@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value};
 use stormix_flow::{Assertion, Body, ExtractSource, GraphqlBody, Header, Method, Step, TestFile};
 
 use super::VERSION;
-use crate::common::js_string;
+use crate::common::{js_string, membership_js};
 use crate::environment::Environment;
 
 /// A collection ready to write: each file's path inside the collection
@@ -358,6 +358,19 @@ fn request(step: &Step, name: &str, seq: usize, warnings: &mut Vec<String>) -> V
                 Some(expr) => match (&j.equals, j.exists) {
                     (Some(Value::String(s)), _) => assertions.push(assert(&expr, "eq", Some(literal(s)))),
                     (Some(v), _) => assertions.push(assert(&expr, "eq", Some(v.to_string()))),
+                    (None, _) if j.one_of.is_some() || j.not_in.is_some() => {
+                        let (negate, list, verb) = match (&j.one_of, &j.not_in) {
+                            (Some(l), _) => (false, l, "is one of"),
+                            (None, Some(l)) => (true, l, "is not one of"),
+                            (None, None) => unreachable!(),
+                        };
+                        let items: Vec<String> = list.iter().map(bru_value).collect();
+                        tests.push(format!(
+                            "test({}, function () {{\n  {}\n}});",
+                            js_string(&format!("{} {verb} {}", j.path, Value::Array(list.clone()))),
+                            membership_js("expect", &expr, &format!("[{}]", items.join(", ")), negate)
+                        ))
+                    }
                     (None, Some(false)) => assertions.push(assert(&expr, "isUndefined", None)),
                     (None, _) => assertions.push(assert(&expr, "isDefined", None)),
                 },
@@ -597,6 +610,20 @@ fn assert(expr: &str, op: &str, value: Option<String>) -> Value {
     Value::Object(a)
 }
 
+/// A list item as JavaScript for a Bruno test script, with `{{var}}`
+/// filled in by Bruno at run time.
+fn bru_value(value: &Value) -> String {
+    let text = value.to_string();
+    let fill = |js: String| {
+        format!("(typeof bru.interpolate === \"function\" ? bru.interpolate({js}) : {js})")
+    };
+    match value {
+        Value::String(s) if s.contains("{{") => fill(js_string(s)),
+        _ if text.contains("{{") => format!("JSON.parse({})", fill(js_string(&text))),
+        _ => text,
+    }
+}
+
 /// Bruno reads an assertion value as a number, boolean or JSON when it
 /// looks like one, so text that does is quoted to stay text.
 fn literal(text: &str) -> String {
@@ -751,6 +778,39 @@ mod tests {
         }
         assert!(with_helpers("x()").eq("x()"));
         assert!(with_helpers("__bruAssert(1, \"eq\", \"1\")").starts_with("// Stormix's helper"));
+    }
+
+    #[test]
+    fn list_checks_become_test_scripts() {
+        let test = TestFile::from_yaml(
+            r#"
+version: 1
+flow:
+  name: Lists
+  steps:
+    - name: status
+      request: { method: GET, url: "http://x/" }
+      assert:
+        - json: { path: $.status, in: ["a,b", "{{plan}}"] }
+        - json: { path: $.status, not_in: [BLOCKED] }
+"#,
+        )
+        .unwrap();
+        let (bundle, _) = to_bundle(&test, &[]);
+        assert!(
+            bundle.contains("const actual = res.body.status;"),
+            "{bundle}"
+        );
+        assert!(
+            bundle.contains(r#"bru.interpolate("{{plan}}")"#),
+            "{bundle}"
+        );
+        assert!(bundle.contains(r#"const list = ["a,b", "#), "{bundle}");
+        assert!(bundle.contains(".to.equal(false);"), "{bundle}");
+        assert!(
+            !bundle.contains("notIn\""),
+            "no comma-splitting operator: {bundle}"
+        );
     }
 
     #[test]

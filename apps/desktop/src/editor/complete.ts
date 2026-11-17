@@ -139,7 +139,7 @@ const KEYS: Record<string, Key[]> = {
     { label: "status", info: "The status code is exactly this", value: "200" },
     { label: "max_duration_ms", info: "The full response arrived within this many ms", value: "500" },
     { label: "header", info: "{ name, equals | contains }" },
-    { label: "json", info: "{ path, equals | exists }" },
+    { label: "json", info: "{ path, equals | in | not_in | exists }" },
     { label: "body_contains", info: "The body contains this text" },
   ],
   "flow/steps/[]/assert/[]/header": [
@@ -150,6 +150,8 @@ const KEYS: Record<string, Key[]> = {
   "flow/steps/[]/assert/[]/json": [
     { label: "path", info: "A JSONPath; alone, checks it matches something" },
     { label: "equals", info: "Any YAML value" },
+    { label: "in", info: "A list: the value is one of these" },
+    { label: "not_in", info: "A list: the value is none of these" },
     { label: "exists", info: "false: the path matches nothing", value: "false" },
   ],
   "flow/steps/[]/scripts": [

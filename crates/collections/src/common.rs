@@ -149,6 +149,35 @@ pub fn js_string(s: &str) -> String {
     serde_json::Value::from(s).to_string()
 }
 
+/// The body of a test that `actual` is (or, with `negate`, is not) one of
+/// the items of the JavaScript array `list`, compared the way Stormix
+/// compares: deeply and exactly for objects and arrays, and a string item
+/// matches a number or boolean with the same JSON text (at the top level
+/// only, like the engine). A missing value fails.
+/// `expect` is the assertion function, `pm.expect` or Bruno's `expect`.
+pub fn membership_js(expect: &str, actual: &str, list: &str, negate: bool) -> String {
+    format!(
+        r#"const actual = {actual};
+  const list = {list};
+  const deep = (a, b) => {{
+    if (a === b) return true;
+    if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    const ka = Object.keys(a);
+    return ka.length === Object.keys(b).length && ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && deep(a[k], b[k]));
+  }};
+  const same = (a, b) => {{
+    if (typeof b === "string" && (typeof a === "number" || typeof a === "boolean")) {{
+      try {{ return JSON.parse(b) === a; }} catch (e) {{ return false; }}
+    }}
+    return deep(a, b);
+  }};
+  {expect}(actual, "no match").to.not.be.undefined;
+  {expect}(list.some((v) => same(actual, v)), "got " + JSON.stringify(actual)).to.equal({});"#,
+        !negate
+    )
+}
+
 /// Replaces `:name` path segments, the way Postman and Bruno path
 /// variables work. The query string is left alone.
 pub fn path_variables(url: &str, vars: &[(String, String)]) -> String {
@@ -233,5 +262,63 @@ mod tests {
             join_scripts(vec!["const x = 1;".into(), "const x = 2;".into()]).as_deref(),
             Some("await (async function () {\nconst x = 1;\n})();\nawait (async function () {\nconst x = 2;\n})();")
         );
+    }
+}
+
+#[cfg(test)]
+mod membership_tests {
+    use super::membership_js;
+
+    /// Runs the exported check in QuickJS with a tiny `expect`, and says
+    /// whether it passed.
+    fn passes(actual: &str, list: &str, negate: bool) -> bool {
+        let code = format!(
+            r#"const expect = (v, msg) => ({{
+                to: {{
+                    equal: (w) => {{ if (v !== w) throw new Error(msg); }},
+                    not: {{ be: {{ get undefined() {{ if (v === undefined) throw new Error(msg); return true; }} }} }},
+                }},
+            }});
+            (function () {{ try {{ {} return true; }} catch (e) {{ return false; }} }})()"#,
+            membership_js("expect", actual, list, negate)
+        );
+        let rt = rquickjs::Runtime::new().unwrap();
+        let ctx = rquickjs::Context::full(&rt).unwrap();
+        ctx.with(|ctx| ctx.eval::<bool, _>(code).unwrap())
+    }
+
+    #[test]
+    fn compares_like_the_engine() {
+        // A string item matches a number or boolean with the same text...
+        assert!(passes("7", r#"["7", 8]"#, false));
+        assert!(!passes("7", r#"["7"]"#, true));
+        assert!(passes("true", r#"["true"]"#, false));
+        // ...but only at the top level: nested fields compare exactly.
+        assert!(!passes(r#"({"id": 7})"#, r#"[{"id": "7"}]"#, false));
+        assert!(passes(r#"({"id": 7})"#, r#"[{"id": "7"}]"#, true));
+        // Objects and arrays compare deeply.
+        assert!(passes(
+            r#"({"id": 1, "tags": [1, 2]})"#,
+            r#"[{"tags": [1, 2], "id": 1}]"#,
+            false
+        ));
+        assert!(!passes(
+            r#"({"id": 1, "tags": [1, 2]})"#,
+            r#"[{"id": 1, "tags": [1, 2]}]"#,
+            true
+        ));
+        assert!(passes("[1, 2]", "[[1, 2]]", false));
+        assert!(!passes("[1, 2]", "[[1, 2]]", true));
+        assert!(!passes("[1, 2]", "[[2, 1]]", false));
+        assert!(passes("[1, 2]", "[[2, 1]]", true));
+        // Items stay whole.
+        assert!(passes(r#""a,b""#, r#"["a,b"]"#, false));
+        assert!(!passes(r#""a""#, r#"["a,b"]"#, false));
+        // A missing value fails both ways; null is a value.
+        assert!(!passes("undefined", r#"["a"]"#, false));
+        assert!(!passes("undefined", r#"["a"]"#, true));
+        assert!(passes("null", "[null]", false));
+        assert!(!passes("null", "[null]", true));
+        assert!(passes("null", r#"["null"]"#, true));
     }
 }

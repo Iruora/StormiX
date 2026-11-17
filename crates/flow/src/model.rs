@@ -256,7 +256,8 @@ pub struct HeaderAssertion {
     pub contains: Option<String>,
 }
 
-/// With neither `equals` nor `exists`, checks the path matches something.
+/// With none of `equals`, `in`, `not_in` or `exists`, checks the path
+/// matches something.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(deny_unknown_fields)]
@@ -265,6 +266,14 @@ pub struct JsonAssertion {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "specta", specta(type = Option<specta_typescript::Unknown>))]
     pub equals: Option<serde_json::Value>,
+    /// The match equals one of these values.
+    #[serde(rename = "in", default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "specta", specta(type = Option<Vec<specta_typescript::Unknown>>))]
+    pub one_of: Option<Vec<serde_json::Value>>,
+    /// The match equals none of these values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "specta", specta(type = Option<Vec<specta_typescript::Unknown>>))]
+    pub not_in: Option<Vec<serde_json::Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exists: Option<bool>,
 }

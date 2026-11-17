@@ -109,6 +109,30 @@ pub(crate) fn assert(assertion: &Assertion, res: &Response<'_>, vars: &Variables
                     Ok(None) => failed(name, "no match".into()),
                     Err(why) => failed(name, why),
                 }
+            } else if let Some(allowed) = &j.one_of {
+                let allowed = render_list(allowed, vars);
+                let name = format!("{} is one of {}", j.path, list_text(&allowed));
+                match found {
+                    Ok(Some(actual)) => {
+                        outcome(name, allowed.iter().any(|v| json_equals(actual, v)), || {
+                            format!("got {actual}")
+                        })
+                    }
+                    Ok(None) => failed(name, "no match".into()),
+                    Err(why) => failed(name, why),
+                }
+            } else if let Some(denied) = &j.not_in {
+                let denied = render_list(denied, vars);
+                let name = format!("{} is not one of {}", j.path, list_text(&denied));
+                match found {
+                    Ok(Some(actual)) => {
+                        outcome(name, !denied.iter().any(|v| json_equals(actual, v)), || {
+                            format!("got {actual}")
+                        })
+                    }
+                    Ok(None) => failed(name, "no match".into()),
+                    Err(why) => failed(name, why),
+                }
             } else if j.exists == Some(false) {
                 let name = format!("{} does not exist", j.path);
                 match found {
@@ -192,6 +216,19 @@ fn json_equals(actual: &Value, expected: &Value) -> bool {
         }
         _ => actual == expected,
     }
+}
+
+fn render_list(values: &[Value], vars: &Variables) -> Vec<Value> {
+    values
+        .iter()
+        .map(|v| vars.render_json(v, &mut Vec::new()))
+        .collect()
+}
+
+/// Values as `[a, b]`, strings unquoted so the check name reads naturally.
+fn list_text(values: &[Value]) -> String {
+    let items: Vec<String> = values.iter().map(text_of).collect();
+    format!("[{}]", items.join(", "))
 }
 
 fn describe_header(actual: Option<&str>) -> String {
@@ -284,8 +321,45 @@ mod tests {
         Assertion::Json(JsonAssertion {
             path: path.into(),
             equals,
+            one_of: None,
+            not_in: None,
             exists,
         })
+    }
+
+    fn json_list(path: &str, one_of: Option<Value>, not_in: Option<Value>) -> Assertion {
+        let list = |v: Value| v.as_array().cloned().unwrap();
+        Assertion::Json(JsonAssertion {
+            path: path.into(),
+            equals: None,
+            one_of: one_of.map(list),
+            not_in: not_in.map(list),
+            exists: None,
+        })
+    }
+
+    #[test]
+    fn json_in_and_not_in_lists() {
+        let check = run(json_list("$.user", Some(json!(["admin", "{{who}}"])), None));
+        assert!(check.passed);
+        assert_eq!(check.name, "$.user is one of [admin, demo]");
+        assert!(run(json_list("$.id", Some(json!([6, "7"])), None)).passed);
+        let check = run(json_list(
+            "$.user",
+            Some(json!(["ACTIVE", "EXPIRED"])),
+            None,
+        ));
+        assert_eq!(check.message.as_deref(), Some("got \"demo\""));
+        assert_eq!(
+            run(json_list("$.missing", Some(json!(["x"])), None))
+                .message
+                .as_deref(),
+            Some("no match")
+        );
+        let check = run(json_list("$.user", None, Some(json!(["admin", "root"]))));
+        assert!(check.passed);
+        assert_eq!(check.name, "$.user is not one of [admin, root]");
+        assert!(!run(json_list("$.id", None, Some(json!([7])))).passed);
     }
 
     #[test]

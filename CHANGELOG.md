@@ -2,7 +2,14 @@
 
 ## Unreleased
 
-- **Fail a load test on the API's memory and health.** Two new thresholds read the API's [`monitor`](docs/TEST_FILE.md#monitor), beside `cpu`: `memory < 1GB` holds the most memory the API used to a limit, and `unhealthy <= 0s` (or `unhealthy < 10s`) fails the test when the API's health check said it was down. Under `find_limit` they stop the search at the first step that breaks them. See [Thresholds](docs/TEST_FILE.md#thresholds).
+### Check a value against a list
+
+- **`in:` on a `json` assertion** passes when the value is one of a list, like `in: [ACTIVE, EXPIRED]`, and **`not_in:`** when it is none of them. Variables work in each item, and `"7"` matches the number 7 as with `equals`. See [`assert`](docs/TEST_FILE.md#assert).
+- The YAML editor suggests both, and exports to Postman and Bruno carry them over as test scripts that compare the same way.
+
+### Fail a load test on the API's memory and health
+
+- **Two new thresholds** read the API's [`monitor`](docs/TEST_FILE.md#monitor), beside `cpu`: `memory < 1GB` holds the most memory the API used to a limit, and `unhealthy <= 0s` (or `unhealthy < 10s`) fails the test when the API's health check said it was down. Under `find_limit` they stop the search at the first step that breaks them. See [Thresholds](docs/TEST_FILE.md#thresholds).
 - **Fixed** two links in the 1.12.0 notes that led nowhere on GitHub.
 
 ## 1.12.0 (2026-11-17)
