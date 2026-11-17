@@ -869,6 +869,16 @@ fn bytes(value: f64) -> String {
     }
 }
 
+/// Time unhealthy: tenths below 10 s, so a short outage that broke
+/// `unhealthy <= 0s` does not read as `0 s`.
+fn seconds(s: f64) -> String {
+    if s > 0.0 && s < 10.0 {
+        format!("{s:.1} s")
+    } else {
+        format!("{s:.0} s")
+    }
+}
+
 /// The measured value in the threshold's own unit.
 fn measured(t: &stormix_metrics::ThresholdResult) -> String {
     let metric = t
@@ -883,7 +893,7 @@ fn measured(t: &stormix_metrics::ThresholdResult) -> String {
         "errors" | "checks" => format!("{:.2}%", t.actual),
         "cpu" => format!("{:.0}%", t.actual),
         "memory" => format!("{:.0} MB", t.actual),
-        "unhealthy" => format!("{:.0} s", t.actual),
+        "unhealthy" => seconds(t.actual),
         "rps" => format!("{:.1}/s", t.actual),
         _ => ms(t.actual),
     }
@@ -945,6 +955,20 @@ mod tests {
             thresholds: Vec::new(),
             monitors: Vec::new(),
         }
+    }
+
+    #[test]
+    fn unhealthy_time_keeps_short_outages_visible() {
+        let result = |actual| stormix_metrics::ThresholdResult {
+            threshold: "unhealthy <= 0s".into(),
+            actual,
+            passed: actual <= 0.0,
+            note: None,
+        };
+        assert_eq!(measured(&result(0.0)), "0 s");
+        assert_eq!(measured(&result(0.4)), "0.4 s");
+        assert_eq!(measured(&result(6.0)), "6.0 s");
+        assert_eq!(measured(&result(42.3)), "42 s");
     }
 
     #[test]

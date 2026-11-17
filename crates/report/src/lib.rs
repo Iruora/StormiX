@@ -332,6 +332,7 @@ fn threshold_html(out: &mut String, t: &ThresholdResult) {
         ("errors" | "checks", _) => format!("{:.2}%", t.actual),
         ("cpu", _) => format!("{:.0}%", t.actual),
         ("memory", _) => format!("{:.0} MB", t.actual),
+        ("unhealthy", _) if t.actual > 0.0 && t.actual < 10.0 => format!("{:.1} s", t.actual),
         ("unhealthy", _) => format!("{:.0} s", t.actual),
         ("rps", _) => format!("{:.1}/s", t.actual),
         _ => ms(t.actual),

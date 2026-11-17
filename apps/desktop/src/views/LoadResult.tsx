@@ -536,7 +536,7 @@ function Threshold({ result }: { result: ThresholdResult }) {
         : metric === "memory"
         ? `${Math.round(actual)} MB`
         : metric === "unhealthy"
-        ? `${Math.round(actual)} s`
+        ? `${actual > 0 && actual < 10 ? actual.toFixed(1) : Math.round(actual)} s`
         : metric === "rps"
         ? `${actual.toFixed(1)}/s`
         : formatMs(actual);

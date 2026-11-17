@@ -295,6 +295,7 @@ pub async fn run_load(
                     // A result that arrives after a step's end belongs to
                     // the next step, even when the tick that closes the step
                     // has not been handled yet: close it first.
+                    drain(&mut monitor_rx, &mut resources);
                     if limit.close_due(started.elapsed(), &resources) {
                         halt.stop();
                     }
@@ -306,6 +307,7 @@ pub async fn run_load(
             _ = tick.tick() => {
                 let elapsed = started.elapsed();
                 if let Some(limit) = &mut limit {
+                    drain(&mut monitor_rx, &mut resources);
                     if limit.close_due(elapsed, &resources) {
                         halt.stop();
                     }
@@ -331,9 +333,7 @@ pub async fn run_load(
         let last = async { while finals.join_next().await.is_some() {} };
         let _ = tokio::time::timeout(Duration::from_secs(11), last).await;
     }
-    while let Ok(update) = monitor_rx.try_recv() {
-        resources[update.index].apply(update);
-    }
+    drain(&mut monitor_rx, &mut resources);
     while let Ok(result) = rx.try_recv() {
         record(&mut recorder, &mut samples, &mut slowest, result);
     }
@@ -343,8 +343,11 @@ pub async fn run_load(
     recorder.interrupted(outcome.interrupted);
 
     let summary = recorder.summary(elapsed);
-    // Dynatrace's last read can land past the end; health counts to it.
+    // Dynatrace's last read can land past the end: memory and health count
+    // to the end, CPU keeps that read as it did before.
     let api = ApiReadings {
+        memory_mib: capacity::peak_memory(&resources, 0.0, elapsed.as_secs_f64())
+            .map(|b| b / 1_048_576.0),
         unhealthy_s: capacity::unhealthy_seconds(&resources, 0.0, elapsed.as_secs_f64()),
         ..api_readings(&resources, 0.0, f64::INFINITY)
     };
@@ -894,6 +897,14 @@ impl Schedule {
             start += len;
         }
         total
+    }
+}
+
+/// Applies the monitor reads already queued, so a step that closes now
+/// sees every reading taken before its end, whichever `select!` branch won.
+fn drain(rx: &mut mpsc::UnboundedReceiver<monitor::Update>, resources: &mut [ResourceSeries]) {
+    while let Ok(update) = rx.try_recv() {
+        resources[update.index].apply(update);
     }
 }
 
