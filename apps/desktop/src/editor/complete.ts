@@ -203,7 +203,7 @@ const VALUES: Record<string, string[]> = {
   version: ["1"],
 };
 
-const THRESHOLDS = ["p95 < 300ms", "p99 < 1s", "avg < 100ms", "errors < 1%", "checks > 99%", "rps > 100", "cpu < 80%"];
+const THRESHOLDS = ["p95 < 300ms", "p99 < 1s", "avg < 100ms", "errors < 1%", "checks > 99%", "rps > 100", "cpu < 80%", "memory < 1GB", "unhealthy <= 0s"];
 
 const DYNAMIC = ["$guid", "$randomUUID", "$timestamp", "$timestampMs", "$randomInt"];
 

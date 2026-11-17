@@ -131,7 +131,7 @@ fn checks_thresholds() {
     .iter()
     .map(|t| t.parse().unwrap())
     .collect();
-    let results = check_thresholds(&thresholds, &s, &r, None);
+    let results = check_thresholds(&thresholds, &s, &r, ApiReadings::default());
     let verdicts: Vec<_> = results
         .iter()
         .map(|r| (r.threshold.as_str(), r.passed))
@@ -147,6 +147,35 @@ fn checks_thresholds() {
         ]
     );
     assert!((results[2].actual - 100.0 / 101.0).abs() < 1e-9);
+}
+
+#[test]
+fn api_thresholds_read_the_monitor_or_fail_with_a_note() {
+    let r = Recorder::new();
+    let s = r.summary(Duration::from_secs(1));
+    let thresholds: Vec<Threshold> = ["cpu < 80%", "memory < 512MB", "unhealthy <= 0s"]
+        .iter()
+        .map(|t| t.parse().unwrap())
+        .collect();
+    let read = ApiReadings {
+        cpu: Some(50.0),
+        memory_mib: Some(600.0),
+        unhealthy_s: Some(0.0),
+    };
+    let results = check_thresholds(&thresholds, &s, &r, read);
+    let verdicts: Vec<_> = results.iter().map(|r| (r.actual, r.passed)).collect();
+    assert_eq!(verdicts, [(50.0, true), (600.0, false), (0.0, true)]);
+
+    let none = check_thresholds(&thresholds, &s, &r, ApiReadings::default());
+    assert!(none.iter().all(|r| !r.passed));
+    assert_eq!(
+        none[1].note.as_deref(),
+        Some("the API's memory was not read; add a monitor")
+    );
+    assert_eq!(
+        none[2].note.as_deref(),
+        Some("the API's health was not read; add a monitor with a health check")
+    );
 }
 
 #[test]

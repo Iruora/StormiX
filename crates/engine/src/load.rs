@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use stormix_flow::{Capacity, Flow, LoadProfile, Metric, Monitor, Per, Threshold};
-use stormix_metrics::{check_thresholds, Recorder, Sample, Second, Summary, ThresholdResult};
+use stormix_metrics::{
+    check_thresholds, ApiReadings, Recorder, Sample, Second, Summary, ThresholdResult,
+};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 
@@ -293,6 +295,7 @@ pub async fn run_load(
                     // A result that arrives after a step's end belongs to
                     // the next step, even when the tick that closes the step
                     // has not been handled yet: close it first.
+                    drain(&mut monitor_rx, &mut resources);
                     if limit.close_due(started.elapsed(), &resources) {
                         halt.stop();
                     }
@@ -304,6 +307,7 @@ pub async fn run_load(
             _ = tick.tick() => {
                 let elapsed = started.elapsed();
                 if let Some(limit) = &mut limit {
+                    drain(&mut monitor_rx, &mut resources);
                     if limit.close_due(elapsed, &resources) {
                         halt.stop();
                     }
@@ -320,6 +324,14 @@ pub async fn run_load(
     let elapsed = started.elapsed();
     forward.abort();
     monitors.abort_all();
+    // The memory peak seen during the run, before Dynatrace's last read
+    // replaces its series (and with it the values read for a minute that
+    // was still open).
+    drain(&mut monitor_rx, &mut resources);
+    let in_run_memory = capacity::peak_memory(&resources, 0.0, elapsed.as_secs_f64());
+    // A find_limit step still open closes on what was read during the run,
+    // like the steps closed before it.
+    let in_run = limit.is_some().then(|| resources.clone());
     // Dynatrace reads once more for the minutes the test ended in, unless
     // the test was stopped. A read gives up within 10 s.
     if stop.is_stopped() {
@@ -329,9 +341,7 @@ pub async fn run_load(
         let last = async { while finals.join_next().await.is_some() {} };
         let _ = tokio::time::timeout(Duration::from_secs(11), last).await;
     }
-    while let Ok(update) = monitor_rx.try_recv() {
-        resources[update.index].apply(update);
-    }
+    drain(&mut monitor_rx, &mut resources);
     while let Ok(result) = rx.try_recv() {
         record(&mut recorder, &mut samples, &mut slowest, result);
     }
@@ -341,12 +351,19 @@ pub async fn run_load(
     recorder.interrupted(outcome.interrupted);
 
     let summary = recorder.summary(elapsed);
-    let api_cpu = capacity::average_cpu(&resources, 0.0, f64::INFINITY);
-    let mut checked = check_thresholds(thresholds, &summary, &recorder, api_cpu);
+    // Dynatrace's last read can land past the end: memory and health count
+    // only to the end, CPU keeps that read as it did before.
+    let api = ApiReadings {
+        memory_mib: capacity::run_peak_memory(in_run_memory, &resources, elapsed.as_secs_f64())
+            .map(|b| b / 1_048_576.0),
+        unhealthy_s: capacity::unhealthy_seconds(&resources, 0.0, elapsed.as_secs_f64()),
+        ..api_readings(&resources, 0.0, f64::INFINITY)
+    };
+    let mut checked = check_thresholds(thresholds, &summary, &recorder, api);
     // A stop the user made; a found limit ends the test as planned.
     let aborted = outcome.aborted && stop.is_stopped();
     let limit = limit.map(|tracker| {
-        let mut search = tracker.finish(elapsed, aborted, &resources);
+        let mut search = tracker.finish(elapsed, aborted, in_run.as_deref().unwrap_or(&resources));
         if let Some(step) = search
             .sustained
             .or(search.steps.first().map(|_| 0))
@@ -356,7 +373,7 @@ pub async fn run_load(
             // the test's, since every later one was meant to break.
             checked = step.thresholds.clone();
             checked.extend(
-                check_thresholds(thresholds, &summary, &recorder, api_cpu)
+                check_thresholds(thresholds, &summary, &recorder, api)
                     .into_iter()
                     .zip(thresholds)
                     .filter(|(_, t)| t.metric == Metric::Throughput)
@@ -452,19 +469,27 @@ impl<'a> LimitTracker<'a> {
         let (start_s, end_s) = (start.as_secs_f64(), end.as_secs_f64());
         let api_cpu = capacity::average_cpu(resources, start_s, end_s);
         let api_memory_bytes = capacity::average_memory(resources, start_s, end_s);
-        let mut thresholds = check_thresholds(&self.thresholds, &summary, &window, api_cpu);
+        let api = api_readings(resources, start_s, end_s);
+        let mut thresholds = check_thresholds(&self.thresholds, &summary, &window, api);
         // Monitors read every few seconds (Dynatrace once a minute), so a
-        // step can end without a CPU reading: that decides nothing, as long
-        // as some reading came in. Without any, the threshold fails.
-        let cpu_read = resources
-            .iter()
-            .any(|r| r.samples.iter().any(|s| s.cpu_percent.is_some()));
-        if api_cpu.is_none() && cpu_read {
-            for (result, t) in thresholds.iter_mut().zip(&self.thresholds) {
-                if t.metric == Metric::ApiCpu && !partial {
-                    result.passed = true;
-                    result.note = Some("no CPU reading during this step".into());
-                }
+        // step can end without a CPU or memory reading: that decides
+        // nothing, as long as some reading came in. Without any, the
+        // threshold fails.
+        let read = |f: fn(&monitor::ResourceSample) -> Option<f64>| {
+            resources
+                .iter()
+                .any(|r| r.samples.iter().any(|s| f(s).is_some()))
+        };
+        let undecided = |metric: Metric| match metric {
+            Metric::ApiCpu => api.cpu.is_none() && read(|s| s.cpu_percent),
+            Metric::ApiMemory => api.memory_mib.is_none() && read(|s| s.memory_bytes),
+            _ => false,
+        };
+        for (result, t) in thresholds.iter_mut().zip(&self.thresholds) {
+            if !partial && undecided(t.metric) {
+                let what = t.metric.monitored().unwrap_or_default();
+                result.passed = true;
+                result.note = Some(format!("no {what} reading during this step"));
             }
         }
         let passed = !partial && summary.requests > 0 && thresholds.iter().all(|t| t.passed);
@@ -880,6 +905,24 @@ impl Schedule {
             start += len;
         }
         total
+    }
+}
+
+/// Applies the monitor reads already queued, so a step that closes now
+/// sees every reading taken before its end, whichever `select!` branch won.
+fn drain(rx: &mut mpsc::UnboundedReceiver<monitor::Update>, resources: &mut [ResourceSeries]) {
+    while let Ok(update) = rx.try_recv() {
+        resources[update.index].apply(update);
+    }
+}
+
+/// What the API's monitors read from `start_s` to `end_s` (seconds since
+/// the load started), for thresholds.
+fn api_readings(resources: &[ResourceSeries], start_s: f64, end_s: f64) -> ApiReadings {
+    ApiReadings {
+        cpu: capacity::average_cpu(resources, start_s, end_s),
+        memory_mib: capacity::peak_memory(resources, start_s, end_s).map(|b| b / 1_048_576.0),
+        unhealthy_s: capacity::unhealthy_seconds(resources, start_s, end_s),
     }
 }
 

@@ -299,6 +299,59 @@ pub(crate) fn average_memory(
         .max_by(f64::total_cmp)
 }
 
+/// The most memory any API used from `start_s` to `end_s`, in bytes. The
+/// read just before the load (t = 0) counts when `start_s` is 0 or less.
+pub(crate) fn peak_memory(resources: &[ResourceSeries], start_s: f64, end_s: f64) -> Option<f64> {
+    resources
+        .iter()
+        .flat_map(|series| &series.samples)
+        .filter(|s| (s.t > start_s || (start_s <= 0.0 && s.t <= 0.0)) && s.t <= end_s)
+        .filter_map(|s| s.memory_bytes)
+        .reduce(f64::max)
+}
+
+/// The most memory any API used during a run that ended at `end_s`:
+/// `in_run`, the peak read before Dynatrace's last read replaced its series,
+/// or a reading from that last read stamped before the end. A minute still
+/// open at the end keeps the values read during the run, even when the last
+/// read gives it a lower one, and nothing stamped after the end counts.
+pub(crate) fn run_peak_memory(
+    in_run: Option<f64>,
+    resources: &[ResourceSeries],
+    end_s: f64,
+) -> Option<f64> {
+    in_run
+        .into_iter()
+        .chain(peak_memory(resources, 0.0, end_s))
+        .reduce(f64::max)
+}
+
+/// How long, in seconds from `start_s` to `end_s`, the least healthy API
+/// said it was not healthy. An unhealthy state still standing at the end
+/// counts until `end_s`. None when no monitor read a health check.
+pub(crate) fn unhealthy_seconds(
+    resources: &[ResourceSeries],
+    start_s: f64,
+    end_s: f64,
+) -> Option<f64> {
+    resources
+        .iter()
+        .filter(|series| !series.health.is_empty())
+        .map(|series| {
+            series
+                .unhealthy_periods()
+                .iter()
+                .map(|p| {
+                    let from = p.from.max(start_s);
+                    let to = p.to.unwrap_or(end_s).min(end_s);
+                    (to - from).max(0.0)
+                })
+                // Not `sum`: an empty f64 sum is -0, shown as "-0 s".
+                .fold(0.0, |total, d| total + d)
+        })
+        .reduce(f64::max)
+}
+
 /// The busiest API's average CPU from `start_s` to `end_s` (seconds since
 /// the load started). None when no monitor read CPU in that time.
 pub(crate) fn average_cpu(resources: &[ResourceSeries], start_s: f64, end_s: f64) -> Option<f64> {
@@ -455,5 +508,102 @@ mod tests {
     fn nothing_to_size_when_no_step_held() {
         let limit = search(vec![step(50, 100.0, None, 20.0, false)], None, None);
         assert!(size(&limit, &capacity(65.0)).is_none());
+    }
+
+    #[test]
+    fn peak_memory_and_unhealthy_time_for_thresholds() {
+        use crate::monitor::{HealthChange, ResourceSample};
+        let mem = |t, mb: f64| ResourceSample {
+            t,
+            memory_bytes: Some(mb * 1_048_576.0),
+            ..Default::default()
+        };
+        let change = |t, status: &str| HealthChange {
+            t,
+            status: status.into(),
+            detail: None,
+        };
+        let series = ResourceSeries {
+            name: "api".into(),
+            url: "http://api/metrics".into(),
+            format: "prometheus".into(),
+            cpu_cores: None,
+            heap_max_bytes: None,
+            memory_kind: None,
+            samples: vec![mem(0.0, 300.0), mem(5.0, 700.0), mem(10.0, 400.0)],
+            failed_reads: 0,
+            error: None,
+            health_url: Some("http://api/health".into()),
+            health: vec![
+                change(0.0, "UP"),
+                change(4.0, "DOWN"),
+                change(7.0, "UP"),
+                change(9.0, "DOWN"),
+            ],
+            health_error: None,
+            failing: false,
+        };
+        let all = [series];
+        let mib = |b: Option<f64>| b.map(|b| b / 1_048_576.0);
+        assert_eq!(mib(peak_memory(&all, 0.0, 12.0)), Some(700.0));
+        assert_eq!(mib(peak_memory(&all, 5.0, 12.0)), Some(400.0));
+        assert_eq!(mib(peak_memory(&all, 10.0, 12.0)), None);
+        // DOWN 4-7, then DOWN from 9 to the end.
+        assert_eq!(unhealthy_seconds(&all, 0.0, 12.0), Some(6.0));
+        assert_eq!(unhealthy_seconds(&all, 5.0, 8.0), Some(2.0));
+        let none = unhealthy_seconds(&all, 0.0, 3.0).unwrap();
+        assert!(none == 0.0 && none.is_sign_positive());
+        let unread = ResourceSeries {
+            health: Vec::new(),
+            ..all[0].clone()
+        };
+        assert_eq!(unhealthy_seconds(&[unread], 0.0, 12.0), None);
+    }
+
+    #[test]
+    fn a_dynatrace_minute_open_at_the_end_keeps_its_in_run_peak() {
+        use crate::monitor::ResourceSample;
+        let mem = |t, mb: f64| ResourceSample {
+            t,
+            memory_bytes: Some(mb * 1_048_576.0),
+            ..Default::default()
+        };
+        let series = |samples| ResourceSeries {
+            name: "api".into(),
+            url: "http://api".into(),
+            format: "dynatrace".into(),
+            cpu_cores: None,
+            heap_max_bytes: None,
+            memory_kind: None,
+            samples,
+            failed_reads: 0,
+            error: None,
+            health_url: None,
+            health: Vec::new(),
+            health_error: None,
+            failing: false,
+        };
+        let mib = |b: Option<f64>| b.map(|b| b / 1_048_576.0);
+        // During a run that ends at 20 s, the open minute read 700 MiB at 10 s.
+        let during = [series(vec![mem(0.0, 300.0), mem(10.0, 700.0)])];
+        let in_run = peak_memory(&during, 0.0, 20.0);
+        assert_eq!(mib(in_run), Some(700.0));
+        // The last read replaces the series: that minute, now complete and
+        // lower, stamped at 21 s, and a minute that began after the end.
+        let after = [series(vec![
+            mem(0.0, 300.0),
+            mem(21.0, 650.0),
+            mem(70.0, 900.0),
+        ])];
+        assert_eq!(mib(run_peak_memory(in_run, &after, 20.0)), Some(700.0));
+        // A higher complete minute that ended before the end counts.
+        let earlier = [series(vec![
+            mem(0.0, 300.0),
+            mem(15.0, 800.0),
+            mem(21.0, 650.0),
+        ])];
+        assert_eq!(mib(run_peak_memory(in_run, &earlier, 20.0)), Some(800.0));
+        // Nothing read at all.
+        assert_eq!(run_peak_memory(None, &[], 20.0), None);
     }
 }

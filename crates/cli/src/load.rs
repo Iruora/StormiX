@@ -869,6 +869,20 @@ fn bytes(value: f64) -> String {
     }
 }
 
+/// Time unhealthy, so a short outage that broke `unhealthy <= 0s` never
+/// reads as `0 s`: milliseconds below 1 s, tenths below 10 s.
+fn seconds(s: f64) -> String {
+    if s <= 0.0 {
+        "0 s".into()
+    } else if s < 1.0 {
+        format!("{:.0} ms", (s * 1000.0).max(1.0))
+    } else if s < 10.0 {
+        format!("{s:.1} s")
+    } else {
+        format!("{s:.0} s")
+    }
+}
+
 /// The measured value in the threshold's own unit.
 fn measured(t: &stormix_metrics::ThresholdResult) -> String {
     let metric = t
@@ -876,12 +890,14 @@ fn measured(t: &stormix_metrics::ThresholdResult) -> String {
         .split([' ', '<', '>'])
         .next()
         .unwrap_or_default();
+    if let Some(note) = &t.note {
+        return note.clone();
+    }
     match metric {
         "errors" | "checks" => format!("{:.2}%", t.actual),
-        "cpu" => match &t.note {
-            Some(note) => note.clone(),
-            None => format!("{:.0}%", t.actual),
-        },
+        "cpu" => format!("{:.0}%", t.actual),
+        "memory" => format!("{:.0} MB", t.actual),
+        "unhealthy" => seconds(t.actual),
         "rps" => format!("{:.1}/s", t.actual),
         _ => ms(t.actual),
     }
@@ -943,6 +959,23 @@ mod tests {
             thresholds: Vec::new(),
             monitors: Vec::new(),
         }
+    }
+
+    #[test]
+    fn unhealthy_time_keeps_short_outages_visible() {
+        let result = |actual| stormix_metrics::ThresholdResult {
+            threshold: "unhealthy <= 0s".into(),
+            actual,
+            passed: actual <= 0.0,
+            note: None,
+        };
+        assert_eq!(measured(&result(0.0)), "0 s");
+        assert_eq!(measured(&result(0.4)), "400 ms");
+        assert_eq!(measured(&result(0.04)), "40 ms");
+        assert_eq!(measured(&result(0.0001)), "1 ms");
+        assert_eq!(measured(&result(1.25)), "1.2 s");
+        assert_eq!(measured(&result(6.0)), "6.0 s");
+        assert_eq!(measured(&result(42.3)), "42 s");
     }
 
     #[test]

@@ -20,6 +20,12 @@ pub enum Metric {
     /// The API's own CPU, read by a `monitor`, in percent where 100 is one
     /// full core: its average over the run.
     ApiCpu,
+    /// The API's memory, read by a `monitor`, in MiB: the most it used
+    /// during the run.
+    ApiMemory,
+    /// How long the API's health check said it was not healthy during the
+    /// run, in seconds.
+    ApiUnhealthy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -60,12 +66,25 @@ impl Metric {
 
     /// Only measured under load, not on a single functional run.
     pub fn needs_load(self) -> bool {
-        matches!(self, Self::Throughput | Self::ApiCpu)
+        matches!(
+            self,
+            Self::Throughput | Self::ApiCpu | Self::ApiMemory | Self::ApiUnhealthy
+        )
     }
 
     /// Read from a `monitor`, not from the requests Stormix sends.
     pub fn needs_monitor(self) -> bool {
-        matches!(self, Self::ApiCpu)
+        matches!(self, Self::ApiCpu | Self::ApiMemory | Self::ApiUnhealthy)
+    }
+
+    /// What a monitor reads for it, for messages: `CPU`, `memory`, `health`.
+    pub fn monitored(self) -> Option<&'static str> {
+        match self {
+            Self::ApiCpu => Some("CPU"),
+            Self::ApiMemory => Some("memory"),
+            Self::ApiUnhealthy => Some("health"),
+            _ => None,
+        }
     }
 }
 
@@ -124,13 +143,15 @@ impl FromStr for Threshold {
             "checks" => Metric::CheckRate,
             "rps" => Metric::Throughput,
             "cpu" => Metric::ApiCpu,
+            "memory" => Metric::ApiMemory,
+            "unhealthy" => Metric::ApiUnhealthy,
             other => {
                 let p = other
                     .strip_prefix('p')
                     .and_then(|n| n.parse::<u8>().ok())
                     .filter(|p| (1..=100).contains(p))
                     .ok_or_else(|| {
-                        err("unknown metric; use p50, p95, p99, avg, max, errors, checks, rps or cpu")
+                        err("unknown metric; use p50, p95, p99, avg, max, errors, checks, rps, cpu, memory or unhealthy")
                     })?;
                 Metric::Percentile(p)
             }
@@ -149,6 +170,14 @@ impl FromStr for Threshold {
             ("%", m) if m.is_rate() => number,
             (_, m) if m.is_rate() => return Err(err("rates are in percent, like 1%")),
             ("", Metric::Throughput) => number,
+            (u, Metric::ApiMemory) => match u.to_ascii_lowercase().as_str() {
+                "mb" | "mib" | "mi" => number,
+                "gb" | "gib" | "gi" => number * 1024.0,
+                _ => return Err(err("memory needs a unit, MB or GB")),
+            },
+            ("s", Metric::ApiUnhealthy) => number,
+            ("ms", Metric::ApiUnhealthy) => number / 1000.0,
+            (_, Metric::ApiUnhealthy) => return Err(err("unhealthy time needs a unit, s or ms")),
             _ => return Err(err("rps takes a plain number")),
         };
         Ok(Self {
@@ -171,10 +200,18 @@ impl fmt::Display for Threshold {
             Metric::CheckRate => "checks",
             Metric::Throughput => "rps",
             Metric::ApiCpu => "cpu",
+            Metric::ApiMemory if self.value >= 1024.0 && (self.value / 1024.0).fract() == 0.0 => {
+                let gb = self.value / 1024.0;
+                return write!(f, "memory {} {gb}GB", self.comparison.as_str());
+            }
+            Metric::ApiMemory => "memory",
+            Metric::ApiUnhealthy => "unhealthy",
         };
         let unit = match self.metric {
             m if m.is_latency() => "ms",
             m if m.is_rate() => "%",
+            Metric::ApiMemory => "MB",
+            Metric::ApiUnhealthy => "s",
             _ => "",
         };
         write!(
@@ -231,6 +268,20 @@ mod tests {
     }
 
     #[test]
+    fn parses_api_memory_and_health() {
+        assert_eq!(t("memory < 512MB").metric, Metric::ApiMemory);
+        assert_eq!(t("memory < 512MB").value, 512.0);
+        assert_eq!(t("memory <= 1.5GB").value, 1536.0);
+        assert_eq!(t("memory < 2Gi").value, 2048.0);
+        assert_eq!(t("unhealthy < 5s").metric, Metric::ApiUnhealthy);
+        assert_eq!(t("unhealthy <= 0s").value, 0.0);
+        assert_eq!(t("unhealthy < 1500ms").value, 1.5);
+        assert!(t("unhealthy < 1s").passes(0.0));
+        assert!(!t("unhealthy <= 0s").passes(2.0));
+        assert!(Metric::ApiMemory.needs_monitor() && Metric::ApiUnhealthy.needs_load());
+    }
+
+    #[test]
     fn rejects_wrong_units_and_metrics() {
         for bad in [
             "p95 < 300",
@@ -241,6 +292,9 @@ mod tests {
             "p95 = 1ms",
             "p95 < fast",
             "cpu < 80",
+            "memory < 512",
+            "memory < 50%",
+            "unhealthy < 5",
         ] {
             assert!(bad.parse::<Threshold>().is_err(), "{bad} should not parse");
         }
@@ -254,6 +308,9 @@ mod tests {
             "errors < 1%",
             "rps >= 100",
             "cpu < 80%",
+            "memory < 512MB",
+            "memory <= 2GB",
+            "unhealthy <= 0s",
         ] {
             assert_eq!(t(s).to_string(), s);
         }
